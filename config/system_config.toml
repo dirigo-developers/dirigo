@@ -1,0 +1,56 @@
+simulation = false
+
+[logger]
+type = "MPH"
+save_path = "D:\\lsm-data"
+
+[laser]
+pulsed = true
+pulse_frequency = "80.3 MHz"
+
+[scanner]
+fast_axis = "x"
+nominal_scanner_frequency = "7930 Hz"
+flip_fast = false
+flip_slow = false
+scan_range.voltage_fast = ["0.2 volts", "5 volts"]
+scan_range.voltage_slow = ["-10 volts", "10 volts"]
+scan_range.angle_fast = "26 degrees"
+scan_range.angle_slow = "40 degrees"
+optics.relay_mag = 5
+optics.objective_fl = "10 mm"
+wiring.fast_scanner_signal_out = "Dev1/ao2"
+wiring.slow_scanner_signal_out = "Dev1/ao3"
+wiring.fast_scanner_sync_in = "PFI0"
+wiring.frame_clock_out = "Dev1/port0/line5"
+wiring.frame_clock_in = "PFI14"
+daq_sample_rate = "120 kHz"
+fast_scanner_settle_time = "200 ms"
+slow_scanner_response_time = "130 us"
+
+[digitizer]
+manufacturer = "Alazar"
+model = "ATS9440" # use to confirm hardware
+nbuffers = 4 # number of buffer in ring buffer
+clock_source = "External"
+sample_rate = "80.3 MHz"
+clock_edge = "rising"
+input_coupling = ["DC", "DC", "DC", "DC"] # 1 entry per channel present
+input_range = ["2 V", "2 V", "2 V", "2 V"]
+input_impedance = ["50 ohm", "50 ohm", "50 ohm", "50 ohm"]
+trigger_source = "external"
+trigger_slope = "falling"
+trigger_level = "2 V"
+external_trigger_coupling = "DC"
+external_trigger_range = "TTL"
+aux_io_mode = "trigger output"
+aux_io_parameter = 0
+
+[detectors]
+detector0.type = "PMT" # options: "SiPM", "PMT"
+detector0.gain = 80
+detector0.label = "Chan A"
+detector1.type = "SiPM"
+detector1.gain = 90
+detector1.label = "Chan B"
+
