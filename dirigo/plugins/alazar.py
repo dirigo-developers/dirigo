@@ -1,67 +1,15 @@
-from atsbindings import Ats, System, Board, Buffer
+from atsbindings import Ats, System, Buffer
+from atsbindings import Board as AlazarBoard
 
 from dirigo.plugin_registry import PluginRegistry
-from dirigo.components.digitizer import Digitizer, SampleClock, Trigger, Channel, AuxillaryIO
+from dirigo.components.digitizer import (
+    Digitizer, Channel, SampleClock, Trigger, Acquire, AuxillaryIO
+)
 
-
-
-class AlazarSampleClock(SampleClock):
-    def __init__(self, board:Board):
-        self._board = board
-        # Set parameters to None to signify that they have not been initialized
-        self._source:Ats.ClockSources = None
-        self._rate:Ats.SampleRates = None
-        self._edge:Ats.ClockEdges = Ats.ClockEdges.CLOCK_EDGE_RISING
-        
-    @property
-    def source(self):
-        return str(self._source)
-    
-    @source.setter
-    def source(self, source:str):
-        source_enum = Ats.ClockSources.from_str(source)
-        if source_enum not in self._board.bsi.supported_clocks:
-            valid_options = ', '.join([str(s) for s in self._board.bsi.supported_clocks])
-            raise ValueError(f"Invalid sample clock source: {source_enum}. "
-                             f"Valid options are: {valid_options}")
-        self._source = source_enum
-        self._set_capture_clock()
-
-    @property
-    def rate(self):
-        return str(self._rate)
-    
-    @rate.setter
-    def rate(self, rate:str):
-        clock_rate_enum = Ats.SampleRates.from_hz(rate)
-        if clock_rate_enum not in self._board.bsi.sample_rates:
-            valid_options = ', '.join([str(s) for s in self._board.bsi.sample_rates])
-            raise ValueError(f"Invalid sample clock rate: {clock_rate_enum}. "
-                             f"Valid options are: {valid_options}")
-        self._rate = clock_rate_enum
-        self._set_capture_clock()
-
-    @property
-    def edge(self):
-        return str(self._edge)
-    
-    @edge.setter
-    def edge(self, edge:str):
-        clock_edge_enum = Ats.ClockEdges.from_str(edge)
-        self._edge = clock_edge_enum
-        self._set_capture_clock()
-
-    def _set_capture_clock(self):
-        """
-        Helper to set capture clock if all required parameters have been set:
-        source and rate
-        """
-        if self._source and self._rate:
-            self._board.set_capture_clock(self._source, self._rate)
 
 
 class AlazarChannel(Channel):
-    def __init__(self, board:Board, channel_index):
+    def __init__(self, board:AlazarBoard, channel_index):
         self._board = board
         self._index = channel_index
         # Set parameters to None to signify that they have not been initialized
@@ -109,6 +57,14 @@ class AlazarChannel(Channel):
         self._range = range_enum
         self._set_input_control()
 
+    @property
+    def enabled(self):
+        return self._enabled
+    
+    @enabled.setter
+    def enabled(self, enabled:bool):
+        self._enabled = enabled
+
     def _set_input_control(self):
         """
         Helper method to set ...
@@ -125,8 +81,68 @@ class AlazarChannel(Channel):
             )
 
 
+
+class AlazarSampleClock(SampleClock):
+    def __init__(self, board:AlazarBoard):
+        self._board = board
+        # Set parameters to None to signify that they have not been initialized
+        self._source:Ats.ClockSources = None
+        self._rate:Ats.SampleRates = None
+        self._edge:Ats.ClockEdges = Ats.ClockEdges.CLOCK_EDGE_RISING
+        
+    @property
+    def source(self):
+        return str(self._source)
+    
+    @source.setter
+    def source(self, source:str):
+        source_enum = Ats.ClockSources.from_str(source)
+        if source_enum not in self._board.bsi.supported_clocks:
+            valid_options = ', '.join([str(s) for s in self._board.bsi.supported_clocks])
+            raise ValueError(f"Invalid sample clock source: {source_enum}. "
+                             f"Valid options are: {valid_options}")
+        self._source = source_enum
+        self._set_capture_clock()
+
+    @property
+    def rate(self):
+        return str(self._rate)
+    
+    @rate.setter
+    def rate(self, rate:str):
+        clock_rate_enum = Ats.SampleRates.from_str(rate)
+        if clock_rate_enum not in self._board.bsi.sample_rates:
+            valid_options = ', '.join([str(s) for s in self._board.bsi.sample_rates])
+            raise ValueError(f"Invalid sample clock rate: {clock_rate_enum}. "
+                             f"Valid options are: {valid_options}")
+        self._rate = clock_rate_enum
+        self._set_capture_clock()
+
+    @property
+    def rate_options(self):
+        return [str(option) for option in self._board.bsi.sample_rates]
+    
+    @property
+    def edge(self):
+        return str(self._edge)
+    
+    @edge.setter
+    def edge(self, edge:str):
+        clock_edge_enum = Ats.ClockEdges.from_str(edge)
+        self._edge = clock_edge_enum
+        self._set_capture_clock()
+
+    def _set_capture_clock(self):
+        """
+        Helper to set capture clock if all required parameters have been set:
+        source, rate, and edge
+        """
+        if self._source and self._rate and self._edge:
+            self._board.set_capture_clock(self._source, self._rate, self._edge)
+
+
 class AlazarTrigger(Trigger):
-    def __init__(self, board:Board, channels:list[AlazarChannel]):
+    def __init__(self, board:AlazarBoard, channels:list[AlazarChannel]):
         self._board = board
         self._channels = channels
         # Set parameters to None to signify that they have not been initialized
@@ -171,7 +187,7 @@ class AlazarTrigger(Trigger):
         if not self._source:
             raise RuntimeError("Trigger source must be set before trigger level")
         if self._source == Ats.TriggerSources.TRIG_DISABLE:
-            return # Raise Error?
+            raise RuntimeError("Cannot set trigger level. Trigger is disabled")
         if self._source == Ats.TriggerSources.TRIG_EXTERNAL:
             trigger_source_range = self._external_range.to_volts 
         else:
@@ -212,7 +228,7 @@ class AlazarTrigger(Trigger):
         Helper to set trigger operation if all required parameters have been set.
         By default, uses trigger engine J and disables engine K
         """
-        if self._source and self._slope:
+        if self._source and self._slope and self._level:
             self._board.set_trigger_operation(
                 operation=Ats.TriggerOperations.TRIG_ENGINE_OP_J,
                 engine1=Ats.TriggerEngines.TRIG_ENGINE_J,
@@ -236,8 +252,144 @@ class AlazarTrigger(Trigger):
             )
 
 
+class AlazarAcquire(Acquire):
+    def __init__(self, board:AlazarBoard, channels:list[AlazarChannel]):
+        self._board = board
+        self._channels = channels
+
+        self._trigger_delay:int = 0
+        self._pre_trigger_samples:int = 0
+
+        self._record_length:int = None
+        self._records_per_buffer:int = None
+        self._buffers_per_acquisition:int = None
+
+        self._buffers:list[Buffer] = None
+        
+    @property
+    def trigger_delay(self):
+        return self._trigger_delay
+    
+    @property
+    def trigger_delay(self, delay:int):
+        if delay < 0:
+            raise ValueError("Trigger delay must be non-negative.")
+        
+        # samples per timestamp resolution is also the resolution for trigger delay
+        dly_res = self._board.bsi.samples_per_timestamp(self.n_channels_enabled)
+        if delay % dly_res != 0:
+            raise ValueError(f"Attempted to set trigger delay {delay}, must"
+                             f"be multiple of {dly_res}")
+        self._trigger_delay = delay
+        self._board.set_trigger_delay(self._trigger_delay)
+
+    @property
+    def pre_trigger_samples(self):
+        return self._pre_trigger_samples
+    
+    @pre_trigger_samples.setter
+    def pre_trigger_samples(self, samples:int):
+        if samples < 0:
+            raise ValueError(f"Attempted to set pre-trigger samples {samples} "
+                             f"must be ≥ 0")
+        pretrig_res = self._board.bsi.pretrig_alignment
+        if samples % pretrig_res != 0:
+            raise ValueError(f"Attempted to set pre-trigger samples {samples}, "
+                             f"must be multiple of {pretrig_res}")
+        self._pre_trigger_samples = samples
+        self._set_record_size()
+
+    @property
+    def record_length(self):
+        return self._record_length
+
+    @record_length.setter
+    def record_length(self, length):
+        if length < self._board.bsi.min_record_size:
+            raise ValueError(f"Attempted to set record length {length}, must "
+                             f"be ≥ {self._board.bsi.min_record_size}")
+        rec_res = self._board.bsi.record_resolution
+        if length % rec_res != 0:
+            raise ValueError(f"Attempted to set record length {length}, must "
+                             f"be multiple of {rec_res}")
+        self._record_length = length
+        self._set_record_size()
+    
+    @property
+    def records_per_buffer(self):
+        return self._records_per_buffer
+    
+    @records_per_buffer.setter
+    def records_per_buffer(self, records:int):
+        if records < 1:
+            ValueError(f"Attempted to set records per buffer {records}, "
+                       f"must be ≥ 1")
+        self._records_per_buffer = records
+
+    @property
+    def buffers_per_acquisition(self):
+        return self._buffers_per_acquisition
+    
+    @buffers_per_acquisition.setter
+    def buffers_per_acquisition(self, buffers):
+        if buffers < 1:
+            ValueError(f"Attempted to set buffers per acquisition {buffers}, "
+                       f"must be ≥ 1")
+        self._buffers_per_acquisition = buffers
+
+    def start(self):
+        if not self.record_length:
+            raise RuntimeError("Must set record length before beginning acquisition")
+        if not self.records_per_buffer:
+            raise RuntimeError("Must set records per buffer before beginning acquisition")
+
+        channels_bit_mask = sum([c.enabled * Ats.Channels.from_int(i) 
+                                for i,c in enumerate(self._channels)])
+        flags = Ats.ADMAFlags.ADMA_EXTERNAL_STARTCAPTURE
+
+        if self.buffers_per_acquisition == float('inf'):
+            records_per_acquisition = 0x7FFFFFFF
+        else:
+            records_per_acquisition = int(
+                self.buffers_per_acquisition * self.records_per_buffer
+            )
+
+        self._board.before_async_read(
+            channels=channels_bit_mask,
+            transfer_offset=-self.pre_trigger_samples, # note the neg. value for pre-trigger samples
+            samples_per_record=self.record_length,
+            records_per_buffer=self.records_per_buffer,
+            records_per_acquisition=records_per_acquisition,
+            flags=flags
+        )
+
+        self._buffers = []
+        for _ in range(self.buffers_per_acquisition):
+            buffer = Buffer(
+                board=self._board, 
+                channels=self.n_channels_enabled,
+                records_per_buffer=self.records_per_buffer,
+                samples_per_record=self.record_length,
+                include_header=True,
+            )
+            self._buffers.append(buffer)
+            self._board.post_async_buffer(buffer.address, buffer.size)
+        
+        self._board.start_capture()
+
+    def stop(self):
+        self._board.abort_async_read()
+
+    def _set_record_size(self):
+        """Helper"""
+        if self._pre_trigger_samples and self._record_length:
+            self._board.set_record_size(
+                pre_trigger_samples=self._pre_trigger_samples, 
+                post_trigger_samples=self._record_length)
+
+
 class AlazarAuxillaryIO(AuxillaryIO):
-    def __init__(self, board:Board):
+    def __init__(self, board:AlazarBoard):
         self._board = board
         self._mode:Ats.AuxIOModes = None
 
@@ -295,17 +447,17 @@ class AlazarDigitizer(Digitizer):
         self.driver_version = System.get_driver_version()
         self.dll_version = System.get_sdk_version() # this is sort of a misnomer
 
-        self._board = Board(system_id, board_id)
-
-        self.sample_clock = AlazarSampleClock(self._board)
+        self._board = AlazarBoard(system_id, board_id)
 
         self.channels = []
         for i in range(self._board.bsi.channels):
             self.channels.append(AlazarChannel(self._board, i))
-
+        self.sample_clock = AlazarSampleClock(self._board)
         self.trigger = AlazarTrigger(self._board, self.channels)
-
+        self.acquire = AlazarAcquire(self._board, self.channels)
         self.aux_io = AlazarAuxillaryIO(self._board)
+
+
 
 
 # Register as a plugin
@@ -317,7 +469,28 @@ PluginRegistry.register_plugin(Digitizer, AlazarDigitizer)
 if __name__ == "__main__":
     digitizer = AlazarDigitizer()
 
-    # Set up channels
-    # Set up input clock
-    # Set up trigger
+    # Vertical
+    for i, channel in enumerate(digitizer.channels):
+        channel.coupling = "DC"
+        channel.impedance = "50 Ω"
+        channel.range = "±2 V"
+        channel.enabled = True
+
+    # Horizontal
+    digitizer.sample_clock.edge = "Rising"
+    digitizer.sample_clock.source = "Internal Clock"
+    digitizer.sample_clock.rate = "10 MS/s"
+
+    # Trigger
+    digitizer.trigger.external_coupling = "DC"
+    digitizer.trigger.external_range = "TTL"
+    digitizer.trigger.source = "External"
+    digitizer.trigger.slope = "Positive"
+    digitizer.trigger.level = 0
+
+    # Acquire
+    digitizer.acquire.pre_trigger_samples = 0
+    digitizer.acquire.record_length = 2048
+
+    print("success")
 

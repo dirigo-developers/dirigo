@@ -4,14 +4,58 @@ from abc import ABC, abstractmethod
 Dirigo digitizer interface
 
 Plugin modules for digitizers must implement concrete versions of classes:
+Channel
 SampleClock
 Trigger
-Channel
+Acquire
+AuxillaryIO [could be optional?]
 Digitizer
 
 Finally, the Digitizer subclass must be registered as a plugin in PluginRegistry.
 
 """
+
+
+class Channel(ABC):
+    @property
+    @abstractmethod
+    def coupling(self):
+        pass
+
+    @coupling.setter
+    @abstractmethod
+    def coupling(self, value):
+        pass
+
+    @property
+    @abstractmethod
+    def impedance(self):
+        pass
+
+    @impedance.setter
+    @abstractmethod
+    def impedance(self, value):
+        pass
+
+    @property
+    @abstractmethod
+    def range(self):
+        pass
+
+    @range.setter
+    @abstractmethod
+    def range(self, value):
+        pass
+
+    @property
+    @abstractmethod
+    def enabled(self) -> bool:
+        pass
+
+    @enabled.setter
+    def enabled(self, value):
+        pass
+
 
 class SampleClock(ABC):
     """Sample clock defining: source, rate, edge"""
@@ -34,6 +78,10 @@ class SampleClock(ABC):
     @abstractmethod
     def rate(self, value):
         pass
+    
+    @abstractmethod
+    def rate_options(self):
+        pass
 
     @property
     @abstractmethod
@@ -43,6 +91,7 @@ class SampleClock(ABC):
     @edge.setter
     @abstractmethod
     def edge(self, value):
+        """Acquire sample on "Rising" or "Falling" edge of sample clock."""
         pass
     
 
@@ -98,35 +147,70 @@ class Trigger(ABC):
         pass
 
 
-class Channel(ABC):
-    @property
-    @abstractmethod
-    def coupling(self):
-        pass
+class Acquire(ABC):
+    def __init__(self):
+        self._channels:list[Channel]
 
-    @coupling.setter
-    @abstractmethod
-    def coupling(self, value):
-        pass
+    @property
+    def n_channels_enabled(self) -> int:
+        return sum([c.enabled for c in self._channels])
 
     @property
     @abstractmethod
-    def impedance(self):
+    def trigger_delay(self):
         pass
 
-    @impedance.setter
+    @trigger_delay.setter
     @abstractmethod
-    def impedance(self, value):
+    def trigger_delay(self, value):
         pass
 
     @property
     @abstractmethod
-    def range(self):
+    def pre_trigger_samples(self):
         pass
 
-    @range.setter
+    @pre_trigger_samples.setter
     @abstractmethod
-    def range(self, value):
+    def pre_trigger_samples(self, value):
+        pass
+
+    @property
+    @abstractmethod
+    def record_length(self):
+        pass
+
+    @record_length.setter
+    @abstractmethod
+    def record_length(self, value):
+        pass
+
+    @property
+    @abstractmethod
+    def records_per_buffer(self):
+        pass
+
+    @records_per_buffer.setter
+    @abstractmethod
+    def records_per_buffer(self, value):
+        pass
+
+    @property
+    @abstractmethod
+    def buffers_per_acquisition(self):
+        pass
+
+    @buffers_per_acquisition.setter
+    @abstractmethod
+    def buffers_per_acquisition(self, value):
+        pass
+
+    @abstractmethod
+    def start(self):
+        pass
+
+    @abstractmethod
+    def stop(self):
         pass
 
 
@@ -145,12 +229,14 @@ class AuxillaryIO(ABC):
         pass
 
 
+
 class Digitizer(ABC):
     """ Abstract digitizer class. """
     def __init__(self):
+        self.channels:list[Channel]
         self.sample_clock:SampleClock
         self.trigger:Trigger
-        self.channels:list[Channel]
+        self.acquire:Acquire
         self.aux_io:AuxillaryIO
 
-    # runtime methods
+    
