@@ -15,8 +15,18 @@ Finally, the Digitizer subclass must be registered as a plugin in PluginRegistry
 
 """
 
+class ValidQuantityRange:
+    def __init__(self, quantiy_min, quantiy_max):
+        self.min = quantiy_min
+        self.max = quantiy_max
+
 
 class Channel(ABC):
+    @property
+    @abstractmethod
+    def index(self):
+        pass
+
     @property
     @abstractmethod
     def coupling(self):
@@ -25,6 +35,11 @@ class Channel(ABC):
     @coupling.setter
     @abstractmethod
     def coupling(self, value):
+        pass
+
+    @property
+    @abstractmethod
+    def coupling_options(self):
         pass
 
     @property
@@ -39,6 +54,11 @@ class Channel(ABC):
 
     @property
     @abstractmethod
+    def impedance_options(self):
+        pass
+
+    @property
+    @abstractmethod
     def range(self):
         pass
 
@@ -49,10 +69,16 @@ class Channel(ABC):
 
     @property
     @abstractmethod
+    def range_options(self):
+        pass
+
+    @property
+    @abstractmethod
     def enabled(self) -> bool:
         pass
 
     @enabled.setter
+    @abstractmethod
     def enabled(self, value):
         pass
 
@@ -61,12 +87,17 @@ class SampleClock(ABC):
     """Sample clock defining: source, rate, edge"""
     @property
     @abstractmethod
-    def source(self):
+    def source(self) -> str:
         pass
 
     @source.setter
     @abstractmethod
     def source(self, value):
+        pass
+
+    @property
+    @abstractmethod
+    def source_options(self) -> list[str]:
         pass
 
     @property
@@ -79,8 +110,9 @@ class SampleClock(ABC):
     def rate(self, value):
         pass
     
+    @property
     @abstractmethod
-    def rate_options(self):
+    def rate_options(self) -> list[str] | ValidQuantityRange:
         pass
 
     @property
@@ -92,6 +124,11 @@ class SampleClock(ABC):
     @abstractmethod
     def edge(self, value):
         """Acquire sample on "Rising" or "Falling" edge of sample clock."""
+        pass
+
+    @property
+    @abstractmethod
+    def edge_options(self):
         pass
     
 
@@ -108,12 +145,22 @@ class Trigger(ABC):
 
     @property
     @abstractmethod
+    def source_options(self):
+        pass
+
+    @property
+    @abstractmethod
     def slope(self):
         pass
     
     @slope.setter
     @abstractmethod
     def slope(self, value):
+        pass
+
+    @property
+    @abstractmethod
+    def slope_options(self):
         pass
 
     @property
@@ -128,6 +175,16 @@ class Trigger(ABC):
 
     @property
     @abstractmethod
+    def level_min(self):
+        pass
+
+    @property
+    @abstractmethod
+    def level_max(self):  
+        pass
+
+    @property
+    @abstractmethod
     def external_coupling(self):
         pass
     
@@ -138,12 +195,22 @@ class Trigger(ABC):
 
     @property
     @abstractmethod
+    def external_coupling_options(self):
+        pass
+
+    @property
+    @abstractmethod
     def external_range(self):
         pass
     
     @external_range.setter
     @abstractmethod
     def external_range(self, value):
+        pass
+
+    @property
+    @abstractmethod
+    def external_range_options(self):
         pass
 
 
@@ -167,12 +234,21 @@ class Acquire(ABC):
 
     @property
     @abstractmethod
+    def trigger_delay_resolution(self):
+        pass
+
+    @property
+    @abstractmethod
     def pre_trigger_samples(self):
         pass
 
     @pre_trigger_samples.setter
     @abstractmethod
     def pre_trigger_samples(self, value):
+        pass
+
+    @property
+    def pre_trigger_resolution(self):
         pass
 
     @property
@@ -183,6 +259,16 @@ class Acquire(ABC):
     @record_length.setter
     @abstractmethod
     def record_length(self, value):
+        pass
+
+    @property
+    @abstractmethod
+    def record_length_minimum(self):
+        pass
+
+    @property
+    @abstractmethod
+    def record_length_resolution(self):
         pass
 
     @property
