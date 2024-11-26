@@ -11,16 +11,16 @@ class MainApp(tk.Tk):
         super().__init__()
         self.title("Dirigo Reference GUI")
 
-        self.digitizer = AlazarDigitizer() # TODO make this a factor function return
+        self.digitizer = AlazarDigitizer() # TODO make this a factory function, TODO instantiate dirigo
 
         # Create UI elements
         self.sample_clock_frame = SampleClockFrame(self, self.digitizer.sample_clock)
         self.sample_clock_frame.grid(row=0, column=0, padx=10, pady=10)
 
-        self.channels_frame = ChannelsFrame(self, self.digitizer.channels)
+        self.channels_frame = ChannelsNotebook(self, self.digitizer.channels)
         self.channels_frame.grid(row=1, column=0, padx=10, pady=10)
 
-        self.trigger_frame = TriggerFrame(self, self.digitizer.trigger)
+        self.trigger_frame = TriggerFrame(self, self.digitizer.trigger, self.channels_frame)
         self.trigger_frame.grid(row=2, column=0, padx=10, pady=10)
   
 
@@ -30,6 +30,7 @@ class SampleClockFrame(ttk.LabelFrame):
         self._sample_clock = sample_clock # not sure we need to hold this ref?
 
         # Sample Clock Source
+        # No dependencies
         label = ttk.Label(self, text="Clock Source")
         label.grid(row=0, column=0, sticky="w", padx=10, pady=5)
         self.source_var = tk.StringVar(value=sample_clock.source)
@@ -40,15 +41,17 @@ class SampleClockFrame(ttk.LabelFrame):
             *sample_clock.source_options,
             command=self._source_callback
         )
-        self.source_menu.grid(row=0, column=1, padx=10, pady=5)
+        self.source_menu.grid(row=0, column=1, sticky="e", padx=10, pady=5)
 
         # Sample Rate
+        # Depends on clock source
         label = ttk.Label(self, text="Sample Rate")
         label.grid(row=1, column=0, sticky="w", padx=10, pady=5)
         self.rate_menu_choice = None
         self._refresh_rate_options()
 
         # Sample Edge
+        # No dependencies
         label = ttk.Label(self, text="Sample Edge")
         label.grid(row=2, column=0, sticky="w", padx=10, pady=5)
         self.edge_var = tk.StringVar(value=sample_clock.edge)
@@ -58,7 +61,7 @@ class SampleClockFrame(ttk.LabelFrame):
             sample_clock.edge, 
             *sample_clock.edge_options,
             command=lambda value: setattr(sample_clock, 'edge', value))
-        self.edge_menu.grid(row=2, column=1, padx=10, pady=5)
+        self.edge_menu.grid(row=2, column=1, sticky="e", padx=10, pady=5)
 
     def _source_callback(self, value):
         self._sample_clock.source = value
@@ -94,7 +97,7 @@ class SampleClockFrame(ttk.LabelFrame):
                 invalidcommand=invalid_ext_rate_cmd,
             )    
 
-        self.rate_menu_choice.grid(row=1, column=1, padx=10, pady=5)
+        self.rate_menu_choice.grid(row=1, column=1, sticky="e", padx=10, pady=5)
 
     def _validate_ext_rate(self, new_value):
         if new_value == "" or new_value == "-":  # Allow empty or negative sign during typing
@@ -121,7 +124,7 @@ class SampleClockFrame(ttk.LabelFrame):
         self.rate_menu_choice.insert(0, self._last_valid_ext_rate)
 
         
-class ChannelsFrame(ttk.LabelFrame):
+class ChannelsNotebook(ttk.LabelFrame):
     def __init__(self, parent, channels:list[digitizer.Channel]):
         super().__init__(parent, text="Channels")
         self._channels = channels
@@ -130,40 +133,36 @@ class ChannelsFrame(ttk.LabelFrame):
         self.notebook = ttk.Notebook(self)
         self.notebook.pack(fill="both", expand=True)
 
-        self.channel_settings = {}
-        for channel in channels:
-            self.create_channel_frame(cid=channel.index)
+        self.frames:list[ChannelFrame] = []
+        for channel in self._channels:
+            frame = ChannelFrame(self.notebook, channel)
+            self.notebook.add(frame, text=f"{channel.index + 1}")
+            self.frames.append(frame)
 
-    def create_channel_frame(self, cid:int):
-        frame = ttk.Frame(self.notebook)
-        channel = self._channels[cid]
-        self.notebook.add(frame, text=f"{cid+1}")
 
-        # Store channel settings
-        self.channel_settings[cid] = {
-            "enabled": tk.BooleanVar(value=channel.enabled),
-            "coupling": tk.StringVar(value=channel.coupling),
-            "impedance": tk.StringVar(value=channel.impedance),
-            "range": tk.StringVar(value=channel.range),
-        }
+class ChannelFrame(ttk.Frame):
+    def __init__(self, parent, channel:digitizer.Channel):
+        super().__init__(parent)
+        self._channel = channel
 
         # Enabled Checkbox
-        enabled_var:tk.BooleanVar = self.channel_settings[cid]["enabled"]
+        self.enabled_var = tk.BooleanVar(value=channel.enabled)
         check_button = ttk.Checkbutton(
-            frame, 
+            self, 
             text="Enabled", 
-            variable=enabled_var,
-            command=lambda: setattr(channel, 'enabled', enabled_var.get())
+            variable=self.enabled_var,
+            command=lambda: setattr(channel, 'enabled', self.enabled_var.get())
         )
         check_button.grid(row=0, column=0, padx=5, pady=5, sticky="w")
+        #self.enabled_var.trace_add('write', )
 
         # Coupling Dropdown
-        coupling_var:tk.StringVar = self.channel_settings[cid]["coupling"]
-        label = ttk.Label(frame, text="Coupling")
+        self.coupling_var = tk.StringVar(value=channel.coupling)
+        label = ttk.Label(self, text="Coupling")
         label.grid(row=1, column=0, padx=5, pady=5, sticky="w")
         coupling_menu = ttk.OptionMenu(
-            frame, 
-            coupling_var, 
+            self, 
+            self.coupling_var, 
             channel.coupling, 
             *channel.coupling_options,
             command=lambda value: setattr(channel, 'coupling', value)
@@ -171,51 +170,65 @@ class ChannelsFrame(ttk.LabelFrame):
         coupling_menu.grid(row=1, column=1, padx=5, pady=5)
 
         # Impedance Dropdown
-        impedance_var:tk.StringVar = self.channel_settings[cid]["impedance"]
-        label = ttk.Label(frame, text="Impedance")
+        self.impedance_var = tk.StringVar(value=channel.impedance)
+        label = ttk.Label(self, text="Impedance")
         label.grid(row=2, column=0, padx=5, pady=5, sticky="w")
         impedance_menu = ttk.OptionMenu(
-            frame, 
-            impedance_var, 
+            self, 
+            self.impedance_var, 
             channel.impedance, 
             *channel.impedance_options,
-            command=lambda value: setattr(channel, 'impedance', value)
+            command=self._impedance_callback
         )
         impedance_menu.grid(row=2, column=1, padx=5, pady=5)
 
         # Range Dropdown
-        range_var:tk.StringVar = self.channel_settings[cid]["range"]
-        label = ttk.Label(frame, text="Range")
+        self.range_var= tk.StringVar(value=channel.range)
+        label = ttk.Label(self, text="Range")
         label.grid(row=3, column=0, padx=5, pady=5, sticky="w")
-        range_menu = ttk.OptionMenu(
-            frame, 
-            range_var, 
-            channel.range, 
-            *channel.range_options,
-            command=lambda value: setattr(channel, 'range', value)
-        )
-        range_menu.grid(row=3, column=1, padx=5, pady=5)
+        self.range_menu = None
+        self._refresh_range_options()       
+
+    def _impedance_callback(self, value):
+        self._channel.impedance = value
+        self._refresh_range_options()
+
+    def _refresh_range_options(self):
+        if self.range_menu:
+            self.range_menu.destroy()
+        
+        if not self._channel.impedance:
+            self.range_menu = ttk.Label(self, text="Select impedance")
+
+        else:
+            self.range_menu = ttk.OptionMenu(
+                self,
+                self.range_var,
+                self._channel.range,
+                *self._channel.range_options,
+                command=lambda value: setattr(self._channel, 'range', value)
+            )
+
+        self.range_menu.grid(row=3, column=1, padx=5, pady=5)
 
 
 class TriggerFrame(ttk.LabelFrame):
-    def __init__(self, parent, trigger:digitizer.Trigger):
+    def __init__(self, parent, trigger:digitizer.Trigger, channels_notebook:ChannelsNotebook):
         super().__init__(parent, text="Trigger")
-        self._trigger = trigger # not sure we need to hold this ref?
+        self._trigger = trigger 
+        self._channels_notebook = channels_notebook
 
         # Trigger Source
+        # Depends on enabled input channels
         label = ttk.Label(self, text="Source")
         label.grid(row=0, column=0, sticky="w", padx=10, pady=5)
-        self.source_var = tk.StringVar(value=trigger.source)
-        self.source_menu = ttk.OptionMenu(
-            self, 
-            self.source_var, 
-            trigger.source,
-            *trigger.source_options,
-            command=lambda value: setattr(trigger, 'source', value)
-        )
-        self.source_menu.grid(row=0, column=1, padx=10, pady=5)
+        self.source_menu = None
+        self._refresh_source_options()
+        for channel_frame in channels_notebook.frames:
+            channel_frame.enabled_var.trace_add('write', self._refresh_source_options)
 
         # Trigger Slope
+        # No dependencies
         label = ttk.Label(self, text="Slope")
         label.grid(row=1, column=0, sticky="w", padx=10, pady=5)
         self.slope_var = tk.StringVar(value=trigger.slope)
@@ -226,9 +239,10 @@ class TriggerFrame(ttk.LabelFrame):
             *trigger.slope_options,
             command=lambda value: setattr(trigger, 'slope', value)
         )
-        self.slope_menu.grid(row=1, column=1, padx=10, pady=5)
+        self.slope_menu.grid(row=1, column=1, sticky="e", padx=10, pady=5)
 
-        # Trigger Level
+        # Trigger Level TODO, react to source
+        # Very dependent
         label = ttk.Label(self, text="Level")
         label.grid(row=2, column=0, sticky="w", padx=10, pady=5)
         self.level_var = tk.StringVar(value=trigger.level)
@@ -239,9 +253,28 @@ class TriggerFrame(ttk.LabelFrame):
             increment=0.1,
             textvariable=self.level_var,
             wrap=False,
+            width=8,
             command=lambda value: setattr(trigger, 'level', value)
         )
-        self.level_spinbox.grid(row=2, column=1, padx=10, pady=5)
+        self.level_spinbox.grid(row=2, column=1, sticky="e", padx=10, pady=5)
+
+    def _refresh_source_options(self, *args):
+        if self.source_menu:
+            self.source_menu.destroy()
+
+        # Update channels enable property before getting options
+        for channel_frame in self._channels_notebook.frames:
+            channel_frame._channel.enabled = channel_frame.enabled_var.get()
+
+        self.source_var = tk.StringVar(value=self._trigger.source)
+        self.source_menu = ttk.OptionMenu(
+            self, 
+            self.source_var, 
+            self._trigger.source,
+            *self._trigger.source_options,
+            command=lambda value: setattr(self._trigger, 'source', value)
+        )
+        self.source_menu.grid(row=0, column=1, sticky="e", padx=10, pady=5)
 
 
 class AcquireFrame():

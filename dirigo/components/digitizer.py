@@ -135,17 +135,17 @@ class SampleClock(ABC):
 class Trigger(ABC):
     @property
     @abstractmethod
-    def source(self):
+    def source(self) -> str:
         pass
     
     @source.setter
     @abstractmethod
-    def source(self, value):
+    def source(self, value:str):
         pass
 
     @property
     @abstractmethod
-    def source_options(self):
+    def source_options(self) -> list[str]:
         pass
 
     @property

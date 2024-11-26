@@ -81,8 +81,9 @@ class AlazarChannel(Channel):
     
     @property
     def range_options(self):
-        options = self._board.bsi.input_ranges(self._impedance)
-        return [str(s) for s in options]
+        if self._impedance:
+            options = self._board.bsi.input_ranges(self._impedance)
+            return [str(s) for s in options]
 
     @property
     def enabled(self):
@@ -234,7 +235,8 @@ class AlazarTrigger(Trigger):
 
     @property
     def source(self):
-        if self._source:
+        if self._source and str(self._source) in self.source_options:
+            # If _source (an enum) exists and if it is currently a valid source option
             return str(self._source)
     
     @source.setter
@@ -250,8 +252,17 @@ class AlazarTrigger(Trigger):
 
     @property
     def source_options(self):
-        options = [str(s) for s in self._board.bsi.supported_trigger_sources]
+        all_options = self._board.bsi.supported_trigger_sources
+
+        # remove channels that are not currently enabled
+        for channel in self._channels:
+            if not channel.enabled:
+                s = f"channel {chr(channel.index + ord('A'))}"
+                all_options.remove(Ats.TriggerSources.from_str(s))
+        
         # may want to remove 'Disable' option, which would require SW trigger
+
+        options = [str(s) for s in all_options]
         return sorted(options)
 
     @property
