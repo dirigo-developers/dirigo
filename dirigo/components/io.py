@@ -6,6 +6,7 @@ from pint import UnitRegistry, UndefinedUnitError, DimensionalityError
 import numpy as np
 
 
+
 def load_toml(file_name:Path|str) -> dict:
     file_name = Path(file_name)
     if not file_name.exists():
@@ -24,6 +25,7 @@ def to_si_units(quantity_with_units:str):
     """
     q = ureg.Quantity(quantity_with_units)
     return q.to_base_units().magnitude
+
 
 def parse_quantity(value: str):
     """Attempts to parse a string with units into a Quantity."""
@@ -71,10 +73,12 @@ class LoggerConfig: # no units
     type: str
     save_path: str
 
+
 @dataclass
 class LaserConfig(UnitAwareDataclass):
     pulsed: bool
     pulse_frequency: float
+
 
 @dataclass
 class ScannerRange(UnitAwareDataclass):
@@ -108,6 +112,7 @@ class ScannerRange(UnitAwareDataclass):
         vrange = self.voltage_slow_max - self.voltage_slow_min
         return vrange / self.angle_slow
 
+
 @dataclass
 class ScannerOptics(UnitAwareDataclass):
     relay_mag: int
@@ -119,6 +124,7 @@ class ScannerOptics(UnitAwareDataclass):
         position = np.sin(angle_at_objective) * self.objective_fl
         return position
 
+
 @dataclass
 class ScannerWiring: # no units
     fast_scanner_signal_out: str
@@ -126,6 +132,7 @@ class ScannerWiring: # no units
     fast_scanner_sync_in: str
     frame_clock_out: str
     frame_clock_in: str
+
 
 @dataclass
 class ScannerConfig(UnitAwareDataclass):
@@ -155,6 +162,7 @@ class ScannerConfig(UnitAwareDataclass):
         voltage = self.scan_range.voltage_fast_min
         return self._voltage_to_scan_width(self, voltage)
 
+
 @dataclass
 class DigitizerConfig(UnitAwareDataclass):
     manufacturer: str
@@ -174,12 +182,20 @@ class DigitizerConfig(UnitAwareDataclass):
     aux_io_mode: str
     aux_io_parameter: int
 
+
+@dataclass
+class StageConfig(UnitAwareDataclass):
+    manufacturer: str
+    model: str
+
+
 @dataclass
 class SystemConfig:
     logger: LoggerConfig
     laser: LaserConfig
     scanner: ScannerConfig
     digitizer: DigitizerConfig
+    stage: StageConfig
 
     @classmethod
     def from_toml(cls, toml_path: Path) -> 'SystemConfig':
@@ -193,5 +209,6 @@ class SystemConfig:
                 optics=ScannerOptics.parse_from_dict(data["scanner"]["optics"]),
                 wiring=ScannerWiring(**data["scanner"].get("wiring", {}))
             ),
-            digitizer=DigitizerConfig.parse_from_dict(data["digitizer"])
+            digitizer=DigitizerConfig.parse_from_dict(data["digitizer"]),
+            stage=StageConfig.parse_from_dict(data["stage"])
         )

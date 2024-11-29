@@ -1,31 +1,34 @@
 import tkinter as tk
 from tkinter import ttk
 
-from dirigo.components import digitizer
-from dirigo.plugins.alazar import AlazarDigitizer
+from dirigo import Dirigo
+from dirigo.interfaces.digitizer import SampleClock, Channel, Trigger
 
 
 
-class MainApp(tk.Tk):
+class ReferenceGUI(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title("Dirigo Reference GUI")
 
-        self.digitizer = AlazarDigitizer() # TODO make this a factory function, TODO instantiate dirigo
+        self.diri = Dirigo()
+
+        digitizer = self.diri.hw.digitizer
 
         # Create UI elements
-        self.sample_clock_frame = SampleClockFrame(self, self.digitizer.sample_clock)
+       
+        self.sample_clock_frame = SampleClockFrame(self, digitizer.sample_clock)
         self.sample_clock_frame.grid(row=0, column=0, padx=10, pady=10)
 
-        self.channels_frame = ChannelsNotebook(self, self.digitizer.channels)
+        self.channels_frame = ChannelsNotebook(self, digitizer.channels)
         self.channels_frame.grid(row=1, column=0, padx=10, pady=10)
 
-        self.trigger_frame = TriggerFrame(self, self.digitizer.trigger, self.channels_frame)
+        self.trigger_frame = TriggerFrame(self, digitizer.trigger, self.channels_frame)
         self.trigger_frame.grid(row=2, column=0, padx=10, pady=10)
   
 
 class SampleClockFrame(ttk.LabelFrame):
-    def __init__(self, parent, sample_clock:digitizer.SampleClock):
+    def __init__(self, parent, sample_clock:SampleClock):
         super().__init__(parent, text="Sample Clock")
         self._sample_clock = sample_clock # not sure we need to hold this ref?
 
@@ -125,7 +128,7 @@ class SampleClockFrame(ttk.LabelFrame):
 
         
 class ChannelsNotebook(ttk.LabelFrame):
-    def __init__(self, parent, channels:list[digitizer.Channel]):
+    def __init__(self, parent, channels:list[Channel]):
         super().__init__(parent, text="Channels")
         self._channels = channels
         
@@ -141,7 +144,7 @@ class ChannelsNotebook(ttk.LabelFrame):
 
 
 class ChannelFrame(ttk.Frame):
-    def __init__(self, parent, channel:digitizer.Channel):
+    def __init__(self, parent, channel:Channel):
         super().__init__(parent)
         self._channel = channel
 
@@ -213,7 +216,7 @@ class ChannelFrame(ttk.Frame):
 
 
 class TriggerFrame(ttk.LabelFrame):
-    def __init__(self, parent, trigger:digitizer.Trigger, channels_notebook:ChannelsNotebook):
+    def __init__(self, parent, trigger:Trigger, channels_notebook:ChannelsNotebook):
         super().__init__(parent, text="Trigger")
         self._trigger = trigger 
         self._channels_notebook = channels_notebook
@@ -283,5 +286,5 @@ class AcquireFrame():
 
 
 if __name__ == "__main__":
-    app = MainApp()
+    app = ReferenceGUI()
     app.mainloop()

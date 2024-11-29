@@ -318,6 +318,7 @@ class AuxillaryIO(ABC):
 
 class Digitizer(ABC):
     """ Abstract digitizer class. """
+    @abstractmethod
     def __init__(self):
         self.channels:list[Channel]
         self.sample_clock:SampleClock
