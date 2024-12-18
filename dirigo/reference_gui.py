@@ -3,6 +3,7 @@ from tkinter import ttk
 
 from dirigo import Dirigo
 from dirigo.interfaces.digitizer import SampleClock, Channel, Trigger
+from dirigo.interfaces.scanner import FastRasterScanner
 
 
 
@@ -13,7 +14,9 @@ class ReferenceGUI(tk.Tk):
 
         self.diri = Dirigo()
 
+        # Gather some references for brevity below
         digitizer = self.diri.hw.digitizer
+        scanner = self.diri.hw.fast_raster_scanner
 
         # Create UI elements
        
@@ -25,6 +28,9 @@ class ReferenceGUI(tk.Tk):
 
         self.trigger_frame = TriggerFrame(self, digitizer.trigger, self.channels_frame)
         self.trigger_frame.grid(row=2, column=0, padx=10, pady=10)
+
+        self.scanner_frame = FastRasterScannerFrame(self, scanner)
+        self.scanner_frame.grid(row=3, column=0, padx=10, pady=10)
   
 
 class SampleClockFrame(ttk.LabelFrame):
@@ -279,6 +285,37 @@ class TriggerFrame(ttk.LabelFrame):
         )
         self.source_menu.grid(row=0, column=1, sticky="e", padx=10, pady=5)
 
+
+class FastRasterScannerFrame(ttk.LabelFrame):
+    def __init__(self, parent, scanner:FastRasterScanner):
+        super().__init__(parent, text="Fast Raster Axis")
+        self._scanner = scanner # not sure we need to hold this ref?
+
+        # Enabled Checkbox
+        self.enabled_var = tk.BooleanVar(value=scanner.enabled)
+        check_button = ttk.Checkbutton(
+            self, 
+            text="Enabled", 
+            variable=self.enabled_var,
+            command=lambda: setattr(scanner, 'enabled', self.enabled_var.get())
+        )
+        check_button.grid(row=0, column=0, padx=5, pady=5, sticky="w")
+        
+        # Amplitude
+        label = ttk.Label(self, text="Amplitude (deg. opt.)")
+        label.grid(row=2, column=0, sticky="w", padx=10, pady=5)
+        self.level_var = tk.StringVar(value=scanner.amplitude)
+        self.level_spinbox = ttk.Spinbox(
+            self, 
+            from_=0,
+            to=scanner._max_scan_angle,
+            increment=2.0,
+            textvariable=self.level_var,
+            wrap=False,
+            width=8,
+            command=lambda: setattr(scanner, 'amplitude', float(self.level_var.get()))
+        )
+        self.level_spinbox.grid(row=2, column=1, sticky="e", padx=10, pady=5)
 
 class AcquireFrame():
     pass

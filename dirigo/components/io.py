@@ -194,8 +194,9 @@ class SystemConfig:
     logger: LoggerConfig
     laser: LaserConfig
     scanner: ScannerConfig
-    digitizer: DigitizerConfig
+    digitizer: dict
     stage: StageConfig
+    fast_raster_scanner: dict # It may be better to make these dicts and have the plugin determine what is needed
 
     @classmethod
     def from_toml(cls, toml_path: Path) -> 'SystemConfig':
@@ -209,6 +210,7 @@ class SystemConfig:
                 optics=ScannerOptics.parse_from_dict(data["scanner"]["optics"]),
                 wiring=ScannerWiring(**data["scanner"].get("wiring", {}))
             ),
-            digitizer=DigitizerConfig.parse_from_dict(data["digitizer"]),
-            stage=StageConfig.parse_from_dict(data["stage"])
+            digitizer=data["digitizer"],
+            stage=StageConfig.parse_from_dict(data["stage"]),
+            fast_raster_scanner=data["fast_raster_scanner"],
         )

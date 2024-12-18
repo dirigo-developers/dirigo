@@ -1,24 +1,28 @@
 from abc import ABC, abstractmethod
 
 """
-Dirigo digitizer interface
+Dirigo digitizer interface.
 
-Plugin modules for digitizers must implement concrete versions of classes:
-Channel
-SampleClock
-Trigger
-Acquire
-AuxillaryIO [could be optional?]
-Digitizer
+Plugins must implement concrete versions of classes:
+- Channel
+- SampleClock
+- Trigger
+- Acquire
+- AuxillaryIO [could be optional?]
+- Digitizer
 
-Finally, the Digitizer subclass must be registered as a plugin in PluginRegistry.
+Plugins must also include a project entry point under group "dirigo_digitizers".
+Example:
+
+[project.entry-points."dirigo_digitizers"]
+alazar = "dirigo_alazar:AlazarDigitizer"
 
 """
 
 class ValidQuantityRange:
-    def __init__(self, quantiy_min, quantiy_max):
-        self.min = quantiy_min
-        self.max = quantiy_max
+    def __init__(self, quantity_min, quantity_max):
+        self.min = quantity_min
+        self.max = quantity_max
 
 
 class Channel(ABC):

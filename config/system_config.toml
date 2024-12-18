@@ -9,42 +9,46 @@ pulsed = true
 pulse_frequency = "80.3 MHz"
 
 [scanner]
-fast_axis = "x"
-nominal_scanner_frequency = "7930 Hz"
-flip_fast = false
+fast_axis = "x" # DONE
+nominal_scanner_frequency = "7930 Hz" # DONE
+flip_fast = false # MAYBE
 flip_slow = false
-scan_range.voltage_fast = ["0.2 volts", "5 volts"]
+scan_range.voltage_fast = ["0.2 volts", "5 volts"] # DONE
 scan_range.voltage_slow = ["-10 volts", "10 volts"]
-scan_range.angle_fast = "26 degrees"
+scan_range.angle_fast = "26 degrees" # DONE
 scan_range.angle_slow = "40 degrees"
 optics.relay_mag = 5
 optics.objective_fl = "10 mm"
-wiring.fast_scanner_signal_out = "Dev1/ao2"
+wiring.fast_scanner_signal_out = "Dev1/ao2" # DONE
 wiring.slow_scanner_signal_out = "Dev1/ao3"
-wiring.fast_scanner_sync_in = "PFI0"
+wiring.fast_scanner_sync_in = "PFI0" # MAYBE
 wiring.frame_clock_out = "Dev1/port0/line5"
 wiring.frame_clock_in = "PFI14"
-daq_sample_rate = "120 kHz"
-fast_scanner_settle_time = "200 ms"
+daq_sample_rate = "120 kHz" # for Slow Scanner only?
+fast_scanner_settle_time = "200 ms" # NOT WELL DEFINED
 slow_scanner_response_time = "130 us"
 
-[digitizer]
-manufacturer = "Alazar"
-model = "ATS9440" # use to confirm hardware
-nbuffers = 4 # number of buffer in ring buffer
-clock_source = "External"
-sample_rate = "80.3 MHz"
-clock_edge = "rising"
-input_coupling = ["DC", "DC", "DC", "DC"] # 1 entry per channel present
-input_range = ["2 V", "2 V", "2 V", "2 V"]
-input_impedance = ["50 ohm", "50 ohm", "50 ohm", "50 ohm"]
-trigger_source = "external"
-trigger_slope = "falling"
-trigger_level = "2 V"
-external_trigger_coupling = "DC"
-external_trigger_range = "TTL"
-aux_io_mode = "trigger output"
-aux_io_parameter = 0
+# [digitizer] -> These should be mostly part of 
+# manufacturer = "Alazar"
+# model = "ATS9440" # use to confirm hardware
+# nbuffers = 4 # number of buffer in ring buffer
+# clock_source = "External"
+# sample_rate = "80.3 MHz"
+# clock_edge = "rising"
+# input_coupling = ["DC", "DC", "DC", "DC"] # 1 entry per channel present
+# input_range = ["2 V", "2 V", "2 V", "2 V"]
+# input_impedance = ["50 ohm", "50 ohm", "50 ohm", "50 ohm"]
+# trigger_source = "external"
+# trigger_slope = "falling"
+# trigger_level = "2 V"
+# external_trigger_coupling = "DC"
+# external_trigger_range = "TTL"
+# aux_io_mode = "trigger output"
+# aux_io_parameter = 0
+
+[digitizer] # Include settings that are required for start up / will NOT change
+type = "Alazar" # could add: model number, serial number to distinguish cards in multicard setups
+
 
 [detectors]
 detector0.type = "PMT" # options: "SiPM", "PMT"
@@ -54,3 +58,15 @@ detector1.type = "SiPM"
 detector1.gain = 90
 detector1.label = "Chan B"
 
+[stage]
+manufacturer = "Thorlabs"
+model = "BBD102"
+
+[fast_raster_scanner]
+type = "ECU0"
+axis = "x"
+nominal_scanner_frequency = "7910 Hz"
+com_port = 3
+amplitude_control_channel = "Dev1/ao2"
+max_scan_angle = "26 degrees" 
+max_analog_control = "5 volts"
