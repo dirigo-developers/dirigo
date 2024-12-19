@@ -19,10 +19,10 @@ class Hardware:
             default_config=default_config.digitizer
         )
 
-        # self.stage = self.get_hardware_plugin(
-        #     group="dirigo_stages",
-        #     default_config=default_config.stage
-        # )
+        self.stage = self.get_hardware_plugin(
+            group="dirigo_stages",
+            default_config=default_config.stage
+        )
 
         self.fast_raster_scanner = self.get_hardware_plugin(
             group="dirigo_ecus",
@@ -31,6 +31,7 @@ class Hardware:
 
     def get_hardware_plugin(self, group, default_config):
         entry_points = importlib.metadata.entry_points(group=group)
+
         for entry_point in entry_points:
             if entry_point.name.lower() == default_config['type'].lower():
                 # Dynamically load and return the plugin class

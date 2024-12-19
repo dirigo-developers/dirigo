@@ -28,6 +28,16 @@ class FastRasterScanner(ABC):
 
     @property
     @abstractmethod
+    def min_scan_angle(self) -> float:
+        pass
+
+    @property
+    @abstractmethod
+    def max_scan_angle(self) -> float:
+        pass
+
+    @property
+    @abstractmethod
     def enabled(self):
         pass
 

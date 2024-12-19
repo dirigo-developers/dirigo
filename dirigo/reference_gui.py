@@ -4,6 +4,7 @@ from tkinter import ttk
 from dirigo import Dirigo
 from dirigo.interfaces.digitizer import SampleClock, Channel, Trigger
 from dirigo.interfaces.scanner import FastRasterScanner
+from dirigo.interfaces.stage import Stage
 
 
 
@@ -17,6 +18,7 @@ class ReferenceGUI(tk.Tk):
         # Gather some references for brevity below
         digitizer = self.diri.hw.digitizer
         scanner = self.diri.hw.fast_raster_scanner
+        stage = self.diri.hw.stage
 
         # Create UI elements
        
@@ -31,6 +33,9 @@ class ReferenceGUI(tk.Tk):
 
         self.scanner_frame = FastRasterScannerFrame(self, scanner)
         self.scanner_frame.grid(row=3, column=0, padx=10, pady=10)
+
+        self.stage_frame = StageFrame(self, stage)
+        self.stage_frame.grid(row=4, column=0, padx=10, pady=10)
   
 
 class SampleClockFrame(ttk.LabelFrame):
@@ -263,7 +268,7 @@ class TriggerFrame(ttk.LabelFrame):
             textvariable=self.level_var,
             wrap=False,
             width=8,
-            command=lambda value: setattr(trigger, 'level', value)
+            command=lambda: setattr(trigger, 'level', float(self.level_var.get()))
         )
         self.level_spinbox.grid(row=2, column=1, sticky="e", padx=10, pady=5)
 
@@ -302,14 +307,14 @@ class FastRasterScannerFrame(ttk.LabelFrame):
         check_button.grid(row=0, column=0, padx=5, pady=5, sticky="w")
         
         # Amplitude
-        label = ttk.Label(self, text="Amplitude (deg. opt.)")
+        label = ttk.Label(self, text="Amplitude (deg.)")
         label.grid(row=2, column=0, sticky="w", padx=10, pady=5)
         self.level_var = tk.StringVar(value=scanner.amplitude)
         self.level_spinbox = ttk.Spinbox(
             self, 
-            from_=0,
-            to=scanner._max_scan_angle,
-            increment=2.0,
+            from_=scanner.min_scan_angle,
+            to=scanner.max_scan_angle,
+            increment=2.0, # arbitrary, may want to define by interface?
             textvariable=self.level_var,
             wrap=False,
             width=8,
@@ -317,9 +322,53 @@ class FastRasterScannerFrame(ttk.LabelFrame):
         )
         self.level_spinbox.grid(row=2, column=1, sticky="e", padx=10, pady=5)
 
+
+class StageFrame(ttk.LabelFrame):
+    def __init__(self, parent, stage:Stage):
+        super().__init__(parent, text="Stage")
+
+        # X Axis
+        # Position (interface in meters, but more convenient to use mm here)
+        label = ttk.Label(self, text="X position (mm)")
+        label.grid(row=0, column=0, sticky="w", padx=10, pady=5)
+        self.x_pos_var = tk.StringVar(value=1000 * stage.x.position)
+        self.x_pos_spinbox = ttk.Spinbox(
+            self, 
+            from_=1000 * stage.x.min_position,
+            to=1000 * stage.x.max_position,
+            increment=10.0, # arbitrary, may want to define by interface?
+            textvariable=self.x_pos_var,
+            wrap=False,
+            width=8,
+            command=lambda: stage.x.move_to_position(
+                float(self.x_pos_var.get())/1000 # convert to meters before passing to interface
+            )
+        )
+        self.x_pos_spinbox.grid(row=0, column=1, sticky="e", padx=10, pady=5)
+
+        # Y Axis
+        # Position (interface in meters, but more convenient to use mm here)
+        label = ttk.Label(self, text="Y position (mm)")
+        label.grid(row=1, column=0, sticky="w", padx=10, pady=5)
+        self.y_pos_var = tk.StringVar(value=1000 * stage.y.position)
+        self.y_pos_spinbox = ttk.Spinbox(
+            self, 
+            from_=1000 * stage.y.min_position,
+            to=1000 * stage.y.max_position,
+            increment=10.0, # arbitrary, may want to define by interface?
+            textvariable=self.y_pos_var,
+            wrap=False,
+            width=8,
+            command=lambda: stage.y.move_to_position(
+                float(self.y_pos_var.get())/1000 # convert to meters before passing to interface
+            )
+        )
+        self.y_pos_spinbox.grid(row=1, column=1, sticky="e", padx=10, pady=5)
+
+
 class AcquireFrame():
     pass
-        
+    
 
 
 if __name__ == "__main__":
