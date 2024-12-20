@@ -194,6 +194,7 @@ class SystemConfig:
     logger: LoggerConfig
     laser: LaserConfig
     scanner: ScannerConfig
+    optics: dict
     digitizer: dict
     stage: dict
     fast_raster_scanner: dict # It may be better to make these dicts and have the plugin determine what is needed
@@ -210,6 +211,7 @@ class SystemConfig:
                 optics=ScannerOptics.parse_from_dict(data["scanner"]["optics"]),
                 wiring=ScannerWiring(**data["scanner"].get("wiring", {}))
             ),
+            optics=data['optics'],
             digitizer=data["digitizer"],
             stage=data["stage"],
             fast_raster_scanner=data["fast_raster_scanner"],

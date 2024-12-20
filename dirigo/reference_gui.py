@@ -2,9 +2,8 @@ import tkinter as tk
 from tkinter import ttk
 
 from dirigo import Dirigo
-from dirigo.interfaces.digitizer import SampleClock, Channel, Trigger
-from dirigo.interfaces.scanner import FastRasterScanner
-from dirigo.interfaces.stage import Stage
+from dirigo.hw_interfaces.digitizer import SampleClock, Channel, Trigger
+from dirigo.hw_interfaces import FastRasterScanner, Stage
 
 
 
@@ -16,9 +15,10 @@ class ReferenceGUI(tk.Tk):
         self.diri = Dirigo()
 
         # Gather some references for brevity below
-        digitizer = self.diri.hw.digitizer
-        scanner = self.diri.hw.fast_raster_scanner
-        stage = self.diri.hw.stage
+        hardware = self.diri.hw
+        digitizer = hardware.digitizer
+        scanner = hardware.fast_raster_scanner
+        stage = hardware.stage
 
         # Create UI elements
        

@@ -2,7 +2,8 @@ import importlib.metadata
 
 from dirigo.components.io import SystemConfig
 from dirigo.components.scanner import Scanner
-from dirigo.interfaces.digitizer import Digitizer
+from dirigo.components.optics import LaserScanningOptics
+from dirigo.hw_interfaces import Digitizer, Stage, FastRasterScanner
 
 
 class Hardware:
@@ -13,18 +14,19 @@ class Hardware:
     # hardware references, not to implement functionality
     def __init__(self, default_config:SystemConfig):
         self.scanner = Scanner(default_config.scanner) # OBSOLETE
+        self.optics = LaserScanningOptics(**default_config.optics)
 
         self.digitizer:Digitizer = self.get_hardware_plugin(
             group="dirigo_digitizers",
             default_config=default_config.digitizer
         )
 
-        self.stage = self.get_hardware_plugin(
+        self.stage:Stage = self.get_hardware_plugin(
             group="dirigo_stages",
             default_config=default_config.stage
         )
 
-        self.fast_raster_scanner = self.get_hardware_plugin(
+        self.fast_raster_scanner:FastRasterScanner = self.get_hardware_plugin(
             group="dirigo_ecus",
             default_config=default_config.fast_raster_scanner
         )
