@@ -1,4 +1,9 @@
 from abc import ABC, abstractmethod
+from pathlib import Path
+
+import numpy as np
+
+from dirigo.components.io import load_toml
 
 """
 Dirigo digitizer interface.
@@ -107,11 +112,19 @@ class SampleClock(ABC):
     @property
     @abstractmethod
     def rate(self):
+        """Returns a human-readable string representation of sample rate."""
         pass
 
     @rate.setter
     @abstractmethod
     def rate(self, value):
+        pass
+
+    @property
+    @abstractmethod
+    def rate_numeric(self) -> float:
+        """ Returns a floating point representation of sample rate in hertz 
+        (samples/second). Useful for calculations."""
         pass
     
     @property
@@ -295,13 +308,45 @@ class Acquire(ABC):
     def buffers_per_acquisition(self, value):
         pass
 
+    @property
+    @abstractmethod
+    def buffers_allocated(self):
+        """
+        Returns the number of buffers to allocate during an acquisition. 
+        Allocated buffers should be less than or equal to the total buffers per
+        acquisition. If it is less than, make sure the code can consume 
+        (e.g. save) the buffer data before they are overwritten.
+        """
+        pass
+
+    @buffers_allocated.setter
+    @abstractmethod
+    def buffers_allocated(self, value):
+        """Set the number of buffers to allocate for an acquisition."""
+        pass
+
     @abstractmethod
     def start(self):
+        pass
+
+    @property
+    @abstractmethod
+    def buffers_acquired(self) -> int:
+        """
+        Returns the number of buffers acquired during the current acquisition.
+        """
+        pass
+
+    @abstractmethod
+    def get_next_completed_buffer(self, blocking: bool = True) -> np.ndarray:
+        """Returns next completed data buffer."""
         pass
 
     @abstractmethod
     def stop(self):
         pass
+
+    
 
 
 class AuxillaryIO(ABC):
@@ -322,6 +367,8 @@ class AuxillaryIO(ABC):
 
 class Digitizer(ABC):
     """ Abstract digitizer class. """
+    PROFILE_LOCATION = Path(__file__).parents[2] / "config/digitizer"
+
     @abstractmethod
     def __init__(self):
         self.channels:list[Channel]
@@ -330,4 +377,23 @@ class Digitizer(ABC):
         self.acquire:Acquire
         self.aux_io:AuxillaryIO
 
-    
+    def load_profile(self, profile_name:str):
+        """Load and apply a settings profile."""
+        profile_fn = profile_name + ".toml"
+        profile = load_toml(self.PROFILE_LOCATION / profile_fn)
+        
+        self.sample_clock.source = profile["sample_clock"]["clock_source"]
+        self.sample_clock.rate = profile["sample_clock"]["rate"]
+        self.sample_clock.edge = profile["sample_clock"]["edge"]
+
+        for i, channel in enumerate(self.channels):
+            channel.enabled = profile["channels"]["enabled"][i]
+            channel.coupling = profile["channels"]["coupling"][i]
+            channel.impedance = profile["channels"]["impedance"][i]
+            channel.range = profile["channels"]["range"][i]
+
+        self.trigger.external_range = profile["trigger"]["external_range"]
+        self.trigger.external_coupling = profile["trigger"]["external_coupling"]
+        self.trigger.source = profile["trigger"]["source"]
+        self.trigger.slope = profile["trigger"]["slope"]
+        self.trigger.level = 0

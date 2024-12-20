@@ -23,7 +23,7 @@ class FastRasterScanner(ABC):
     
     @property
     @abstractmethod
-    def nominal_line_rate(self):
+    def nominal_scanner_frequency(self):
         pass
 
     @property

@@ -1,11 +1,32 @@
-from dataclasses import dataclass
 import math
 
-@dataclass
-class LaserScanningOptics: # possibly this should be an interface
-    objective_focal_length: float # meters
-    relay_magnification: float # dimensionless
-    # scan range limits?
+
+class LaserScanningOptics: # TODO, rework as interface?
+    def __init__(self, objective_focal_length: str|float, relay_magnification: float):
+        # validate focal length argument
+        if isinstance(objective_focal_length, str):
+            v, u = objective_focal_length.split()
+            if u.lower() in ["mm", "millimeter", "millimeters"]:
+                v = float(v) / 1000
+            elif u.lower() in ["m", "meter", "meters"]:
+                v = float(v)
+            else:
+                raise ValueError(
+                    f"Expecting objective focal length units in mm or m, got {u}"
+                )
+        self._objective_focal_length = v
+
+        self._relay_magnification = float(relay_magnification)
+
+    @property
+    def objective_focal_length(self):
+        """Returns the objective focal length in meters."""
+        return self._objective_focal_length
+    
+    @property
+    def relay_magnification(self):
+        """Returns the scan relay lateral magnification"""
+        return self._relay_magnification
 
     def scan_angle_to_object_position(self, angle: float) -> float:
         """

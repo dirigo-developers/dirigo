@@ -1,5 +1,5 @@
 [sample_clock]
-clock_source = "Internal"
+clock_source = "Internal clock"
 rate = "100 MS/s"
 edge = "Rising"
 
@@ -13,3 +13,5 @@ range = ["2 V", "2 V", "2 V", "2 V"]
 source = "External"
 slope = "Positive"
 level = 0
+external_range = "TTL"
+external_coupling = "DC"
