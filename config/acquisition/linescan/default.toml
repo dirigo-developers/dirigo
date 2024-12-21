@@ -1,0 +1,8 @@
+bidirectional_scanning = true
+line_width = 2e-3 # meters
+pixel_size = 2e-6 # meters
+fill_fraction = 0.9
+lines_per_buffer = 256
+buffers_per_acquisition = 8
+buffers_allocated = 4
+digitizer_profile = "default"

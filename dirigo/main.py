@@ -1,11 +1,10 @@
+import importlib.metadata
 from pathlib import Path
 import queue
 
 from dirigo.components.io import SystemConfig
 from dirigo.components.hardware import Hardware
 from dirigo.sw_interfaces import Acquisition
-
-from dirigo.sw_interfaces.acquisition import LineAcquisition, LineAcquisitionSpec
 
 
 
@@ -23,24 +22,31 @@ class Dirigo:
         self.data_queue = queue.Queue() # TODO, probably needs to be reset periodically
 
 
-    def acquisition_factory(self, type: str) -> Acquisition:
+    def acquisition_factory(self, type: str, spec_name: str = "default") -> Acquisition:
         """Returns an initialized acquisition worker object."""
         self._flush_queue()
 
-        # Get the Acquisition specification
-        spec = LineAcquisitionSpec(
-            bidirectional_scanning=False,
-            line_width=2e-3,
-            pixel_size=2e-6,
-            fill_fraction=0.9,
-            lines_per_buffer=256,
-            buffers_per_acquisition=4,
-            buffers_allocated=4
-        )
+        # Dynamically load plugin class
+        entry_pts = importlib.metadata.entry_points(group="dirigo_acquisitions")
 
-        # Initialize worker object
-        acq_worker =  LineAcquisition(self.hw, self.data_queue, spec)
-        return acq_worker
+        # Look for the specified plugin by name
+        for ep in entry_pts:
+            if ep.name == type:
+                # Load and instantiate the plugin class
+                try:
+                    plugin_class:Acquisition = ep.load()
+                    # Instantiate and return the acquisition worker
+                    spec = plugin_class.get_specification(spec_name)
+                    return plugin_class(self.hw, self.data_queue, spec)  
+                except Exception as e:
+                    raise RuntimeError(
+                        f"Failed to load Acquisition '{type}': {e}"
+                    )
+        
+        # If the plugin was not found, raise an error
+        raise ValueError(
+            f"Acquisition '{type}' not found in entry points."
+        )
     
     def _flush_queue(self):
         """Remove all items from the queue."""
@@ -55,6 +61,6 @@ if __name__ == "__main__":
 
     diri = Dirigo()
     
-    acq = diri.acquisition_factory('line')
+    acq = diri.acquisition_factory('frame')
 
     None

@@ -55,3 +55,8 @@ com_port = 3
 amplitude_control_channel = "Dev1/ao2"
 max_scan_angle = "26 degrees" 
 max_analog_control = "5 volts"
+
+[slow_raster_scanner]
+type = "ECU0"
+axis = "y"
+control_channel = "Dev1/ao3"

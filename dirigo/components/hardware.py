@@ -32,9 +32,9 @@ class Hardware:
         )
 
     def get_hardware_plugin(self, group, default_config):
-        entry_points = importlib.metadata.entry_points(group=group)
+        entry_pts = importlib.metadata.entry_points(group=group)
 
-        for entry_point in entry_points:
+        for entry_point in entry_pts:
             if entry_point.name.lower() == default_config['type'].lower():
                 # Dynamically load and return the plugin class
                 ConcreteClass = entry_point.load()

@@ -58,4 +58,43 @@ class FastRasterScanner(ABC):
 
 
 class SlowRasterScanner(ABC):
-    pass
+    def __init__(self):
+        pass
+
+    @property
+    @abstractmethod
+    def axis(self):
+        pass
+    
+    @property
+    @abstractmethod
+    def min_scan_angle(self) -> float:
+        pass
+
+    @property
+    @abstractmethod
+    def max_scan_angle(self) -> float:
+        pass
+
+    @property
+    @abstractmethod
+    def amplitude(self) -> float:
+        pass
+
+    @amplitude.setter
+    @abstractmethod
+    def amplitude(self, new_value):
+        pass
+
+    @property
+    @abstractmethod
+    def period(self) -> float:
+        pass
+
+    @period.setter
+    @abstractmethod
+    def period(self, value:float):
+        pass
+
+
+    # Offset?
