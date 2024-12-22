@@ -198,6 +198,7 @@ class SystemConfig:
     digitizer: dict
     stage: dict
     fast_raster_scanner: dict # It may be better to make these dicts and have the plugin determine what is needed
+    slow_raster_scanner: dict
 
     @classmethod
     def from_toml(cls, toml_path: Path) -> 'SystemConfig':
@@ -215,4 +216,5 @@ class SystemConfig:
             digitizer=data["digitizer"],
             stage=data["stage"],
             fast_raster_scanner=data["fast_raster_scanner"],
+            slow_raster_scanner=data["slow_raster_scanner"]
         )

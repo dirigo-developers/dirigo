@@ -1,0 +1,29 @@
+RasterScanner
+-axis (getter) (static)
+-angle_limits (getter) (static)
+-amplitude (getter)
+-frequency (getter)
+-waveform (getter)
+
+
+FastRasterScanner
+-enabled (getter/setter)
+
+ResonantScanner
+-amplitude (setter)
+-waveform = 'sinusoid'
+
+PolygonScanner
+-frequency (setter)
+-waveform = 'sawtooth'
+
+
+SlowRasterScanner
+-amplitude (setter)
+-offset (getter/setter)
+-frequency (setter)
+-waveform (setter)
+
+
+
+

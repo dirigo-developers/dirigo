@@ -1,5 +1,6 @@
 from abc import ABC, abstractmethod
 
+# TODO, this module is potentially unncessary
 
 """
 Dirigo multifunction I/O (MFIO) device interface.

@@ -118,7 +118,7 @@ class LineAcquisition(Acquisition):
 
 @dataclass
 class FrameAcquisitionSpec(LineAcquisitionSpec):
-    anything_new:int
+    frame_height: float # meters
 
 
 

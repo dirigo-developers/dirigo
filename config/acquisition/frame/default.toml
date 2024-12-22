@@ -6,4 +6,4 @@ lines_per_buffer = 512
 buffers_per_acquisition = 8
 buffers_allocated = 4
 digitizer_profile = "default"
-anything_new = 2
+frame_height = 2e-3 # meters

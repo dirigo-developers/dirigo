@@ -48,15 +48,16 @@ type = "BBD102"
 # Nominal speeds (used for out-of-acquisition imaging)
 
 [fast_raster_scanner]
-type = "ECU0"
+type = "ecu0_resonant_scanner"
 axis = "x"
-nominal_scanner_frequency = "7910 Hz"
+angle_limits = {"min" = -13.0, "max "= 13.0}
+analog_control_range = {"min" = "0 V", max = "5 V"}
+frequency = "7910 Hz"
 com_port = 3
 amplitude_control_channel = "Dev1/ao2"
-max_scan_angle = "26 degrees" 
 max_analog_control = "5 volts"
 
 [slow_raster_scanner]
-type = "ECU0"
+type = "ecu0_slow_raster_scanner"
 axis = "y"
 control_channel = "Dev1/ao3"
