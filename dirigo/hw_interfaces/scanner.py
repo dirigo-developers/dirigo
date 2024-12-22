@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 import re
 
-from dirigo.components.utilities import AngleRange
+from dirigo.components.utilities import AngleRange, Frequency
 
 """
 Dirigo scanner interface.
@@ -96,6 +96,7 @@ class RasterScanner(ABC):
 
 class FastRasterScanner(RasterScanner):
     """Abstraction for fast raster scanning axis."""
+
     @property
     @abstractmethod
     def enabled(self) -> bool:
@@ -123,30 +124,17 @@ class ResonantScanner(FastRasterScanner):
     """
     def __init__(self, frequency: str, **kwargs):
         super().__init__(**kwargs)
-
-        # Validate frequency
-        frequency_pattern = r"^\s*(\d+(\.\d+)?)\s*(Hz|kHz|MHz)\s*$"
-        match = re.match(frequency_pattern, frequency)
-
-        if not match:
-            raise ValueError(f"Invalid frequency format: '{frequency}'. Expected format: '<value> <unit>' (e.g., '7910 Hz').")
-
-        # Extract the value and unit
-        value, _, unit = match.groups()
-        value = float(value)
-
-        # Convert to Hz if necessary
-        unit_multipliers = {
-            "Hz": 1,
-            "kHz": 1e3,
-            "MHz": 1e6,
-            "GHz": 1e9,
-        }
-        self._frequency = value * unit_multipliers[unit] # frequency in Hz
         
+        frequency = Frequency(frequency)
+        if frequency <= 0:
+            raise ValueError(f"Value for frequency must be positive, "
+                             f"got {frequency}")
+
+        self._frequency = frequency
+
     @property
     def waveform(self):
-        return 'sinusoid' # the defining characteristic of such a scanner
+        return 'sinusoid'
     
     @property
     def frequency(self):

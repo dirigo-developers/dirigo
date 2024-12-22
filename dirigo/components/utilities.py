@@ -3,49 +3,54 @@ import re
 from typing import Dict
 
 
-class RangeWithUnits:
+class UnitQuantity(float):
     """
-    Describes a range with associated units and supports unit conversion.
+    Represents a single value with an associated unit and supports unit conversion.
 
     Attributes:
-    - min (float): Minimum value in the range (converted to the base unit).
-    - max (float): Maximum value in the range (converted to the base unit).
-    - unit (str): The original unit of the range (e.g., "Hz", "kHz").
+    - unit (str): The original unit of the quantity (e.g., "V", "mV").
     """
     ALLOWED_UNITS_AND_MULTIPLIERS: Dict[str, float] = None  # Define allowed units and their factors in subclasses
 
-    def __init__(self, min: str, max: str):
+    def __new__(cls, quantity: str):
         """
-        Initialize the range with strings specifying values and units.
+        Create a new instance of UnitQuantity.
 
         Args:
-            min (str): Minimum value with unit (e.g., "-45 degrees").
-            max (str): Maximum value with unit (e.g., "45 degrees").
+            quantity (str or float): Value with unit (e.g., "5 V", "100 mV") or a float (base unit).
+
+        Returns:
+            UnitQuantity: An instance of the class.
 
         Raises:
-            ValueError: If the input format is invalid or the units are not allowed.
+            ValueError: If the input format is invalid or the unit is not allowed.
         """
-        self._min, unit_min = self._parse_value_with_unit(min)
-        self._max, unit_max = self._parse_value_with_unit(max)
+        if isinstance(quantity, str):
+            value, unit = cls._parse_value_with_unit(quantity)
+            if cls.ALLOWED_UNITS_AND_MULTIPLIERS and unit not in cls.ALLOWED_UNITS_AND_MULTIPLIERS:
+                raise ValueError(f"Invalid unit '{unit}'. Allowed units are: {list(cls.ALLOWED_UNITS_AND_MULTIPLIERS.keys())}.")
+            multiplier = cls.ALLOWED_UNITS_AND_MULTIPLIERS[unit]
+            base_value = value * multiplier
+        elif isinstance(quantity, (int, float)):
+            base_value = float(quantity)
+            unit = next(iter(cls.ALLOWED_UNITS_AND_MULTIPLIERS))  # Default to the base unit
+            value = base_value
+        else:
+            raise TypeError("Input must be a string with units or a float representing the base unit.")
 
-        if self.ALLOWED_UNITS_AND_MULTIPLIERS and unit_min not in self.ALLOWED_UNITS_AND_MULTIPLIERS:
-            raise ValueError(f"Invalid unit '{unit_min}'. Allowed units are: {list(self.ALLOWED_UNITS_AND_MULTIPLIERS.keys())}.")
-        if self.ALLOWED_UNITS_AND_MULTIPLIERS and unit_max not in self.ALLOWED_UNITS_AND_MULTIPLIERS:
-            raise ValueError(f"Invalid unit '{unit_max}'. Allowed units are: {list(self.ALLOWED_UNITS_AND_MULTIPLIERS.keys())}.")
+        # Use float's __new__ to initialize the value
+        instance = super().__new__(cls, base_value)
+        instance._original_value = value
+        instance._unit = unit
+        return instance
 
-        # Convert values to base unit using the multiplier
-        self._min *= self.ALLOWED_UNITS_AND_MULTIPLIERS[unit_min]
-        self._max *= self.ALLOWED_UNITS_AND_MULTIPLIERS[unit_max]
-
-        if self._min >= self._max:
-            raise ValueError(f"Invalid range: min ({self._min}) must be less than max ({self._max}).")
-
-    def _parse_value_with_unit(self, value: str) -> tuple[float, str]:
+    @staticmethod
+    def _parse_value_with_unit(quantity: str) -> tuple[float, str]:
         """
         Parses a string containing a value and unit.
 
         Args:
-            value (str): Input string (e.g., "-45 degrees").
+            quantity (str): Input string (e.g., "5 V").
 
         Returns:
             tuple[float, str]: Parsed value as a float and the unit as a string.
@@ -54,72 +59,143 @@ class RangeWithUnits:
             ValueError: If the input string is not in the expected format.
         """
         pattern = r"^\s*([-+]?\d+(\.\d+)?)\s*(\w+)\s*$"
-        match = re.match(pattern, value)
+        match = re.match(pattern, quantity)
 
         if not match:
-            raise ValueError(f"Invalid format for value with unit: '{value}'. Expected format: '<value> <unit>'.")
+            raise ValueError(f"Invalid format for value with unit: '{quantity}'. Expected format: '<value> <unit>'.")
 
         value_str, _, unit = match.groups()
         return float(value_str), unit
 
     @property
-    def min(self) -> float:
+    def unit(self) -> str:
+        """Get the original unit."""
+        return self._unit
+
+    def __str__(self) -> str:
+        """Return a human-readable string with the original value and unit."""
+        return f"{self._original_value} {self._unit}"
+
+    def __repr__(self):
+        return str(self)
+
+
+class Voltage(UnitQuantity):
+    """
+    Represents a voltage value with units (e.g., V, mV, kV, etc.).
+    """
+    ALLOWED_UNITS_AND_MULTIPLIERS = {
+        "V": 1,        # base unit: volts
+        "mV": 1e-3,    # millivolts to volts
+        "μV": 1e-6,    # microvolts to volts
+        "nV": 1e-9,    # nanovolts to volts
+        "kV": 1e3,     # kilovolts to volts
+    }
+
+
+class Angle(UnitQuantity):
+    """
+    Represents an angular value with units (e.g. rad, deg).
+    """
+    ALLOWED_UNITS_AND_MULTIPLIERS = {
+        "rad": 1,           # Base unit: radians
+        "deg": math.pi/180  # degrees to radians
+    }
+
+
+class Frequency(UnitQuantity):
+    """
+    Represents a frequency value with units (e.g. Hz, kHz, MHz, GHz)
+    """
+    ALLOWED_UNITS_AND_MULTIPLIERS = {
+        "Hz": 1,        # base unit: hertz
+        "kHz": 1e-3,    # kilohertz to hertz
+        "MHz": 1e-6,    # megahertz to hertz
+        "GHz": 1e-9,    # gigahertz to hertz
+    }
+
+
+class RangeWithUnits:
+    """
+    Represents a range with associated units and supports unit conversion.
+
+    Attributes:
+    - min (UnitQuantity): Minimum value as a UnitQuantity.
+    - max (UnitQuantity): Maximum value as a UnitQuantity.
+    - unit (str): The base unit of the range.
+    """
+    UNIT_QUANTITY_CLASS = UnitQuantity  # Define the UnitQuantity class to use in subclasses
+
+    def __init__(self, min: str, max: str):
+        """
+        Initialize the range with strings specifying values and units.
+
+        Args:
+            min (str): Minimum value with unit (e.g., "100 mV").
+            max (str): Maximum value with unit (e.g., "1 V").
+
+        Raises:
+            ValueError: If the input format is invalid or the range is invalid (min >= max).
+        """
+        # Parse min and max values using the UnitQuantity class
+        self._min = self.UNIT_QUANTITY_CLASS(min)
+        self._max = self.UNIT_QUANTITY_CLASS(max)
+
+        # Validate that min < max in the base unit
+        if float(self._min) >= float(self._max):
+            raise ValueError(f"Invalid range: min ({self._min}) must be less than max ({self._max}).")
+
+        # Set the base unit as the first key from the allowed units and multipliers
+        self.unit = next(iter(self.UNIT_QUANTITY_CLASS.ALLOWED_UNITS_AND_MULTIPLIERS))
+
+    @property
+    def min(self) -> UnitQuantity:
         """Get the minimum value in the base unit."""
         return self._min
 
     @property
-    def max(self) -> float:
+    def max(self) -> UnitQuantity:
         """Get the maximum value in the base unit."""
         return self._max
-    
-    @property
-    def unit(self) -> str:
-        """Get the range base unit."""
-        return next(iter(self.ALLOWED_UNITS_AND_MULTIPLIERS))
 
-    def within_limits(self, value: float) -> bool:
-        """Check whether a value is within the range."""
-        return self._min <= value <= self._max
+    def within_range(self, value: UnitQuantity) -> bool:
+        """
+        Check whether a UnitQuantity is within the range.
+
+        Args:
+            value (UnitQuantity): The value to check.
+
+        Returns:
+            bool: True if the value is within the range, False otherwise.
+
+        Raises:
+            ValueError: If the value is not a UnitQuantity or if its units are incompatible.
+        """
+        if not isinstance(value, UnitQuantity):
+            raise ValueError("Input must be a UnitQuantity.")
+
+        # Normalize the input value to the base unit for comparison
+        normalized_value = float(value)
+        return float(self._min) <= normalized_value <= float(self._max)
 
     @property
     def range(self) -> float:
         """Get the range as the difference between max and min."""
-        return self._max - self._min
+        return self.UNIT_QUANTITY_CLASS(str(self.max - self.min) + " " + self.unit)
 
+    def __str__(self) -> str:
+        """Return a human-readable string representation of the range."""
+        return f"{self._min} to {self._max}"
 
-class FrequencyRange(RangeWithUnits):
-    """
-    Describes a range of frequencies with units (e.g., Hz, kHz, MHz).
-    """
-    ALLOWED_UNITS_AND_MULTIPLIERS = {
-        "Hz": 1,
-        "kHz": 1e3,
-        "MHz": 1e6,
-        "GHz": 1e9,
-    }
-
-    def __init__(self, min: str, max: str):
-        super().__init__(min, max)
+    def __repr__(self) -> str:
+        return f"RangeWithUnits({self._min}, {self._max})"
 
 
 class AngleRange(RangeWithUnits):
     """
     Describes a range of angles with units (e.g., radians, degrees).
     """
-    ALLOWED_UNITS_AND_MULTIPLIERS = {
-        "radians": 1,
-        "degrees": math.pi / 180, 
-    }
-
-    def __init__(self, min: str, max: str):
-        super().__init__(min, max)
-
-        # Additional validation for angles
-        if self.min_degrees < -90 or self.max_degrees > 90:
-            raise ValueError(
-                f"Angle range must be within the valid optical range (-90 to 90 degrees). "
-                f"Received: min={self.min_degrees} degrees, max={self.max_degrees} degrees."
-            )
+    UNIT_QUANTITY_CLASS = Angle
 
     @property 
     def min_degrees(self):
@@ -132,25 +208,15 @@ class AngleRange(RangeWithUnits):
 
 class VoltageRange(RangeWithUnits):
     """
-    Describes a range of voltages with units (e.g., V, mV, uV).
+    Represents a range of voltages with units (e.g., V, mV, kV).
     """
-    ALLOWED_UNITS_AND_MULTIPLIERS = {
-        "V": 1,        # Base unit: Volts
-        "mV": 1e-3,    # Millivolts to volts
-        "uV": 1e-6,    # Microvolts to volts
-    }
-
-    def __init__(self, min: str, max: str):
-        """
-        Initialize the voltage range.
-
-        Args:
-            min (str): Minimum voltage with unit (e.g., "0 V").
-            max (str): Maximum voltage with unit (e.g., "10 V").
-        """
-        super().__init__(min, max)
+    UNIT_QUANTITY_CLASS = Voltage
         
 
+
+# For testing
 if __name__ == "__main__":
-    v_range = VoltageRange(min="-1 V", max="1 V")
-    None
+
+    angle_range = AngleRange(min="-6 deg", max="6 deg")
+
+    assert angle_range.within_range(Angle("1.2 deg"))

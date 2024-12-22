@@ -2,7 +2,7 @@ import nidaqmx
 import nidaqmx.errors
 from nidaqmx.system import System as NISystem
 
-from dirigo.components.utilities import VoltageRange
+from dirigo.components.utilities import VoltageRange, Angle, Voltage
 from dirigo.hw_interfaces.scanner import (
     ResonantScanner,
     SlowRasterScanner
@@ -56,22 +56,20 @@ class ResonantScannerViaNI(ResonantScanner):
             )
         self._analog_control_range = VoltageRange(**analog_control_range)
 
+        # Default: set amplitude to 0 upon startup
+        self.amplitude = 0.0
+
     @property
     def amplitude(self):
-        """Get the peak-to-peak amplitude, in degrees optical."""
+        """Get the peak-to-peak amplitude, in radians optical."""
         return self._amplitude
 
     @amplitude.setter
-    def amplitude(self, new_ampl: float):
-        """Set the peak-to-peak amplitude, in degrees optical."""
-        try: 
-            # Convert input to a float
-            new_ampl = float(new_ampl)
-        except ValueError:
-            raise ValueError(f"Expected a float value for 'amplitude', got {type(new_ampl)}: {new_ampl}")
-        
+    def amplitude(self, new_ampl: Angle | float):
+        """Set the peak-to-peak amplitude."""
+
         # Validate that the value is within the acceptable range
-        if not self.angle_limits.within_limits(new_ampl/2):
+        if not self.angle_limits.within_range(Angle(new_ampl/2)):
             raise ValueError(
                 f"Value for 'amplitude' outside settable range "
                 f"{self.angle_limits.min} to {self.angle_limits.max}. "
@@ -81,7 +79,7 @@ class ResonantScannerViaNI(ResonantScanner):
         # Calculate the required analog voltage value, validate within range
         ampl_fraction = new_ampl / self.angle_limits.range
         analog_value =  ampl_fraction * self.analog_control_range.max
-        if not self.analog_control_range.within_limits(analog_value):
+        if not self.analog_control_range.within_range(Voltage(analog_value)):
             raise ValueError(
                 f"Voltage to achieve amplitude={new_ampl} is outside range. "
                 f"Attempted to set {analog_value} V. "
@@ -139,7 +137,7 @@ class GalvoSlowRasterScannerViaNI(SlowRasterScanner):
 if __name__ == "__main__":
     config = {
         "axis": "y",
-        "angle_limits": {"min": "-13.0 degrees", "max": "13.0 degrees"},
+        "angle_limits": {"min": "-13.0 deg", "max": "13.0 deg"},
         "analog_control_range" : {"min": "0 V", "max": "5 V"},
         "frequency": "7910 Hz",
         "amplitude_control_channel": "Dev1/ao3"
