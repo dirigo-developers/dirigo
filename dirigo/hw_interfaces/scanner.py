@@ -1,7 +1,6 @@
 from abc import ABC, abstractmethod
-import re
 
-from dirigo.components.utilities import AngleRange, Frequency
+import dirigo
 
 """
 Dirigo scanner interface.
@@ -38,7 +37,7 @@ class RasterScanner(ABC):
             raise ValueError(
                 f"angle_limits must be a dictionary with 'min' and 'max' keys."
             )
-        self._angle_limits = AngleRange(**angle_limits)
+        self._angle_limits = dirigo.AngleRange(**angle_limits)
 
     @property
     def axis_label(self) -> str:
@@ -50,37 +49,36 @@ class RasterScanner(ABC):
         return self._axis
 
     @property
-    def angle_limits(self) -> AngleRange:
+    def angle_limits(self) -> dirigo.AngleRange:
         """Returns an object describing the scan angle limits."""
         return self._angle_limits
 
     @property
     @abstractmethod
-    def amplitude(self) -> float:
+    def amplitude(self) -> dirigo.Angle:
         """
-        The peak-to-peak scan amplitude, in degrees optical.
+        The peak-to-peak scan amplitude.
 
         Setting this property updates the scan amplitude. Implementations should
         document whether changes have effect immediately, at the beginning of
         the next period, or neither.
-        
-        Requirements:
-
-        - Must be a positive float.
-        - Must not exceed the maximum angle defined by `scan_angle_range.max`.
-
-        Attempting to set a value outside these bounds should raise a ValueError.
         """
+        pass
+
+    @amplitude.setter
+    @abstractmethod
+    def amplitude(self, value: dirigo.Angle | float):
         pass
 
     @property
     @abstractmethod
-    def frequency(self) -> float:
-        """
-        The scan frequency, in hertz.
-        
-        TODO
-        """
+    def frequency(self) -> dirigo.Frequency:
+        """The scan frequency."""
+        pass
+
+    @frequency.setter
+    @abstractmethod
+    def frequency(self, value: dirigo.Frequency | float):
         pass
 
     @property
@@ -93,13 +91,18 @@ class RasterScanner(ABC):
         """
         pass
 
+    @waveform.setter
+    @abstractmethod
+    def waveform(self, new_waveform: str):
+        pass
+
 
 class FastRasterScanner(RasterScanner):
     """Abstraction for fast raster scanning axis."""
 
     @property
     @abstractmethod
-    def enabled(self) -> bool:
+    def enabled(self) -> bool: # Think on: should this be in RasterScanner?
         """
         Indicates whether the scanner is currently enabled.
         
@@ -125,94 +128,64 @@ class ResonantScanner(FastRasterScanner):
     def __init__(self, frequency: str, **kwargs):
         super().__init__(**kwargs)
         
-        frequency = Frequency(frequency)
-        if frequency <= 0:
+        frequency_obj = dirigo.Frequency(frequency)
+        if frequency_obj <= 0:
             raise ValueError(f"Value for frequency must be positive, "
-                             f"got {frequency}")
+                             f"got {frequency_obj}")
 
-        self._frequency = frequency
-
+        self._frequency = frequency_obj
+    
+    @property
+    def frequency(self):
+        """
+        Returns the nominal scanner frequency. 
+        
+        Not a measurement of the actual frequency.
+        """
+        return self._frequency
+    
+    @frequency.setter
+    def frequency(self, _):
+        raise NotImplementedError("Frequency is fixed for resonant scanners.")
+    
     @property
     def waveform(self):
         return 'sinusoid'
     
-    @property
-    def frequency(self):
-        return self._frequency
-
-    @RasterScanner.amplitude.setter
-    @abstractmethod
-    def amplitude(self, value: float):
-        """Set the amplitude."""
-        pass
+    @waveform.setter
+    def waveform(self, _):
+        raise NotImplementedError("Waveform is sinusoidal for resonant scanners.")
 
 
 class PolygonScanner(FastRasterScanner):
+    # WIP
+
     @property
     def waveform(self):
         return 'sawtooth'
     
-    @RasterScanner.frequency.setter
-    @abstractmethod
-    def frequency(self, value: float):
-        """Sets the frequency, in hertz."""
-        pass
+    @waveform.setter
+    def waveform(self, value):
+        NotImplementedError("Waveform is sawtooth for polygonal scanners.")
 
-    
-    # @property
-    # @abstractmethod
-    # def nominal_scanner_frequency(self) -> float:
-    #     """
-    #     Returns the nominal scanner frequency in hertz. 
-
-    #     The frequency defines the rate at which the scanner oscillates and may 
-    #     or may not be equivalent to the line rate. This property represents the
-    #     'specification' or an a priori measurement. It is not the instantaneous 
-    #     (actual) frequency.
-        
-    #     Must be a positive float.
-    #     """
-    #     pass
 
 
 class SlowRasterScanner(RasterScanner):
     """Abstraction for slow raster scanning axis."""
-    @RasterScanner.amplitude.setter
-    @abstractmethod
-    def amplitude(self, value: float):
-        """
-        Set the scan amplitude, in degrees optical.
-        """
-        pass
 
     @property
     @abstractmethod
-    def offset(self) -> float:
-        """Returns the scan angle offset, in degrees optical."""
+    def offset(self) -> dirigo.Angle:
+        """
+        Returns the scan angle offset.
+        
+        Setting this value shifts the scan range.
+        """
         pass
 
     @offset.setter
     @abstractmethod
     def offset(self, value: float):
         pass
-
-    @RasterScanner.frequency.setter
-    @abstractmethod
-    def frequency(self, value: float):
-        """
-        Set the scan frequency, in hertz.
-        """
-        pass
-
-    @RasterScanner.waveform.setter
-    @abstractmethod
-    def waveform(self, value: str):
-        """
-        Sets the scan angle waveform.
-
-        Valid options: 'sinusoid', 'sawtooth', 'triangle'
-        """
-        pass
+   
     
-    
-
