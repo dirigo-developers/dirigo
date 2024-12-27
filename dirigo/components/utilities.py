@@ -12,7 +12,7 @@ class UnitQuantity(float):
     """
     ALLOWED_UNITS_AND_MULTIPLIERS: Dict[str, float] = None  # Define allowed units and their factors in subclasses
 
-    def __new__(cls, quantity: str):
+    def __new__(cls, quantity: str | float):
         """
         Create a new instance of UnitQuantity.
 
@@ -130,6 +130,40 @@ class Time(UnitQuantity):
     }
 
 
+class Position(UnitQuantity):
+    """
+    Represents a spatial position value with units (e.g. m, mm, μm, nm, km)
+    """
+    ALLOWED_UNITS_AND_MULTIPLIERS = {
+        "m": 1,         # base unit: meters
+        "mm": 1e3,      # millimeters to meters
+        "μm": 1e6,      # micrometers to meters
+        "nm": 1e9,      # nanometers to meters
+        "km": 1e-3      # kilometers to meters
+    }
+
+
+class Velocity(UnitQuantity):
+    """
+    Represents a velocity value with units (e.g. m/s, mm/s, μm/s)
+    """
+    ALLOWED_UNITS_AND_MULTIPLIERS = {
+        "m/s": 1,       # base unit: meters per second
+        "mm/s": 1e3,    # millimeters per second to meters per second
+        "μm/s": 1e6,    # micrometers per second to meters per second
+    }
+
+
+class AngularVelocity(UnitQuantity):
+    """
+    Represents an angular velocity value with units (e.g. rad/s, deg/s)
+    """
+    ALLOWED_UNITS_AND_MULTIPLIERS = {
+        "rad/s": 1,             # base unit: radians per second
+        "deg/s": math.pi / 180  # degrees per second to radians per second
+    }
+
+
 class RangeWithUnits:
     """
     Represents a range with associated units and supports unit conversion.
@@ -141,13 +175,13 @@ class RangeWithUnits:
     """
     UNIT_QUANTITY_CLASS = UnitQuantity  # Define the UnitQuantity class to use in subclasses
 
-    def __init__(self, min: str, max: str):
+    def __init__(self, min: str | float, max: str | float):
         """
         Initialize the range with strings specifying values and units.
 
         Args:
-            min (str): Minimum value with unit (e.g., "100 mV").
-            max (str): Maximum value with unit (e.g., "1 V").
+            min (str or float): Minimum value with unit (e.g., "100 mV") or float value in base units (e.g. 0.1)
+            max (str or float): Maximum value with unit or float (same as min).
 
         Raises:
             ValueError: If the input format is invalid or the range is invalid (min >= max).
@@ -203,7 +237,7 @@ class RangeWithUnits:
         return f"{self._min} to {self._max}"
 
     def __repr__(self) -> str:
-        return f"RangeWithUnits({self._min}, {self._max})"
+        return f"{type(self).__name__}({self._min}, {self._max})"
 
 
 class AngleRange(RangeWithUnits):
@@ -229,6 +263,13 @@ class VoltageRange(RangeWithUnits):
     """
     UNIT_QUANTITY_CLASS = Voltage
         
+
+class PositionRange(RangeWithUnits):
+    """
+    Represents a position range with units (e.g. m, mm, μm, nm, km)
+    """
+    UNIT_QUANTITY_CLASS = Position
+
 
 
 # # For testing
