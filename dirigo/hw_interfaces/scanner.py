@@ -40,7 +40,7 @@ class RasterScanner(ABC):
         self._angle_limits = dirigo.AngleRange(**angle_limits)
 
     @property
-    def axis_label(self) -> str:
+    def axis(self) -> str:
         """
         The axis along which the scanner operates.
 

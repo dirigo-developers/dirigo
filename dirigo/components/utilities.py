@@ -109,9 +109,24 @@ class Frequency(UnitQuantity):
     """
     ALLOWED_UNITS_AND_MULTIPLIERS = {
         "Hz": 1,        # base unit: hertz
-        "kHz": 1e-3,    # kilohertz to hertz
-        "MHz": 1e-6,    # megahertz to hertz
-        "GHz": 1e-9,    # gigahertz to hertz
+        "kHz": 1e3,     # kilohertz to hertz
+        "MHz": 1e6,     # megahertz to hertz
+        "GHz": 1e9,     # gigahertz to hertz
+    }
+
+
+class Time(UnitQuantity):
+    """
+    Represents a time value with units (e.g. s, ms, μs, ns, min, hr, days)
+    """
+    ALLOWED_UNITS_AND_MULTIPLIERS = {
+        "s": 1,         # base unit: seconds
+        "ms": 1e-3,     # milliseconds to seconds
+        "μs": 1e-6,     # microseconds to seconds
+        "ns": 1e-9,     # nanoseconds to seconds
+        "min": 60.0,    # minutes to seconds
+        "hr": 3600.0,   # hours to seconds
+        "days": 86400.0 # days to seconds
     }
 
 
@@ -198,11 +213,13 @@ class AngleRange(RangeWithUnits):
     UNIT_QUANTITY_CLASS = Angle
 
     @property 
-    def min_degrees(self):
+    def min_degrees(self) -> float:
+        """Returns min in degrees optical."""
         return self.min * 180 / math.pi
     
     @property 
-    def max_degrees(self):
+    def max_degrees(self) -> float:
+        """Returns max in degrees optical."""
         return self.max * 180 / math.pi
     
 
@@ -214,9 +231,9 @@ class VoltageRange(RangeWithUnits):
         
 
 
-# For testing
-if __name__ == "__main__":
+# # For testing
+# if __name__ == "__main__":
 
-    angle_range = AngleRange(min="-6 deg", max="6 deg")
+#     angle_range = AngleRange(min="-6 deg", max="6 deg")
 
-    assert angle_range.within_range(Angle("1.2 deg"))
+#     assert angle_range.within_range(Angle("1.2 deg"))

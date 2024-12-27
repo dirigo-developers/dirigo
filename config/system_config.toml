@@ -61,3 +61,4 @@ enable_channel = "" # or None
 type = "galvo_slow_raster_scanner_via_ni"
 axis = "y"
 control_channel = "Dev1/ao3"
+trigger_channel = "/Dev1/PFI4"

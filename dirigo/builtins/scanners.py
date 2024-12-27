@@ -1,12 +1,73 @@
 import nidaqmx
 import nidaqmx.errors
 from nidaqmx.system import System as NISystem
+from nidaqmx.constants import AcquisitionType, RegenerationMode
 
 import dirigo
 from dirigo.hw_interfaces.scanner import (
     ResonantScanner,
     SlowRasterScanner
 )
+
+
+
+def validate_ni_channel(channel_name: str):
+    """
+    Confirm if a given channel or terminal exists on a device.
+    
+    Parameters:
+    - channel_name: str, the full channel name to check (e.g., 'Dev1/ai0', 
+      'Dev1/ao0', '/Dev1/PFI0').
+      Note: Terminals (e.g., PFI0) must include a leading '/' (e.g., '/Dev1/PFI0'). 
+
+    Raises:
+    - ValueError: If the channel name format is invalid or the channel/terminal
+      does not exist.
+    - KeyError: If the specified device does not exist.
+
+    Returns:
+    - None: If the channel exists (raises no exception).
+    """
+    # Ensure channel_name includes both device and channel/terminal parts
+    if '/' not in channel_name or channel_name.count('/') > 2:
+        raise ValueError(
+            f"Invalid channel name format, {channel_name}. "
+            f"Valid formats: [device name]/[channel name] or /[device name]/[terminal name]. "
+            f"Examples: 'Dev1/ao0', '/Dev1/PFI4'"
+        )
+
+    # Split device name from the rest of the channel name
+    parts = channel_name.split('/')
+    if channel_name.startswith('/'):
+        # Handle terminal format: '/Dev1/PFI0'
+        device_name = parts[1]
+    else:
+        # Handle channel format: 'Dev1/ai0'
+        device_name = parts[0]
+
+    system = NISystem.local()
+
+    try:
+        # Get the device
+        device = system.devices[device_name]
+    except KeyError:
+        raise ValueError(f"Device {device_name} not found in the system.")
+
+    # Collect all channel and terminal names from the device
+    all_channels = []
+    all_channels.extend(chan.name for chan in device.ai_physical_chans)
+    all_channels.extend(chan.name for chan in device.ao_physical_chans)
+    all_channels.extend(chan.name for chan in device.di_lines)
+    all_channels.extend(chan.name for chan in device.do_lines)
+    all_channels.extend(device.terminals)
+
+    # Check if the specified channel exists
+    if channel_name not in all_channels:
+        raise ValueError(
+            f"Channel/terminal, {channel_name} not found on device, {device_name}"
+        )
+    # If no exception is raised, the channel is valid
+
 
 
 class ResonantScannerViaNI(ResonantScanner):
@@ -16,33 +77,10 @@ class ResonantScannerViaNI(ResonantScanner):
     def __init__(self, amplitude_control_channel: str, **kwargs):
         super().__init__(**kwargs)
 
-        # Validate Analog Out channel
-        try:
-            # Split the device and channel name
-            device_name, _ = amplitude_control_channel.split("/", 1)
+        # Validated and set ampltidue control analog channel
+        validate_ni_channel(amplitude_control_channel)
+        self._amplitude_control_channel = amplitude_control_channel
 
-            # Retrieve the system and the specified device
-            system = NISystem.local()
-            device = next(
-                (d for d in system.devices if d.name == device_name), None
-            )
-
-            if not device:
-                raise ValueError(f"Device '{device_name}' not found.")
-
-            # Check if the channel exists in the analog output channels
-            if amplitude_control_channel not in device.ao_physical_chans.channel_names:
-                raise ValueError(f"Channel '{amplitude_control_channel}' does "
-                                 f"not exist on device '{device_name}'.")
-            
-            # Set the validated channel
-            self._amplitude_control_channel = amplitude_control_channel
-
-        except ValueError as e:
-            raise ValueError(f"Invalid amplitude control channel: {e}") from e
-        except nidaqmx.errors.DaqError as e:
-            raise nidaqmx.errors.DaqError(f"NI-DAQmx Error during initialization: {e}") from e
-        
         # Validate the analog control range
         analog_control_range = kwargs.get('analog_control_range')
         if not isinstance(analog_control_range, dict):
@@ -111,8 +149,21 @@ class ResonantScannerViaNI(ResonantScanner):
 
 
 class GalvoSlowRasterScannerViaNI(SlowRasterScanner):
-    def __init__(self, **kwargs):
+    REARM_TIME = dirigo.Time("1 ms") # time to allow NI card to rearm after outputing waveform
+
+    def __init__(self, control_channel: str, trigger_channel: str, 
+                 sample_rate : str, **kwargs):
         super().__init__(**kwargs)
+
+        # Validated and set ampltidue control analog channel
+        validate_ni_channel(control_channel)
+        self._control_channel = control_channel
+
+        validate_ni_channel(trigger_channel)
+        self._trigger_channel = trigger_channel
+
+        # Validate sample rate setting
+        self._sample_rate = dirigo.Frequency(sample_rate)
     
     @property
     def amplitude(self) -> dirigo.Angle:
@@ -186,7 +237,7 @@ class GalvoSlowRasterScannerViaNI(SlowRasterScanner):
         self._frequency = freq
     
     @property
-    def waveform(self) -> str: # Think on: should this be in SlowRasterScanner?
+    def waveform(self) -> str: 
         return self._waveform
     
     @waveform.setter
@@ -198,6 +249,65 @@ class GalvoSlowRasterScannerViaNI(SlowRasterScanner):
             )
         self._waveform = new_waveform
 
+    @property
+    def enabled(self) -> bool:
+        """
+        Indicates whether the scanner is currently enabled. 
+        
+        When True, the scanner will scan a waveform for each received trigger.
+        Setting this property to False disables scanner activity.
+        """
+        pass
+
+    @enabled.setter
+    def enabled(self, new_state: bool):
+        pass
+
+    @property
+    def samples_per_period(self) -> int:
+        """
+        Number of analog output samples per slow axis scanner period.
+        
+        """
+        period = 1 / self.frequency
+        # The actual scan period is reduced by the scan re-arm time, which
+        # should occur within the flyback time.
+        samples = (period - self.REARM_TIME) * self._sample_rate
+
+        return int(samples)
+
+    def start(self):
+        # Instantiate task object
+        self._task = nidaqmx.Task("Galvo slow raster scanner")
+        self._task.ao_channels.add_ao_voltage_chan(
+            physical_channel=self._control_channel
+        )
+
+        # Check whether hardware output buffer size is large enough
+        # It may be possible to 'stream' output data to the device in case of a 
+        # large output waveform, but not yet tested. Also, it's easy enough to 
+        # reduce the sample output rate.
+        if self.samples_per_period > self._task.out_stream.output_onbrd_buf_size:
+            raise RuntimeError(
+                "Error loading slow axis scan waveform to card: too many samples. "
+                "Try reducing the sample rate."
+            )
+        
+        self._task.timing.cfg_samp_clk_timing(
+            rate=self._sample_rate,
+            sample_mode=AcquisitionType.FINITE,
+            samps_per_chan=self.samples_per_period
+        )
+
+        self._task.triggers.start_trigger.cfg_dig_edge_start_trig(
+            trigger_source=self._trigger_channel
+        )
+        self._task.triggers.start_trigger.retriggerable = True
+        #self._task.out_stream.regen_mode = RegenerationMode.DONT_ALLOW_REGENERATION
+
+        # Write the waveform to the buffer
+        self._task.write(waveform, auto_start=False)
+
 
 # Testing
 if __name__ == "__main__":
@@ -206,13 +316,20 @@ if __name__ == "__main__":
     #     "angle_limits": {"min": "-13.0 deg", "max": "13.0 deg"},
     #     "analog_control_range" : {"min": "0 V", "max": "5 V"},
     #     "frequency": "7910 Hz",
-    #     "amplitude_control_channel": "Dev1/ao3"
+    #     "amplitude_control_channel": "Dev1/ao2"
     # }
     # scanner = ResonantScannerViaNI(**config)
 
     config = {
         "axis": "x",
         "angle_limits": {"min": "-15.0 deg", "max": "15.0 deg"},
+        "control_channel": "Dev1/ao3",
+        "trigger_channel": "/Dev1/PFI14",
+        "sample_rate": "50 kHz"
     }
-
     scanner = GalvoSlowRasterScannerViaNI(**config)
+
+    scanner.frequency = 7910 / (256+16)
+    scanner.start()
+
+    None
