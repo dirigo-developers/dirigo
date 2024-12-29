@@ -12,7 +12,8 @@ class Acquisition(threading.Thread, ABC):
     """
     REQUIRED_RESOURCES: list[str] = None
     SPEC_LOCATION: str = None
-    def __init__(self, hw:Hardware, data_queue:queue.Queue, spec):
+    
+    def __init__(self, hw: Hardware, data_queue: queue.Queue, spec):
         super().__init__()
         self.hw = hw
         self.spec = spec

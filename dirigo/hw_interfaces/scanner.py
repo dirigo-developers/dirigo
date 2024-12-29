@@ -11,27 +11,21 @@ Dirigo scanner interface.
 
 class RasterScanner(ABC):
     """Abstraction of a single raster scanner axis."""
-    def __init__(self, **kwargs):
+    VALID_AXES = {'x', 'y'}
+    def __init__(self, axis: str, angle_limits: dict, **kwargs):
         """
         Initialize the raster scanner with parameters from a dictionary.
 
         Args:
-            kwargs: A dictionary containing initialization parameters.
-                Required keys:
-                - axis (str): The axis label ('x' or 'y').
-                - angle_limits (dict): A dictionary with 'min' and 'max' keys
-                  defining the scan angle range in degrees.
+            - axis (str): The axis label. See `VALID_AXES` for options.
+            - angle_limits (dict): A dictionary with 'min' and 'max' keys defining the scan angle range.
         """
-        axis = kwargs.get('axis')
-        if axis not in {'x', 'y'}:
-            raise ValueError("axis must be 'x' or 'y'.")
+        if axis not in self.VALID_AXES: 
+            raise ValueError(f"axis must be one of {', '.join(self.VALID_AXES)}.")
         self._axis = axis
 
-        angle_limits = kwargs.get('angle_limits')
         if not isinstance(angle_limits, dict):
-            raise ValueError(
-                "angle_limits must be a dictionary."
-            )
+            raise ValueError("`angle_limits` must be a dictionary.")
         missing_keys = {'min', 'max'} - angle_limits.keys()
         if missing_keys:
             raise ValueError(
@@ -41,11 +35,7 @@ class RasterScanner(ABC):
 
     @property
     def axis(self) -> str:
-        """
-        The axis along which the scanner operates.
-
-        Valid values: 'x' or 'y'
-        """
+        """The axis along which the scanner operates."""
         return self._axis
 
     @property
@@ -62,23 +52,30 @@ class RasterScanner(ABC):
         Setting this property updates the scan amplitude. Implementations should
         document whether changes have effect immediately, at the beginning of
         the next period, or neither.
+
+        If amplitude is not adjustable, implementations should raise 
+        NotImplementedError in setter.
         """
         pass
 
     @amplitude.setter
     @abstractmethod
-    def amplitude(self, value: dirigo.Angle | float):
+    def amplitude(self, value: dirigo.Angle):
         pass
 
     @property
     @abstractmethod
     def frequency(self) -> dirigo.Frequency:
-        """The scan frequency."""
+        """The scan frequency.
+        
+        If frequency is not adjustable, implementations should raise 
+        NotImplementedError in setter.
+        """
         pass
 
     @frequency.setter
     @abstractmethod
-    def frequency(self, value: dirigo.Frequency | float):
+    def frequency(self, value: dirigo.Frequency):
         pass
 
     @property
@@ -88,6 +85,9 @@ class RasterScanner(ABC):
         Describes the scan angle waveform.
 
         Valid options: 'sinusoid', 'sawtooth', 'triangle'
+
+        If waveform is not adjustable, implementations should raise 
+        NotImplementedError in setter.
         """
         pass
 
@@ -102,7 +102,7 @@ class FastRasterScanner(RasterScanner):
 
     @property
     @abstractmethod
-    def enabled(self) -> bool: # Think on: should this be in RasterScanner?
+    def enabled(self) -> bool: # Think on: should this be in RasterScanner? Should it instead be methods start/stop
         """
         Indicates whether the scanner is currently enabled.
         
@@ -136,7 +136,7 @@ class ResonantScanner(FastRasterScanner):
         self._frequency = frequency_obj
     
     @property
-    def frequency(self):
+    def frequency(self) -> dirigo.Frequency:
         """
         Returns the nominal scanner frequency. 
         
@@ -149,7 +149,7 @@ class ResonantScanner(FastRasterScanner):
         raise NotImplementedError("Frequency is fixed for resonant scanners.")
     
     @property
-    def waveform(self):
+    def waveform(self) -> str:
         return 'sinusoid'
     
     @waveform.setter
@@ -158,16 +158,33 @@ class ResonantScanner(FastRasterScanner):
 
 
 class PolygonScanner(FastRasterScanner):
-    # WIP
+    """
+    Abstraction for polygon motor assembly scanner.
+    """
+    def __init__(self, facet_count: int, **kwargs):
+        super().__init__(**kwargs)
+        self._facet_count = facet_count
 
     @property
-    def waveform(self):
+    def facet_count(self) -> int:
+        return self._facet_count
+
+    @property
+    def amplitude(self) -> dirigo.AngleRange:
+        theta = 360 / self.facet_count
+        return dirigo.AngleRange(min=f"{-theta} deg", max=f"{theta} deg")
+
+    @amplitude.setter
+    def amplitude(self, _):
+        raise NotImplementedError("Amplitude is not adjustable for polygonal scanners.")
+
+    @property
+    def waveform(self) -> str:
         return 'sawtooth'
     
     @waveform.setter
     def waveform(self, value):
-        NotImplementedError("Waveform is sawtooth for polygonal scanners.")
-
+        raise NotImplementedError("Waveform is sawtooth for polygonal scanners.")
 
 
 class SlowRasterScanner(RasterScanner):

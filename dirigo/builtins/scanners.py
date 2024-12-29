@@ -152,7 +152,7 @@ class GalvoSlowRasterScannerViaNI(SlowRasterScanner):
     REARM_TIME = dirigo.Time("1 ms") # time to allow NI card to rearm after outputing waveform
 
     def __init__(self, control_channel: str, trigger_channel: str, 
-                 sample_rate : str, **kwargs):
+                 sample_rate: str, **kwargs):
         super().__init__(**kwargs)
 
         # Validated and set ampltidue control analog channel
@@ -306,6 +306,7 @@ class GalvoSlowRasterScannerViaNI(SlowRasterScanner):
         #self._task.out_stream.regen_mode = RegenerationMode.DONT_ALLOW_REGENERATION
 
         # Write the waveform to the buffer
+        waveform = 1
         self._task.write(waveform, auto_start=False)
 
 

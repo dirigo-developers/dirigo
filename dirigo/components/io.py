@@ -81,7 +81,7 @@ class LaserConfig(UnitAwareDataclass):
 
 
 @dataclass
-class ScannerRange(UnitAwareDataclass):
+class ScannerRange(UnitAwareDataclass): # REMOVE?
     voltage_fast: list[float]
     voltage_slow: list[float]
     angle_fast: float
@@ -114,7 +114,7 @@ class ScannerRange(UnitAwareDataclass):
 
 
 @dataclass
-class ScannerOptics(UnitAwareDataclass):
+class ScannerOptics(UnitAwareDataclass): # REMOVE?
     relay_mag: int
     objective_fl: float
 
@@ -126,7 +126,7 @@ class ScannerOptics(UnitAwareDataclass):
 
 
 @dataclass
-class ScannerWiring: # no units
+class ScannerWiring: # no units # REMOVE
     fast_scanner_signal_out: str
     slow_scanner_signal_out: str
     fast_scanner_sync_in: str
@@ -135,7 +135,7 @@ class ScannerWiring: # no units
 
 
 @dataclass
-class ScannerConfig(UnitAwareDataclass):
+class ScannerConfig(UnitAwareDataclass): # REMOVE
     fast_axis: str
     nominal_scanner_frequency: float
     flip_fast: bool
@@ -193,7 +193,6 @@ class StageConfig(UnitAwareDataclass):
 class SystemConfig:
     logger: LoggerConfig
     laser: LaserConfig
-    scanner: ScannerConfig
     optics: dict
     digitizer: dict
     stage: dict
@@ -206,12 +205,6 @@ class SystemConfig:
         return cls(
             logger=LoggerConfig(**data.get("logger", {})),
             laser=LaserConfig.parse_from_dict(data["laser"]),
-            scanner=ScannerConfig(
-                **{k: v for k, v in data.get("scanner", {}).items() if k not in ("scan_range", "optics", "wiring")},
-                scan_range=ScannerRange.parse_from_dict(data["scanner"]["scan_range"]),
-                optics=ScannerOptics.parse_from_dict(data["scanner"]["optics"]),
-                wiring=ScannerWiring(**data["scanner"].get("wiring", {}))
-            ),
             optics=data['optics'],
             digitizer=data["digitizer"],
             stage=data["stage"],

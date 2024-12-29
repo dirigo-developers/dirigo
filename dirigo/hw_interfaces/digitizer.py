@@ -40,13 +40,13 @@ class Channel(ABC):
     @property
     @abstractmethod
     def index(self) -> int:
-        """Index of the channel (e.g., 0-based index)."""
+        """Index of the channel (0-based index)."""
         pass
 
     @property
     @abstractmethod
     def coupling(self) -> str:
-        """Signal coupling mode (e.g., 'AC', 'DC')."""
+        """Signal coupling mode (e.g., "AC", "DC")."""
         pass
 
     @coupling.setter
@@ -67,7 +67,7 @@ class Channel(ABC):
     @property
     @abstractmethod
     def impedance(self) -> str:
-        """Input impedance setting (e.g., 50 Ohm, 1 MOhm)."""
+        """Input impedance setting (e.g., "50 Ohm", "1 MOhm")."""
         pass
 
     @impedance.setter
@@ -270,7 +270,7 @@ class Trigger(ABC):
 
     @property
     @abstractmethod
-    def external_range(self) -> str:
+    def external_range(self) -> str: # return dirigo.VoltageRange?
         """Voltage range for external triggers."""
         pass
     
@@ -345,16 +345,6 @@ class Acquire(ABC):
         """
         pass
 
-    @property
-    @abstractmethod
-    def record_duration(self) -> dirigo.Time:
-        """Record duration.
-
-        Use `record_length` for specifying the same setting in terms of number 
-        samples. 
-        """
-        pass
-
     @record_length.setter
     @abstractmethod
     def record_length(self, length: int):
@@ -362,6 +352,16 @@ class Acquire(ABC):
         
         Record length (in number of samples) must be greater than 
         `record_length_minimum` and divisible by `record_length_resolution`.
+        """
+        pass
+
+    @property
+    @abstractmethod
+    def record_duration(self) -> dirigo.Time:
+        """Record duration.
+
+        Use `record_length` for specifying the same setting in terms of number 
+        samples. 
         """
         pass
 

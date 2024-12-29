@@ -122,24 +122,37 @@ class Stage(ABC):
     @max_velocity.setter
     @abstractmethod
     def max_velocity(self, value:dirigo.UnitQuantity):
-        """Sets the maximum velocity."""
+        pass
+
+    @property
+    @abstractmethod
+    def acceleration(self) -> dirigo.UnitQuantity:
+        """
+        Return the current acceleration used during ramp up/down phase of move.
+        """
+        pass
+
+    @acceleration.setter
+    @abstractmethod
+    def acceleration(self, value: dirigo.UnitQuantity):
         pass
 
 
 class LinearStage(Stage):
     VALID_AXES = {'x', 'y', 'z'}
     
-    def __init__(self, limits: dict, **kwargs):
-        super().__init__(**kwargs)
+    # Thoughts on scrapping this?
+    # def __init__(self, limits: dict, **kwargs):
+    #     super().__init__(**kwargs)
 
-        # Validate limits
-        self._validate_limits_dict(limits)
-        self._limits = dirigo.PositionRange(**limits)
+    #     # Validate limits
+    #     self._validate_limits_dict(limits)
+    #     self._limits = dirigo.PositionRange(**limits)
 
-    @property
-    def position_limits(self) -> dirigo.PositionRange:
-        """Returns an object describing the stage spatial position limits."""
-        return self._limits
+    # @property
+    # def position_limits(self) -> dirigo.PositionRange:
+    #     """Returns an object describing the stage spatial position limits."""
+    #     return self._limits
     
     @abstractmethod 
     def move_to(self, position: dirigo.Position, blocking: bool = False):
@@ -155,7 +168,7 @@ class LinearStage(Stage):
     @abstractmethod
     def max_velocity(self) -> dirigo.Velocity:
         """
-        Return the current maximum velocity setting.
+        Return the maximum velocity used in move operations.
 
         Note that this is the imposed velocity limit for moves. It is not
         necessarily the maximum attainable velocity for this stage.
@@ -168,87 +181,43 @@ class LinearStage(Stage):
         """Sets the maximum velocity."""
         pass
 
-
-import time
-
-import clr
-kinesis_location = "C:\\Program Files\\Thorlabs\\Kinesis\\"
-clr.AddReference(kinesis_location + "Thorlabs.MotionControl.DeviceManagerCLI.dll")
-clr.AddReference(kinesis_location + "Thorlabs.MotionControl.GenericMotorCLI.dll")
-clr.AddReference(kinesis_location + "Thorlabs.MotionControl.Benchtop.BrushlessMotorCLI.dll")
-from Thorlabs.MotionControl.DeviceManagerCLI import DeviceManagerCLI
-from Thorlabs.MotionControl.GenericMotorCLI import MotorDirection, DeviceUnitConverter
-from Thorlabs.MotionControl.Benchtop.BrushlessMotorCLI import *
-from Thorlabs.MotionControl.Benchtop.BrushlessMotorCLI import BenchtopBrushlessMotor
-from System import Decimal
-
-
-class ThorlabsLinearMotor(LinearStage): # alt name: Linear brushless?
-    MOVE_TIMEOUT = dirigo.Time('10 s')
-
-    def __init__(self, position_limits: dict = None, **kwargs):
-        super().__init__(**kwargs)
-        # position limits may be set manually in system_config.toml, or omitted to use 
-        if position_limits is None:
-            self._position_limits = None # position limit property will read limits from API
-        else:
-            self._position_limits = dirigo.PositionRange(**position_limits)
-        # more TODO
-
-    @property # could be cached property -- but don't expect big increase in speed
-    def position_limits(self) -> dirigo.PositionRange:
-        if self._position_limits is None:
-            min_position = Decimal.ToDouble(
-                self._channel.AdvancedMotorLimits.LengthMinimum) / 1000
-            max_position = Decimal.ToDouble(
-                self._channel.AdvancedMotorLimits.LengthMaximum) / 1000
-            return dirigo.PositionRange(min_position, max_position)
-        else:
-            return self._position_limits
-
-    def move_to(self, position: dirigo.Position, blocking: bool = False):
+    @property
+    @abstractmethod
+    def acceleration(self) -> dirigo.Acceleration:
         """
-        Initiate move to specified spatial position.
-
-        Choose whether to return immediately (blocking=False, default) or to
-        wait until finished moving (blocking=True).
+        Return the acceleration used during ramp up/down phase of move.
         """
-        #validate move
-        if not self.position_limits.within_range(position):
-            raise ValueError(
-                f"Requested move, ({position}) beyond limits, "
-                f"min: {self.position_limits.min}, max: min: {self.position_limits.max}"
-            )
-        
-        timeout_or_blocking = 1000 * self.MOVE_TIMEOUT if blocking else 0
-        self._channel.MoveTo(position * 1000, timeout_or_blocking) # 2nd arg=0 means non-blocking
-            
-        self._last_move_timestamp = time.perf_counter() # to fix bug where position goes to 0.0 immediately after issuing command
+        pass
 
-    def stop(self):
-        """Halts motion."""
-        self._channel.StopImmediate()
+    @acceleration.setter
+    @abstractmethod
+    def acceleration(self, value: dirigo.Acceleration):
+        pass
+
+
+class MultiAxisStage(ABC):
+    """
+    Dirigo interface for an X, Y, and/or Z sample translation stage.
+    """
+    # TODO, device info?
 
     @property
-    def max_velocity(self) -> dirigo.Velocity:
-        """
-        Return the current maximum velocity setting.
+    @abstractmethod
+    def x(self) -> None | LinearStage:
+        """If available, returns reference to the X stage axis"""
+        pass
+    
+    @property
+    @abstractmethod
+    def y(self) -> None | LinearStage:
+        """If available, returns reference to the Y stage axis"""
+        pass
 
-        Note that this is the imposed velocity limit for moves. It is not
-        necessarily the maximum attainable velocity for this stage.
-        """
-        vel_params = self._channel.GetVelocityParams()
-        v_max = Decimal.ToDouble(vel_params.MaxVelocity) 
-        return dirigo.Velocity(v_max / 1000)  # API uses velocity in mm/s
-
-    @max_velocity.setter
-    def max_velocity(self, new_velocity: dirigo.Velocity):
-        # todo, validate
-        vel_params = self._channel.GetVelocityParams()
-        vel_params.MaxVelocity = Decimal(new_velocity * 1000) # API uses velocity in mm/s
-        self._channel.SetVelocityParams(vel_params)
-
-
+    @property
+    @abstractmethod
+    def z(self) -> None | LinearStage:
+        """If available, returns reference to the Z stage axis"""
+        pass
 
 
 class RotationStage(Stage):
@@ -291,30 +260,28 @@ class RotationStage(Stage):
     @max_velocity.setter
     @abstractmethod
     def max_velocity(self, value:dirigo.AngularVelocity):
-        """Sets the maximum angular velocity."""
         pass
 
-
-
-class OLD:
     @property
     @abstractmethod
-    def acceleration(self) -> float:
-        """Return the current acceleration setting (in meters/second^2.)"""
+    def acceleration(self) -> dirigo.AngularAcceleration:
+        """
+        Return the angular acceleration used during ramp up/down phase of move.
+        """
         pass
 
     @acceleration.setter
     @abstractmethod
-    def acceleration(self, value:float):
-        """Sets the acceleration (in meters/second^2)."""
+    def acceleration(self, value: dirigo.AngularAcceleration):
         pass
 
 
+
+#class OLD:
     # TODO, not sure whether to keep this
     # @abstractmethod
     # def move_at_velocity(self, direction:str, velocity:float): 
     #     pass
-
 
     # # TODO, why do we need this?
     # @property
@@ -329,10 +296,12 @@ class OLD:
     #         time.sleep(sleep_period)
 
 
-class LinearMotorStageAxis(Stage):
+# Not sure whether distinction necessary
+class LinearMotorStageAxis(LinearStage):
     """
     Represents ...
     """
+    pass
 
 
 class StepperMotorStageAxis(Stage):
@@ -342,39 +311,3 @@ class StepperMotorStageAxis(Stage):
     pass
 
 
-class MultiAxisStage(ABC):
-    """
-    Dirogo interface for a sample translation stage. Comprises one or more axes. 
-    """
-
-    @property
-    @abstractmethod
-    def x(self) -> None | Stage:
-        """If available, returns reference to the X stage axis"""
-        pass
-    
-    @property
-    @abstractmethod
-    def y(self) -> None | Stage:
-        """If available, returns reference to the Y stage axis"""
-        pass
-
-    @property
-    @abstractmethod
-    def z(self) -> None | Stage:
-        """If available, returns reference to the Z stage axis"""
-        pass
-
-
-
-# for testing
-if __name__ == "__main__":
-    
-    config = {
-        "axis": "x",
-        "limits": {"min": "0 mm", "max": "55 mm"} 
-    }
-
-    stage1 = LinearStage(**config)
-
-    None

@@ -2,6 +2,8 @@ import importlib.metadata
 from pathlib import Path
 import queue
 
+from platformdirs import user_config_dir
+
 from dirigo.components.io import SystemConfig
 from dirigo.components.hardware import Hardware
 from dirigo.sw_interfaces import Acquisition
@@ -15,11 +17,18 @@ class Dirigo:
     """
 
     def __init__(self):
-        path = Path(__file__).parent.parent / "config/system_config.toml"
-        self.sys_config = SystemConfig.from_toml(path)
+        # Retrieve system_config.toml
+        config_dir = Path(user_config_dir(appauthor="Dirigo", appname="Dirigo"))
+        if not config_dir.exists():
+            raise FileNotFoundError(
+                f"Could not find system configuration file. "
+                f"Expected to find directory: {config_dir}"
+            )
+        self.sys_config = SystemConfig.from_toml(config_dir / "system_config.toml")
+
         self.hw = Hardware(self.sys_config) # TODO, should this be 'resources'?
 
-        self.data_queue = queue.Queue() # TODO, probably needs to be reset periodically
+        self.data_queue = queue.Queue() 
 
 
     def acquisition_factory(self, type: str, spec_name: str = "default") -> Acquisition:
@@ -30,19 +39,21 @@ class Dirigo:
         entry_pts = importlib.metadata.entry_points(group="dirigo_acquisitions")
 
         # Look for the specified plugin by name
-        for ep in entry_pts:
-            if ep.name == type:
+        for entry_pt in entry_pts:
+            if entry_pt.name == type:
                 # Load and instantiate the plugin class
                 try:
-                    plugin_class:Acquisition = ep.load()
-                    # Instantiate and return the acquisition worker
+                    plugin_class: Acquisition = entry_pt.load()
+                    
+                    # Get the acquisition specification
                     spec = plugin_class.get_specification(spec_name)
+
+                    # Instantiate and return the acquisition worker
                     return plugin_class(self.hw, self.data_queue, spec)  
+                
                 except Exception as e:
-                    raise RuntimeError(
-                        f"Failed to load Acquisition '{type}': {e}"
-                    )
-        
+                    raise RuntimeError(f"Failed to load Acquisition '{type}': {e}")
+                                
         # If the plugin was not found, raise an error
         raise ValueError(
             f"Acquisition '{type}' not found in entry points."

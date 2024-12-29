@@ -1,9 +1,11 @@
 import tkinter as tk
 from tkinter import ttk
 
-from dirigo import Dirigo
+import dirigo
+from dirigo.main import Dirigo
 from dirigo.hw_interfaces.digitizer import SampleClock, Channel, Trigger
-from dirigo.hw_interfaces import FastRasterScanner, Stage
+from dirigo.hw_interfaces.scanner import FastRasterScanner
+from dirigo.hw_interfaces.stage import MultiAxisStage
 
 
 
@@ -52,7 +54,7 @@ class SampleClockFrame(ttk.LabelFrame):
             self, 
             self.source_var, 
             sample_clock.source,
-            *sample_clock.source_options,
+            *sorted(sample_clock.source_options, key=lambda x: len(x)), # this sorting puts Internal Clock at the top
             command=self._source_callback
         )
         self.source_menu.grid(row=0, column=1, sticky="e", padx=10, pady=5)
@@ -94,7 +96,7 @@ class SampleClockFrame(ttk.LabelFrame):
                 self, 
                 self.rate_var,
                 self._sample_clock.rate,
-                *self._sample_clock.rate_options,
+                *[str(x) for x in sorted(self._sample_clock.rate_options)], # sorts and formats the rate options
                 command=lambda value: setattr(self._sample_clock, 'rate', value)
             )
 
@@ -219,7 +221,7 @@ class ChannelFrame(ttk.Frame):
                 self,
                 self.range_var,
                 self._channel.range,
-                *self._channel.range_options,
+                *sorted(self._channel.range_options, key=lambda x: -len(x)), # bit hacky: sorting strategy
                 command=lambda value: setattr(self._channel, 'range', value)
             )
 
@@ -262,8 +264,8 @@ class TriggerFrame(ttk.LabelFrame):
         self.level_var = tk.StringVar(value=trigger.level)
         self.level_spinbox = ttk.Spinbox(
             self, 
-            from_=trigger.level_min,
-            to=trigger.level_max,
+            from_=None if trigger.level_limits is None else trigger.level_limits.min,
+            to=None if trigger.level_limits is None else trigger.level_limits.max,
             increment=0.1,
             textvariable=self.level_var,
             wrap=False,
@@ -312,19 +314,21 @@ class FastRasterScannerFrame(ttk.LabelFrame):
         self.level_var = tk.StringVar(value=scanner.amplitude)
         self.level_spinbox = ttk.Spinbox(
             self, 
-            from_=scanner.min_scan_angle,
-            to=scanner.max_scan_angle,
+            from_=0,
+            to=scanner.angle_limits.max_degrees - scanner.angle_limits.min_degrees,
             increment=2.0, # arbitrary, may want to define by interface?
             textvariable=self.level_var,
             wrap=False,
             width=8,
-            command=lambda: setattr(scanner, 'amplitude', float(self.level_var.get()))
+            command=lambda: setattr(
+                scanner, 'amplitude', dirigo.Angle(f"{self.level_var.get()} deg")
+            )
         )
         self.level_spinbox.grid(row=2, column=1, sticky="e", padx=10, pady=5)
 
 
 class StageFrame(ttk.LabelFrame):
-    def __init__(self, parent, stage:Stage):
+    def __init__(self, parent, stage:MultiAxisStage):
         super().__init__(parent, text="Stage")
 
         # X Axis
@@ -334,14 +338,14 @@ class StageFrame(ttk.LabelFrame):
         self.x_pos_var = tk.StringVar(value=1000 * stage.x.position)
         self.x_pos_spinbox = ttk.Spinbox(
             self, 
-            from_=1000 * stage.x.min_position,
-            to=1000 * stage.x.max_position,
+            from_=1000 * stage.x.position_limits.min,
+            to=1000 * stage.x.position_limits.max,
             increment=10.0, # arbitrary, may want to define by interface?
             textvariable=self.x_pos_var,
             wrap=False,
             width=8,
-            command=lambda: stage.x.move_to_position(
-                float(self.x_pos_var.get())/1000 # convert to meters before passing to interface
+            command=lambda: stage.x.move_to(
+                dirigo.Position(float(self.x_pos_var.get()) / 1000) # convert from mm to meters
             )
         )
         self.x_pos_spinbox.grid(row=0, column=1, sticky="e", padx=10, pady=5)
@@ -353,14 +357,14 @@ class StageFrame(ttk.LabelFrame):
         self.y_pos_var = tk.StringVar(value=1000 * stage.y.position)
         self.y_pos_spinbox = ttk.Spinbox(
             self, 
-            from_=1000 * stage.y.min_position,
-            to=1000 * stage.y.max_position,
+            from_=1000 * stage.y.position_limits.min,
+            to=1000 * stage.y.position_limits.max,
             increment=10.0, # arbitrary, may want to define by interface?
             textvariable=self.y_pos_var,
             wrap=False,
             width=8,
-            command=lambda: stage.y.move_to_position(
-                float(self.y_pos_var.get())/1000 # convert to meters before passing to interface
+            command=lambda: stage.y.move_to(
+                dirigo.Position(float(self.y_pos_var.get()) / 1000) # convert to meters
             )
         )
         self.y_pos_spinbox.grid(row=1, column=1, sticky="e", padx=10, pady=5)

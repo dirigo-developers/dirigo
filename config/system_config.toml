@@ -45,7 +45,11 @@ detector1.label = "Chan B"
 
 [stage]
 type = "BBD102"
-# Nominal speeds (used for out-of-acquisition imaging)
+x_config.axis = "x"
+x_config.position_limits = {min = "1 mm", max = "99 mm"}
+y_config.axis = "y"
+y_config.position_limits = {min = "1 mm", max = "74 mm"}
+# Nominal speed, anything else?
 
 [fast_raster_scanner]
 type = "ecu0_resonant_scanner"

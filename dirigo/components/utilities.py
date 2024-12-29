@@ -66,6 +66,25 @@ class UnitQuantity(float):
 
         value_str, _, unit = match.groups()
         return float(value_str), unit
+    
+    def _get_optimal_unit(self):
+        """
+        Determines the most appropriate unit for the current base value.
+
+        Returns:
+            tuple[float, str]: The converted value and the corresponding unit.
+        """
+        if not self.ALLOWED_UNITS_AND_MULTIPLIERS:
+            raise ValueError("No allowed units defined for this class.")
+
+        # Sort units by multiplier in descending order
+        sorted_units = sorted(self.ALLOWED_UNITS_AND_MULTIPLIERS.items(), key=lambda x: x[1], reverse=True)
+        for unit, multiplier in sorted_units:
+            if abs(self / multiplier) >= 1:
+                return self / multiplier, unit
+        # Default to the smallest unit
+        smallest_unit, smallest_multiplier = sorted_units[-1]
+        return self / smallest_multiplier, smallest_unit
 
     @property
     def unit(self) -> str:
@@ -73,8 +92,9 @@ class UnitQuantity(float):
         return self._unit
 
     def __str__(self) -> str:
-        """Return a human-readable string with the original value and unit."""
-        return f"{self._original_value} {self._unit}"
+        """Return a human-readable string with the optimal unit."""
+        value, unit = self._get_optimal_unit()
+        return f"{value:.3g} {unit}"  # Use 3 significant digits
 
     def __repr__(self):
         return str(self)
@@ -98,8 +118,8 @@ class Angle(UnitQuantity):
     Represents an angular value with units (e.g. rad, deg).
     """
     ALLOWED_UNITS_AND_MULTIPLIERS = {
-        "rad": 1,           # Base unit: radians
-        "deg": math.pi/180  # degrees to radians
+        "rad": 1,               # Base unit: radians
+        "deg": math.pi / 180    # degrees to radians
     }
 
 
@@ -112,6 +132,21 @@ class Frequency(UnitQuantity):
         "kHz": 1e3,     # kilohertz to hertz
         "MHz": 1e6,     # megahertz to hertz
         "GHz": 1e9,     # gigahertz to hertz
+    }
+
+
+class SampleRate(UnitQuantity):
+    """
+    Represents a samples per second rate value with units (e.g. S/s, kS/s, MS/s, GS/s).
+
+    Dimensionally equivalent to Frequency, but with slight modification to unit
+    labels to benefit specific situations (e.g. digitizer rate).
+    """
+    ALLOWED_UNITS_AND_MULTIPLIERS = {
+        "S/s": 1,       # base unit: samples per second
+        "kS/s": 1e3,    # kilo samples per second to samples per second
+        "MS/s": 1e6,    # mega samples per second to samples per second
+        "GS/s": 1e9,    # giga kilo samples per second to samples per second
     }
 
 
@@ -136,10 +171,10 @@ class Position(UnitQuantity):
     """
     ALLOWED_UNITS_AND_MULTIPLIERS = {
         "m": 1,         # base unit: meters
-        "mm": 1e3,      # millimeters to meters
-        "μm": 1e6,      # micrometers to meters
-        "nm": 1e9,      # nanometers to meters
-        "km": 1e-3      # kilometers to meters
+        "mm": 1e-3,     # millimeters to meters
+        "μm": 1e-6,     # micrometers to meters
+        "nm": 1e-9,     # nanometers to meters
+        "km": 1e3       # kilometers to meters
     }
 
 
@@ -149,8 +184,8 @@ class Velocity(UnitQuantity):
     """
     ALLOWED_UNITS_AND_MULTIPLIERS = {
         "m/s": 1,       # base unit: meters per second
-        "mm/s": 1e3,    # millimeters per second to meters per second
-        "μm/s": 1e6,    # micrometers per second to meters per second
+        "mm/s": 1e-3,   # millimeters per second to meters per second
+        "μm/s": 1e-6,   # micrometers per second to meters per second
     }
 
 
@@ -161,6 +196,27 @@ class AngularVelocity(UnitQuantity):
     ALLOWED_UNITS_AND_MULTIPLIERS = {
         "rad/s": 1,             # base unit: radians per second
         "deg/s": math.pi / 180  # degrees per second to radians per second
+    }
+
+
+class Acceleration(UnitQuantity):
+    """
+    Represents a velocity value with units (e.g. m/s^2, mm/s^2, μm/s^2)
+    """
+    ALLOWED_UNITS_AND_MULTIPLIERS = {
+        "m/s^2": 1,     # base unit: meters per second squared
+        "mm/s^2": 1e-3, # millimeters per second squared to meters per second squared
+        "μm/s^2": 1e-6, # micrometers per second squared to meters per second squared
+    }
+
+
+class AngularAcceleration(UnitQuantity):
+    """
+    Represents an angular velocity value with units (e.g. rad/s, deg/s)
+    """
+    ALLOWED_UNITS_AND_MULTIPLIERS = {
+        "rad/s^2": 1,               # base unit: radians per second squared
+        "deg/s^2": math.pi / 180    # degrees per second squared to radians per second squared
     }
 
 
@@ -269,6 +325,14 @@ class PositionRange(RangeWithUnits):
     Represents a position range with units (e.g. m, mm, μm, nm, km)
     """
     UNIT_QUANTITY_CLASS = Position
+
+
+class FrequencyRange(RangeWithUnits):
+    """
+    Represents a position range with units (e.g. Hz, kHz, MHz, GHz)
+    """
+    UNIT_QUANTITY_CLASS = Frequency
+
 
 
 

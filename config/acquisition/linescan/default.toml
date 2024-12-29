@@ -1,5 +1,5 @@
 bidirectional_scanning = true
-line_width = 2e-3 # meters
+line_width = "2 mm"
 pixel_size = 2e-6 # meters
 fill_fraction = 0.9
 lines_per_buffer = 256
