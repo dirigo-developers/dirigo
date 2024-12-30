@@ -294,17 +294,18 @@ class TriggerFrame(ttk.LabelFrame):
 
 
 class FastRasterScannerFrame(ttk.LabelFrame):
-    def __init__(self, parent, scanner:FastRasterScanner):
+    def __init__(self, parent, scanner: FastRasterScanner):
         super().__init__(parent, text="Fast Raster Axis")
         self._scanner = scanner # not sure we need to hold this ref?
 
         # Enabled Checkbox
-        self.enabled_var = tk.BooleanVar(value=scanner.enabled)
+        self.enabled_var = tk.BooleanVar(value=False)
         check_button = ttk.Checkbutton(
             self, 
             text="Enabled", 
             variable=self.enabled_var,
-            command=lambda: setattr(scanner, 'enabled', self.enabled_var.get())
+            #command=lambda: setattr(scanner, 'enabled', self.enabled_var.get())
+            command=lambda: self._scanner.start() if self.enabled_var.get() else self._scanner.stop()
         )
         check_button.grid(row=0, column=0, padx=5, pady=5, sticky="w")
         

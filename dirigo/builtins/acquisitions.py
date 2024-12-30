@@ -12,7 +12,7 @@ from dirigo.sw_interfaces import Acquisition
 
 
 
-class LineAcquisitionSpec:
+class LineAcquisitionSpec(): # TODO, this could inherit from an overall AcquisitionSpec
     def __init__(
             self,
             bidirectional_scanning: bool,
@@ -75,7 +75,7 @@ class LineAcquisition(Acquisition):
     SPEC_LOCATION = Path(user_config_dir("Dirigo")) / "acquisition/linescan"
     
     def __init__(self, hw, data_queue: queue.Queue, spec: LineAcquisitionSpec):
-        """Initialized a line acquistion worker."""
+        """Initialize a line acquisition worker."""
         # Tip: since this method runs on main thread, limit to HW init tasks that will return fast, prepend slower tasks to run method
         super().__init__(hw, data_queue, spec) # stores hw and queue, checks resources
         self.spec: LineAcquisitionSpec # to refine type hints
@@ -90,6 +90,12 @@ class LineAcquisition(Acquisition):
         self.hw.digitizer.acquire.buffers_per_acquisition = spec.buffers_per_acquisition
         self.hw.digitizer.acquire.buffers_allocated = spec.buffers_allocated
 
+        # Setup scanner
+        self.hw.fast_raster_scanner.amplitude = \
+            self.hw.optics.object_position_to_scan_angle(self.spec.scan_width)
+        # for res scanner: frequency is set (fixed), waveform is set (fixed), duty cycle is set (fixed)
+        # for other scanners--TBD
+
     @classmethod
     def get_specification(cls, spec_name: str = "default"):
         spec_fn = spec_name + ".toml"
@@ -97,12 +103,10 @@ class LineAcquisition(Acquisition):
         return LineAcquisitionSpec(**spec)
 
     def run(self):
-        # Start scanner 
-        self.hw.fast_raster_scanner.amplitude = \
-            self.hw.optics.object_position_to_scan_angle(self.spec.scan_width)
-        self.hw.fast_raster_scanner.enabled = True
+        digitizer = self.hw.digitizer # for brevity in this method
 
-        digitizer = self.hw.digitizer
+        # Start scanner & digitizer
+        self.hw.fast_raster_scanner.start()        
         digitizer.acquire.start() # This includes the buffer allocation
 
         try:
@@ -112,6 +116,7 @@ class LineAcquisition(Acquisition):
                 buffer_data = digitizer.acquire.get_next_completed_buffer()
                 
                 self.data_queue.put(buffer_data)
+                print(f"Got buffer {digitizer.acquire.buffers_acquired}")
 
         finally:
             # Stop scanner
@@ -145,6 +150,7 @@ class FrameAcquisitionSpec(LineAcquisitionSpec):
         super().__init__(**kwargs)
 
         self.frame_height = dirigo.Position(frame_height)
+
         if pixel_height is not None:
             self.pixel_height = dirigo.Position(pixel_height)
         else:
@@ -152,14 +158,29 @@ class FrameAcquisitionSpec(LineAcquisitionSpec):
             self.pixel_height = self.pixel_size
 
     @property
-    def lines_per_frame(self) -> float:
-        """
-        Returns the number of lines per frame.
+    def lines_per_frame(self) -> int:
+        """Returns the number of lines per frame.
         
-        Note: The caller must decide how to handle a fractional line count 
-        (for instance, by either rounding up or down).
+        Rounds to nearest integer line number (if frame height is not divisible 
+        by pixel height).
         """
-        return self.frame_height / self.pixel_height
+        return round(self.frame_height / self.pixel_height)
+    
+    @property
+    def flyback_lines(self) -> int:
+        return 0 #??
+
+    @property
+    def records_per_buffer(self) -> int:
+        """Returns the number of digitizer records per buffer.
+
+        Includes records that may be part of the slow raster axis flyback.        
+        """
+        if self.bidirectional_scanning:
+            return (self.lines_per_frame + self.flyback_lines) // 2
+        else:
+            return self.lines_per_frame + self.flyback_lines
+
 
 
 class FrameAcquisition(LineAcquisition):
@@ -170,28 +191,33 @@ class FrameAcquisition(LineAcquisition):
         super().__init__(hw, data_queue, spec)
         self.spec: FrameAcquisitionSpec
 
-        None
+        # Set up slow scanner (fast scanner is set up in super().__init__)
+        spec.bidirectional_scanning
+        self.hw.slow_raster_scanner.amplitude = \
+            self.hw.optics.object_position_to_scan_angle(spec.frame_height)
+        self.hw.slow_raster_scanner.frequency = self.hw.fast_raster_scanner.frequency / round(spec.lines_per_frame) # flyback lines
+        self.hw.slow_raster_scanner.waveform = 'asymmetric triangle'
+        self.hw.slow_raster_scanner.duty_cycle = 0.9 # TODO calculate based on flyback lines
 
+        self.hw.slow_raster_scanner.prepare_frame_clock(self.hw.fast_raster_scanner, spec)
 
 
     @classmethod
-    def get_specification(cls, spec_name = "default"):
+    def get_specification(cls, spec_name:str = "default"):
         spec_fn = spec_name + ".toml"
         spec = load_toml(cls.SPEC_LOCATION / spec_fn)
         return FrameAcquisitionSpec(**spec)
     
     def run(self):
-        # one way to do this may be to set up slow scanner, then call super's method?
+        
         self.hw.slow_raster_scanner.start()
+
         try:
             super().run()
+
         finally:
             self.hw.slow_raster_scanner.stop()
 
-        # or a re-write:
-        # Start fast scanner
-        # Start slow scanner
 
-        pass
 
 

@@ -1,49 +1,37 @@
-import math
+import dirigo
 
 
-class LaserScanningOptics: # TODO, rework as interface?
-    def __init__(self, objective_focal_length: str|float, relay_magnification: float):
-        # validate focal length argument
-        if isinstance(objective_focal_length, str):
-            v, u = objective_focal_length.split()
-            if u.lower() in ["mm", "millimeter", "millimeters"]:
-                v = float(v) / 1000
-            elif u.lower() in ["m", "meter", "meters"]:
-                v = float(v)
-            else:
-                raise ValueError(
-                    f"Expecting objective focal length units in mm or m, got {u}"
-                )
-        self._objective_focal_length = v
+# TODO, rework as interface?
 
+class LaserScanningOptics: 
+    def __init__(self, objective_focal_length: str, relay_magnification: float):
+        self._objective_focal_length = dirigo.Position(objective_focal_length)
         self._relay_magnification = float(relay_magnification)
 
     @property
-    def objective_focal_length(self):
-        """Returns the objective focal length in meters."""
+    def objective_focal_length(self) -> dirigo.Position:
+        """Returns the objective focal length."""
         return self._objective_focal_length
     
     @property
-    def relay_magnification(self):
-        """Returns the scan relay lateral magnification"""
+    def relay_magnification(self) -> float:
+        """Returns the scan relay system (typically: scan lens + tube lens) 
+        lateral magnification.
+        """
         return self._relay_magnification
 
-    def scan_angle_to_object_position(self, angle: float) -> float:
+    def scan_angle_to_object_position(self, angle: dirigo.Angle) -> dirigo.Position:
         """
-        Return the focus position (in meters) for a certain scanner angle (in  
-        degrees, optical).
+        Return the focus position for a certain scanner angle (optical).
         """
-        angle_rad = math.pi * angle / 180
-        objective_angle_rad = angle_rad / self.relay_magnification
-        return objective_angle_rad * self.objective_focal_length
+        objective_angle = angle / self.relay_magnification
+        return dirigo.Position(objective_angle * self.objective_focal_length)
 
-    def object_position_to_scan_angle(self, position: float) -> float:
+    def object_position_to_scan_angle(self, position: dirigo.Position) -> dirigo.Angle:
         """
-        Return the scanner angle (in degrees, optical) required for a certain 
-        focus position (in meters).
+        Return the scanner angle (optical) required for a certain focus position.
         """
-        objective_angle_rad = position / self.objective_focal_length
-        angle_rad = objective_angle_rad * self.relay_magnification
-        return 180 * angle_rad / math.pi
-
+        objective_angle = position / self.objective_focal_length
+        angle = objective_angle * self.relay_magnification
+        return dirigo.Angle(angle)
 

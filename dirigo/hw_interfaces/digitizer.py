@@ -1,6 +1,7 @@
 from abc import ABC, abstractmethod
 from pathlib import Path
 
+from platformdirs import user_config_dir
 import numpy as np
 
 import dirigo
@@ -488,7 +489,7 @@ class AuxillaryIO(ABC):
 class Digitizer(ABC):
     """Abstract base class for digitizer hardware interface."""
 
-    PROFILE_LOCATION = Path(__file__).parents[2] / "config/digitizer"
+    PROFILE_LOCATION = Path(user_config_dir("Dirigo")) / "digitizer"
 
     @abstractmethod
     def __init__(self):

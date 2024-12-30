@@ -58,7 +58,8 @@ class UnitQuantity(float):
         Raises:
             ValueError: If the input string is not in the expected format.
         """
-        pattern = r"^\s*([-+]?\d+(\.\d+)?)\s*(\w+)\s*$"
+        #pattern = r"^\s*([-+]?\d+(\.\d+)?)\s*(\w+)\s*$"
+        pattern = r"^\s*([-+]?\d+(\.\d+)?)\s*([\w/]+)\s*$"
         match = re.match(pattern, quantity)
 
         if not match:
@@ -125,13 +126,14 @@ class Angle(UnitQuantity):
 
 class Frequency(UnitQuantity):
     """
-    Represents a frequency value with units (e.g. Hz, kHz, MHz, GHz)
+    Represents a frequency value with units (e.g. Hz, kHz, MHz, GHz, or rpm).
     """
     ALLOWED_UNITS_AND_MULTIPLIERS = {
         "Hz": 1,        # base unit: hertz
         "kHz": 1e3,     # kilohertz to hertz
         "MHz": 1e6,     # megahertz to hertz
         "GHz": 1e9,     # gigahertz to hertz
+        "rpm": 1/60     # rotations per minute to hertz
     }
 
 

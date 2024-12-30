@@ -73,5 +73,6 @@ if __name__ == "__main__":
     diri = Dirigo()
     
     acq = diri.acquisition_factory('frame')
+    acq.start()
 
     None

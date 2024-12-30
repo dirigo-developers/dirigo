@@ -1,12 +1,16 @@
+import math
+
+import numpy as np
 import nidaqmx
 import nidaqmx.errors
 from nidaqmx.system import System as NISystem
-from nidaqmx.constants import AcquisitionType, RegenerationMode
+from nidaqmx.constants import AcquisitionType, LineGrouping, Edge
 
 import dirigo
 from dirigo.hw_interfaces.scanner import (
-    ResonantScanner,
-    SlowRasterScanner
+    RasterScanner,
+    FastRasterScanner, SlowRasterScanner,
+    ResonantScanner, GalvoScanner
 )
 
 
@@ -70,11 +74,11 @@ def validate_ni_channel(channel_name: str):
 
 
 
-class ResonantScannerViaNI(ResonantScanner):
+class ResonantScannerViaNI(ResonantScanner, FastRasterScanner):
     """
     Resonant scanner operated via an NIDAQ MFIO card.
     """
-    def __init__(self, amplitude_control_channel: str, **kwargs):
+    def __init__(self, amplitude_control_channel: str, analog_control_range: dict, **kwargs):
         super().__init__(**kwargs)
 
         # Validated and set ampltidue control analog channel
@@ -82,7 +86,6 @@ class ResonantScannerViaNI(ResonantScanner):
         self._amplitude_control_channel = amplitude_control_channel
 
         # Validate the analog control range
-        analog_control_range = kwargs.get('analog_control_range')
         if not isinstance(analog_control_range, dict):
             raise ValueError(
                 "analog_control_range must be a dictionary."
@@ -135,133 +138,143 @@ class ResonantScannerViaNI(ResonantScanner):
         self._amplitude = new_ampl
 
     @property
-    def enabled(self) -> bool:
-        pass
-
-    @enabled.setter
-    def enabled(self, new_state: bool):
-        pass
-
-    @property
     def analog_control_range(self) -> dirigo.VoltageRange:
         """Returns an object describing the analog control range."""
         return self._analog_control_range
 
 
-class GalvoSlowRasterScannerViaNI(SlowRasterScanner):
+class FrameClock:
+    """
+    Counts fast scanner clock pulses and emits a frame clock signal.
+    
+    This class is used to synchronize a slow scanner with a fast scanner.
+    It generates a digital output signal based on a specified number of 
+    fast scanner periods per slow scanner frame.
+
+    Note:
+        Currently supports only a 50% duty cycle.
+
+    Attributes:
+        LINE_CLOCK_MAX_ERROR (float): Safety margin added to the maximum 
+            expected line clock frequency as required by NIDAQmx.
+    """
+
+    LINE_CLOCK_MAX_ERROR = 0.1  # Add 10% safety margin for maximum frequency
+
+    def __init__(self, 
+                 line_clock_channel: str, 
+                 frame_clock_channel: str,
+                 line_clock_frequency: dirigo.Frequency,
+                 periods_per_frame: int):
+        """
+        Initializes the FrameClock object.
+
+        Args:
+            line_clock_channel (str): NI DAQmx channel for the line clock input.
+            frame_clock_channel (str): NI DAQmx channel for the frame clock output.
+            line_clock_frequency (dirigo.Frequency): Frequency of the line clock.
+            periods_per_frame (int): Number of line clock periods per frame clock.
+
+        Raises:
+            ValueError: If `periods_per_frame` is not a positive integer.
+            ValueError: If the `line_clock_frequency` is not a dirigo.Frequency object.
+            ValueError: If the channel name format is invalid or the channel/terminal
+                        does not exist.
+        """
+        # Validate frame clock channel
+        validate_ni_channel(frame_clock_channel)
+        self._frame_clock_channel = frame_clock_channel
+
+        # Validate line sync channel
+        validate_ni_channel(line_clock_channel)
+        self._line_clock_channel = line_clock_channel
+
+        if not isinstance(line_clock_frequency, dirigo.Frequency):
+            raise ValueError("`line_clock_frequency` must be a frequency object")
+        self._line_clock_frequency = line_clock_frequency
+
+        if periods_per_frame <= 0:
+            raise ValueError("`periods_per_frame must` be a positive integer.")
+        self._periods_per_frame = periods_per_frame
+
+    def start(self):
+        """
+        Starts the frame clock signal generation.
+
+        Configures and starts a NIDAQmx task to output a frame clock signal
+        based on the specified number of line clock periods per frame.
+
+        Raises:
+            nidaqmx.DaqError: If the DAQmx task configuration fails.
+        """
+        # Set up task
+        self._task = nidaqmx.Task("Frame clock")
+        self._task.do_channels.add_do_chan(
+            lines=self._frame_clock_channel,
+            line_grouping=LineGrouping.CHAN_PER_LINE
+        )
+
+        # Set timing
+        max_freq = (1 + self.LINE_CLOCK_MAX_ERROR) * self._line_clock_frequency
+        self._task.timing.cfg_samp_clk_timing(
+            rate=max_freq, 
+            source=self._line_clock_channel,
+            active_edge=Edge.RISING,
+            sample_mode=AcquisitionType.CONTINUOUS
+        )
+
+        # Make the clock signal and write to device
+        clock_signal = np.zeros(self._periods_per_frame, dtype=np.bool_)
+        clock_signal[:self._periods_per_frame // 2] = True
+        self._task.write(clock_signal, auto_start=True)
+
+    def stop(self):
+        """
+        Stops the frame clock signal generation.
+
+        Stops and closes the associated NIDAQmx task.
+
+        Raises:
+            nidaqmx.DaqError: If stopping or closing the task fails.
+        """
+        self._task.stop()
+        self._task.close()
+
+
+class GalvoSlowRasterScannerViaNI(GalvoScanner, SlowRasterScanner):
     REARM_TIME = dirigo.Time("1 ms") # time to allow NI card to rearm after outputing waveform
 
-    def __init__(self, control_channel: str, trigger_channel: str, 
-                 sample_rate: str, **kwargs):
+    def __init__(self, control_channel: str, analog_control_range: dict, 
+                 trigger_channel: str, sample_rate: str, 
+                 line_clock_channel: str, frame_clock_channel: str,
+                 **kwargs):
         super().__init__(**kwargs)
 
-        # Validated and set ampltidue control analog channel
+        # validated and set amplitude control analog channel
         validate_ni_channel(control_channel)
         self._control_channel = control_channel
 
+        # validate amplitude control limits and set in private attr
+        if not isinstance(analog_control_range, dict):
+            raise ValueError("`analog_control_range` must be a dictionary.")
+        missing_keys = {'min', 'max'} - analog_control_range.keys()
+        if missing_keys:
+            raise ValueError(
+                f"`analog_control_range` must be a dictionary with 'min' and 'max' keys."
+            )
+        self._analog_control_range = dirigo.VoltageRange(**analog_control_range)
+
+        # validate trigger channel
         validate_ni_channel(trigger_channel)
         self._trigger_channel = trigger_channel
 
-        # Validate sample rate setting
-        self._sample_rate = dirigo.Frequency(sample_rate)
-    
-    @property
-    def amplitude(self) -> dirigo.Angle:
-        """
-        The peak-to-peak scan amplitude.
-        """
-        return self._amplitude
-    
-    @amplitude.setter
-    def amplitude(self, new_amplitude: dirigo.Angle | float):
-        ampl = dirigo.Angle(new_amplitude)
-        
-        # Check that proposed waveform will not exceed scanner limits
-        upper = dirigo.Angle(self.offset + ampl/2)
-        if not self.angle_limits.within_range(upper):
-            raise ValueError(
-                f"Error setting amplitude. Scan waveform would exceed scanner "
-                f"upper limit ({self.angle_limits.max_degrees})."
-            )
-        lower = dirigo.Angle(self.offset - ampl/2)
-        if not self.angle_limits.within_range(lower):
-            raise ValueError(
-                f"Error setting amplitude. Scan waveform would exceed scanner "
-                f"lower limit ({self.angle_limits.min_degrees})."
-            )
+        self._sample_rate = dirigo.SampleRate(sample_rate)
 
-        self._amplitude = ampl
-
-    @property
-    def offset(self) -> dirigo.Angle:
-        return self._offset
-    
-    @offset.setter
-    def offset(self, new_offset: dirigo.Angle | float):
-        offset = dirigo.Angle(new_offset)
-
-        # Check that proposed waveform will not exceed scanner limits
-        upper = dirigo.Angle(offset + self.amplitude/2)
-        if not self.angle_limits.within_range(upper):
-            raise ValueError(
-                f"Error setting offset. Scan waveform would exceed scanner "
-                f"upper limit ({self.angle_limits.max_degrees})."
-            )
-        lower = dirigo.Angle(offset - self.amplitude/2)
-        if not self.angle_limits.within_range(lower):
-            raise ValueError(
-                f"Error setting offset. Scan waveform would exceed scanner "
-                f"lower limit ({self.angle_limits.min_degrees})."
-            )
-        
-        self._offset = offset
-    
-    @property
-    def frequency(self) -> float:
-        """
-        The scanner frequency.
-        """
-        return self._frequency
-    
-    @frequency.setter
-    def frequency(self, new_frequency: dirigo.Frequency | float):
-        freq = dirigo.Frequency(new_frequency)
-
-        # Check positive 
-        if freq <= 0:
-            raise ValueError(
-                f"Error setting frequency. Must be positve, got {freq}"
-            )
-        # (any other contraints? likely, but whose responsibility to check?)
-        
-        self._frequency = freq
-    
-    @property
-    def waveform(self) -> str: 
-        return self._waveform
-    
-    @waveform.setter
-    def waveform(self, new_waveform: str):
-        if new_waveform not in {'sinusoid', 'sawtooth', 'triangle'}:
-            raise ValueError(
-                f"Error setting waveform type. Valid options 'sinusoid', "
-                f"'sawtooth', 'triangle'. Recieved {new_waveform}"
-            )
-        self._waveform = new_waveform
-
-    @property
-    def enabled(self) -> bool:
-        """
-        Indicates whether the scanner is currently enabled. 
-        
-        When True, the scanner will scan a waveform for each received trigger.
-        Setting this property to False disables scanner activity.
-        """
-        pass
-
-    @enabled.setter
-    def enabled(self, new_state: bool):
-        pass
+        self._frame_clock: FrameClock = None # Set later with information from fast scanner
+        validate_ni_channel(line_clock_channel) # will be validated again when FrameClock object is made, but that's OK
+        self._line_clock_channel = line_clock_channel
+        validate_ni_channel(frame_clock_channel)
+        self._frame_clock_channel = frame_clock_channel
 
     @property
     def samples_per_period(self) -> int:
@@ -275,9 +288,33 @@ class GalvoSlowRasterScannerViaNI(SlowRasterScanner):
         samples = (period - self.REARM_TIME) * self._sample_rate
 
         return int(samples)
+    
+    def prepare_frame_clock(self, fast_scanner: RasterScanner, acquisition_spec):
+        """Prepares the fast scanner"""
+        if not self.frequency:
+            raise RuntimeError(
+                "Slow scanner `frequency` must be set before preparing frame clock."
+            )
+        self._frame_clock = FrameClock(
+            line_clock_channel=self._line_clock_channel,
+            frame_clock_channel=self._frame_clock_channel,
+            line_clock_frequency=fast_scanner.frequency,
+            periods_per_frame=acquisition_spec.records_per_buffer
+        )
 
     def start(self):
-        # Instantiate task object
+        # Check whether all required properties have been set
+        if not self.frequency: 
+            raise RuntimeError("Required scanner parameter, `frequency` not set.")
+        if not self.waveform:
+            raise RuntimeError("Required scanner parameter, `waveform` not set.")
+        if not self.duty_cycle:
+            raise RuntimeError("Required scanner parameter, `duty_cycle` not set.")
+        if not self._frame_clock:
+            raise RuntimeError("Frame clock must be initialized before starting. "
+                               "Use the `prepare_frame_clock` method.")
+
+        # Instantiate tasks and set channels
         self._task = nidaqmx.Task("Galvo slow raster scanner")
         self._task.ao_channels.add_ao_voltage_chan(
             physical_channel=self._control_channel
@@ -293,6 +330,7 @@ class GalvoSlowRasterScannerViaNI(SlowRasterScanner):
                 "Try reducing the sample rate."
             )
         
+        # Set task timings
         self._task.timing.cfg_samp_clk_timing(
             rate=self._sample_rate,
             sample_mode=AcquisitionType.FINITE,
@@ -306,9 +344,38 @@ class GalvoSlowRasterScannerViaNI(SlowRasterScanner):
         #self._task.out_stream.regen_mode = RegenerationMode.DONT_ALLOW_REGENERATION
 
         # Write the waveform to the buffer
-        waveform = 1
-        self._task.write(waveform, auto_start=False)
+        waveform_radians = self.generate_waveform()
+        volts_per_radian = self._analog_control_range.range / self.angle_limits.range
+        waveform_volts = waveform_radians * volts_per_radian
+        self._task.write(waveform_volts, auto_start=True) # still requires triggering for output
 
+        # Start frame clock
+        self._frame_clock.start()
+
+    def stop(self):
+        self._task.stop()
+        self._task.close()
+        self._frame_clock.stop()
+        self._frame_clock = None
+
+    def generate_waveform(self):
+        """Returns are waveform vector in units of radian."""
+        amp_rad = self.amplitude / 2 # divide pk-pk amplitude by 2 to get amplitude (converts to radians)
+        nsamples = self.samples_per_period
+
+        # TODO, adjustable phase?
+        if self.waveform == 'sinusoid':
+            t = np.linspace(start=0, stop=2*np.pi, num=nsamples)
+            return amp_rad * np.cos(t)
+        elif self.waveform in {'triangle', 'asymmetric triangle', 'sawtooth'}:
+            num_up = math.ceil(nsamples * self.duty_cycle)
+            num_down = math.floor(nsamples * (1-self.duty_cycle))
+            parts = (
+                np.linspace(start=-amp_rad, stop=amp_rad, num=num_up),
+                np.linspace(start=amp_rad, stop=-amp_rad, num=num_down)
+            )
+            return np.concatenate(parts, axis=0)
+ 
 
 # Testing
 if __name__ == "__main__":
@@ -323,14 +390,20 @@ if __name__ == "__main__":
 
     config = {
         "axis": "x",
-        "angle_limits": {"min": "-15.0 deg", "max": "15.0 deg"},
+        "angle_limits": {"min": "-20.0 deg", "max": "20.0 deg"},
+        "analog_control_range": {"min": "-10 V", "max": "10 V"},
         "control_channel": "Dev1/ao3",
         "trigger_channel": "/Dev1/PFI14",
-        "sample_rate": "50 kHz"
+        "frame_clock_channel": "Dev1/port0/line5",
+        "line_clock_channel": "/Dev1/PFI0",
+        "sample_rate": "100 kS/s"
     }
     scanner = GalvoSlowRasterScannerViaNI(**config)
 
     scanner.frequency = 7910 / (256+16)
+    scanner.waveform = 'asymmetric triangle'
+    scanner.duty_cycle = 0.9
+    scanner.amplitude = dirigo.Angle('10 deg')
     scanner.start()
 
     None

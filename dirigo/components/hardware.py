@@ -18,22 +18,22 @@ class Hardware:
     def __init__(self, default_config:SystemConfig):
         self.optics = LaserScanningOptics(**default_config.optics)
 
-        self.digitizer:Digitizer = self.get_hardware_plugin(
+        self.digitizer: Digitizer = self.get_hardware_plugin(
             group="dirigo_digitizers",
             default_config=default_config.digitizer
         )
 
-        self.stage:MultiAxisStage = self.get_hardware_plugin(
+        self.stage: MultiAxisStage = self.get_hardware_plugin(
             group="dirigo_stages",
             default_config=default_config.stage
         )
 
-        self.fast_raster_scanner:FastRasterScanner = self.get_hardware_plugin(
+        self.fast_raster_scanner: FastRasterScanner = self.get_hardware_plugin(
             group="dirigo_scanners",
             default_config=default_config.fast_raster_scanner
         )
 
-        self.slow_raster_scanner:SlowRasterScanner = self.get_hardware_plugin(
+        self.slow_raster_scanner: SlowRasterScanner = self.get_hardware_plugin(
             group="dirigo_scanners",
             default_config=default_config.slow_raster_scanner
         )
