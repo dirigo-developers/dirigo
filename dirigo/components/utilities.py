@@ -286,7 +286,7 @@ class RangeWithUnits:
         return float(self._min) <= normalized_value <= float(self._max)
 
     @property
-    def range(self) -> float:
+    def range(self) -> UnitQuantity:
         """Get the range as the difference between max and min."""
         return self.UNIT_QUANTITY_CLASS(str(self.max - self.min) + " " + self.unit)
 

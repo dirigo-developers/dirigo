@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from abc import ABC, abstractmethod
+import time
 
 import dirigo
 
@@ -24,6 +25,7 @@ class Stage(ABC):
     Abstract interface for a single stage.
     """
     VALID_AXES = {} # subclasses must overwrite with allowed axes labels e.g. 'x'
+    SLEEP_INTERVAL = dirigo.Time('1 ms')
 
     @staticmethod
     def _validate_limits_dict(limits_dict):
@@ -83,9 +85,19 @@ class Stage(ABC):
 
     @property
     @abstractmethod
-    def moving(self) -> bool:
+    def moving(self) -> bool:   
         """Return True if the stage axis is currently moving."""
         pass
+
+    def wait_until_move_finished(self): # TODO, timeout
+        """
+        Blocks until finished moving.
+        
+        Useful when two axes need to be moved simultaneously and both need to be
+        checked for completion before moving on. Move both axes (non-blocking)
+        and call this method on each axis."""
+        while self.moving:
+            time.sleep(self.SLEEP_INTERVAL)
 
     @abstractmethod
     def stop(self):
@@ -276,27 +288,7 @@ class RotationStage(Stage):
         pass
 
 
-
-#class OLD:
-    # TODO, not sure whether to keep this
-    # @abstractmethod
-    # def move_at_velocity(self, direction:str, velocity:float): 
-    #     pass
-
-    # # TODO, why do we need this?
-    # @property
-    # @abstractmethod
-    # def home_position(self):
-    #     pass
-    #     #return (self.max_position + self.min_position)/2
-    
-    # def wait_until_finished(self, sleep_period = 0.1e-3):
-    #     """ Waits until not busy (ie blocking) """
-    #     while self.is_busy:
-    #         time.sleep(sleep_period)
-
-
-# Not sure whether distinction necessary
+# Not sure whether this distinction is necessary
 class LinearMotorStageAxis(LinearStage):
     """
     Represents ...

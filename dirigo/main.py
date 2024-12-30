@@ -72,7 +72,8 @@ if __name__ == "__main__":
 
     diri = Dirigo()
     
-    acq = diri.acquisition_factory('frame')
+    acq = diri.acquisition_factory('strip')
     acq.start()
 
-    None
+    acq.join(timeout=10.0)
+

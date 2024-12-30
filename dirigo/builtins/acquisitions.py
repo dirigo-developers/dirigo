@@ -1,6 +1,7 @@
 from pathlib import Path
-from math import asin, pi
+import math
 import queue
+from typing import Union
 
 from platformdirs import user_config_dir
 
@@ -19,10 +20,10 @@ class LineAcquisitionSpec(): # TODO, this could inherit from an overall Acquisit
             line_width: str,
             pixel_size: str,
             fill_fraction: float,
-            lines_per_buffer: int,
-            buffers_per_acquisition: int,
+            buffers_per_acquisition: int | float, # float('inf')
             buffers_allocated: int,
             digitizer_profile: str,
+            lines_per_buffer: int = None,
     ):
         self.bidirectional_scanning = bidirectional_scanning 
         self.line_width = dirigo.Position(line_width)
@@ -33,6 +34,8 @@ class LineAcquisitionSpec(): # TODO, this could inherit from an overall Acquisit
         self.fill_fraction = fill_fraction
         # TODO validate lines per buffer
         self.lines_per_buffer = lines_per_buffer
+        if isinstance(buffers_per_acquisition, float) and not buffers_per_acquisition == float('inf'):
+            raise ValueError(f"`buffers_per_acquisition` cannot be a non-infinite float.")
         self.buffers_per_acquisition = buffers_per_acquisition
         self.buffers_allocated = buffers_allocated
         self.digitizer_profile = digitizer_profile    
@@ -73,6 +76,7 @@ class LineAcquisitionSpec(): # TODO, this could inherit from an overall Acquisit
 class LineAcquisition(Acquisition):
     REQUIRED_RESOURCES = [Digitizer, FastRasterScanner]
     SPEC_LOCATION = Path(user_config_dir("Dirigo")) / "acquisition/linescan"
+    SPEC_OBJECT = LineAcquisitionSpec
     
     def __init__(self, hw, data_queue: queue.Queue, spec: LineAcquisitionSpec):
         """Initialize a line acquisition worker."""
@@ -96,12 +100,6 @@ class LineAcquisition(Acquisition):
         # for res scanner: frequency is set (fixed), waveform is set (fixed), duty cycle is set (fixed)
         # for other scanners--TBD
 
-    @classmethod
-    def get_specification(cls, spec_name: str = "default"):
-        spec_fn = spec_name + ".toml"
-        spec = load_toml(cls.SPEC_LOCATION / spec_fn)
-        return LineAcquisitionSpec(**spec)
-
     def run(self):
         digitizer = self.hw.digitizer # for brevity in this method
 
@@ -120,16 +118,16 @@ class LineAcquisition(Acquisition):
 
         finally:
             # Stop scanner
-            self.hw.fast_raster_scanner.enabled = False
+            self.hw.fast_raster_scanner.stop()
 
     def _calculate_record_length(self, round_up: bool = True) -> int | float:
         # Calculate record length
         scan_per = 1 / self.hw.fast_raster_scanner.frequency
         
         if self.spec.bidirectional_scanning:
-            record_per = scan_per * asin((self.spec.fill_fraction+1)/2) * 2/pi
+            record_per = scan_per * math.asin((self.spec.fill_fraction+1) / 2) * 2/math.pi
         else:
-            record_per = scan_per/2  * asin(self.spec.fill_fraction) * 2/pi
+            record_per = scan_per/2  * math.asin(self.spec.fill_fraction) * 2/math.pi
 
         record_len = record_per * self.hw.digitizer.sample_clock.rate
        
@@ -146,7 +144,7 @@ class LineAcquisition(Acquisition):
 
 
 class FrameAcquisitionSpec(LineAcquisitionSpec):
-    def __init__(self, frame_height: str, pixel_height: str = None, **kwargs):
+    def __init__(self, frame_height: str, flyback_periods: int, pixel_height: str = None, **kwargs):
         super().__init__(**kwargs)
 
         self.frame_height = dirigo.Position(frame_height)
@@ -157,18 +155,18 @@ class FrameAcquisitionSpec(LineAcquisitionSpec):
             # If no pixel height is specified, assume square pixel shape
             self.pixel_height = self.pixel_size
 
+        self.flyback_periods = flyback_periods
+
     @property
     def lines_per_frame(self) -> int:
         """Returns the number of lines per frame.
         
-        Rounds to nearest integer line number (if frame height is not divisible 
-        by pixel height).
+        Rounds to nearest integer line number or multiple of 2 if bidirectional scanning.
         """
-        return round(self.frame_height / self.pixel_height)
-    
-    @property
-    def flyback_lines(self) -> int:
-        return 0 #??
+        if self.bidirectional_scanning:
+            return 2 * round(self.frame_height / self.pixel_height / 2)
+        else:
+            return round(self.frame_height / self.pixel_height)
 
     @property
     def records_per_buffer(self) -> int:
@@ -177,39 +175,34 @@ class FrameAcquisitionSpec(LineAcquisitionSpec):
         Includes records that may be part of the slow raster axis flyback.        
         """
         if self.bidirectional_scanning:
-            return (self.lines_per_frame + self.flyback_lines) // 2
+            return (self.lines_per_frame // 2) + self.flyback_periods
         else:
-            return self.lines_per_frame + self.flyback_lines
-
+            return self.lines_per_frame + self.flyback_periods
 
 
 class FrameAcquisition(LineAcquisition):
     REQUIRED_RESOURCES = [Digitizer, FastRasterScanner, SlowRasterScanner]
     SPEC_LOCATION = Path(user_config_dir("Dirigo")) / "acquisition/frame"
+    SPEC_OBJECT = FrameAcquisitionSpec
 
     def __init__(self, hw, data_queue: queue.Queue, spec: FrameAcquisitionSpec):
         super().__init__(hw, data_queue, spec)
         self.spec: FrameAcquisitionSpec
 
-        # Set up slow scanner (fast scanner is set up in super().__init__)
-        spec.bidirectional_scanning
+        # Set up slow scanner, fast scanner is already set up in super().__init__()
         self.hw.slow_raster_scanner.amplitude = \
             self.hw.optics.object_position_to_scan_angle(spec.frame_height)
-        self.hw.slow_raster_scanner.frequency = self.hw.fast_raster_scanner.frequency / round(spec.lines_per_frame) # flyback lines
+        self.hw.slow_raster_scanner.frequency = (
+            self.hw.fast_raster_scanner.frequency / spec.records_per_buffer
+        )
         self.hw.slow_raster_scanner.waveform = 'asymmetric triangle'
-        self.hw.slow_raster_scanner.duty_cycle = 0.9 # TODO calculate based on flyback lines
+        self.hw.slow_raster_scanner.duty_cycle = (
+            1 - spec.flyback_periods / spec.records_per_buffer
+        )
 
         self.hw.slow_raster_scanner.prepare_frame_clock(self.hw.fast_raster_scanner, spec)
 
-
-    @classmethod
-    def get_specification(cls, spec_name:str = "default"):
-        spec_fn = spec_name + ".toml"
-        spec = load_toml(cls.SPEC_LOCATION / spec_fn)
-        return FrameAcquisitionSpec(**spec)
-    
     def run(self):
-        
         self.hw.slow_raster_scanner.start()
 
         try:

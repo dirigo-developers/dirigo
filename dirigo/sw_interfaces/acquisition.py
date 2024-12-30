@@ -3,7 +3,14 @@ import threading
 import queue
 
 from dirigo.components.hardware import Hardware
+from dirigo.components.io import load_toml
 
+
+
+class AcquisitonSpec:
+    """Marker class for an acquisition specification."""
+    # TODO, are there any attributes that are constant for all acquisitions?
+    pass
 
 
 class Acquisition(threading.Thread, ABC):
@@ -12,17 +19,22 @@ class Acquisition(threading.Thread, ABC):
     """
     REQUIRED_RESOURCES: list[str] = None
     SPEC_LOCATION: str = None
+    SPEC_OBJECT: AcquisitonSpec
     
-    def __init__(self, hw: Hardware, data_queue: queue.Queue, spec):
+    def __init__(self, hw: Hardware, data_queue: queue.Queue, spec: AcquisitonSpec):
         super().__init__()
         self.hw = hw
-        self.spec = spec
         self.check_resources()
         self.data_queue = data_queue
-        self.running = False
+        self.spec = spec
         self._stop_event = threading.Event()  # Event to signal thread termination
     
     def check_resources(self):
+        """Iterates through class attribute REQUIRED_RESOURCES to check if all 
+        resources are present.
+
+        Raises RuntimeError if any required resources are missing.
+        """
         if self.REQUIRED_RESOURCES is None: # No acquisition without any resources
             raise NotImplementedError(
                 f"Acquisition must implement 'required_resources' attribute."
@@ -37,11 +49,12 @@ class Acquisition(threading.Thread, ABC):
                     f"resource."
                 )
             
-    @staticmethod
-    @abstractmethod
-    def get_specification():
+    @classmethod
+    def get_specification(cls, spec_name: str = "default"):
         """Return the associated Specification object"""
-        pass
+        spec_fn = spec_name + ".toml"
+        spec = load_toml(cls.SPEC_LOCATION / spec_fn)
+        return cls.SPEC_OBJECT(**spec)
 
     @abstractmethod
     def run(self):
@@ -52,5 +65,5 @@ class Acquisition(threading.Thread, ABC):
         self._stop_event.set()
 
         if blocking:
-            self.join()  # Wait for the thread to finish
+            self.join()  # does not return until thread completes
 
