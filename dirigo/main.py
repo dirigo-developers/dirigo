@@ -7,7 +7,7 @@ from platformdirs import user_config_dir
 from dirigo.components.io import SystemConfig
 from dirigo.components.hardware import Hardware
 from dirigo.sw_interfaces import Acquisition
-
+from dirigo.sw_interfaces import Processor
 
 
 class Dirigo:
@@ -59,6 +59,11 @@ class Dirigo:
             f"Acquisition '{type}' not found in entry points."
         )
     
+    def processor_factory(self, acquisition: Acquisition) -> Processor:
+        # entry points look up
+        acquisition.spec # definitely need to pass the spec
+    
+    
     def _flush_queue(self):
         """Remove all items from the queue."""
         while not self.data_queue.empty():
@@ -72,8 +77,14 @@ if __name__ == "__main__":
 
     diri = Dirigo()
     
-    acq = diri.acquisition_factory('strip')
-    acq.start()
+    acquisition = diri.acquisition_factory('strip')
 
-    acq.join(timeout=10.0)
+    processor = diri.processor_factory(acquisition, 'foo')
+    # passing acquisition to processor could automatically link them
+
+    # spawn Display, Logging threads?
+
+    acquisition.start()
+
+    acquisition.join(timeout=10.0)
 

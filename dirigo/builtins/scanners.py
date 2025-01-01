@@ -106,8 +106,12 @@ class ResonantScannerViaNI(ResonantScanner, FastRasterScanner):
         return self._amplitude
 
     @amplitude.setter
-    def amplitude(self, new_ampl: dirigo.Angle | float):
+    def amplitude(self, new_ampl: dirigo.Angle):
         """Set the peak-to-peak amplitude."""
+        if not isinstance(new_ampl, dirigo.Voltage):
+            raise ValueError(
+                f"`amplitude` must be set with Voltage object. Got {type(new_ampl)}"
+            )
 
         # Validate that the value is within the acceptable range
         if not self.angle_limits.within_range(dirigo.Angle(new_ampl/2)):
