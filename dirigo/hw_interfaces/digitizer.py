@@ -150,17 +150,17 @@ class SampleClock(ABC):
 
     @property
     @abstractmethod
-    def rate(self) -> dirigo.Frequency:
+    def rate(self) -> dirigo.SampleRate:
         pass
 
     @rate.setter
     @abstractmethod
-    def rate(self, value: dirigo.Frequency):
+    def rate(self, value: dirigo.SampleRate):
         pass
     
     @property
     @abstractmethod
-    def rate_options(self) -> set[dirigo.Frequency]:
+    def rate_options(self) -> set[dirigo.SampleRate]:
         pass
 
     @property

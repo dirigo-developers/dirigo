@@ -7,10 +7,14 @@ from dirigo.components.io import load_toml
 
 
 
-class AcquisitonSpec:
+class AcquisitionSpec:
     """Marker class for an acquisition specification."""
-    # TODO, are there any attributes that are constant for all acquisitions?
-    pass
+    def __init__(self, nchannels: int = 1, **kwargs):
+        if not isinstance(nchannels, int):
+            raise ValueError("Acquisition spec parameter: `nchannels` must be an integer")
+        if nchannels < 1:
+            raise ValueError("`nchannels` must be 1 or greater")
+        self.nchannels = nchannels
 
 
 class Acquisition(threading.Thread, ABC):
@@ -19,9 +23,9 @@ class Acquisition(threading.Thread, ABC):
     """
     REQUIRED_RESOURCES: list[str] = None
     SPEC_LOCATION: str = None
-    SPEC_OBJECT: AcquisitonSpec
+    SPEC_OBJECT: AcquisitionSpec
     
-    def __init__(self, hw: Hardware, data_queue: queue.Queue, spec: AcquisitonSpec):
+    def __init__(self, hw: Hardware, data_queue: queue.Queue, spec: AcquisitionSpec):
         super().__init__()
         self.hw = hw
         self.check_resources()

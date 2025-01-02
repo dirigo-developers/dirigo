@@ -98,19 +98,19 @@ class ResonantScannerViaNI(ResonantScanner, FastRasterScanner):
         self._analog_control_range = dirigo.VoltageRange(**analog_control_range)
 
         # Default: set amplitude to 0 upon startup
-        self.amplitude = 0.0
+        self.amplitude = dirigo.Angle(0.0)
 
     @property
-    def amplitude(self):
+    def amplitude(self) -> dirigo.Angle:
         """Get the peak-to-peak amplitude, in radians optical."""
         return self._amplitude
 
     @amplitude.setter
     def amplitude(self, new_ampl: dirigo.Angle):
         """Set the peak-to-peak amplitude."""
-        if not isinstance(new_ampl, dirigo.Voltage):
+        if not isinstance(new_ampl, dirigo.Angle):
             raise ValueError(
-                f"`amplitude` must be set with Voltage object. Got {type(new_ampl)}"
+                f"`amplitude` must be set with Angle object. Got {type(new_ampl)}"
             )
 
         # Validate that the value is within the acceptable range

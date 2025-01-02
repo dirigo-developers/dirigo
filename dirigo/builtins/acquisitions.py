@@ -1,7 +1,7 @@
 from pathlib import Path
 import math
 import queue
-from typing import Union
+import time
 
 from platformdirs import user_config_dir
 
@@ -9,11 +9,11 @@ import dirigo
 from dirigo.components.io import load_toml
 from dirigo.hw_interfaces.digitizer import Digitizer
 from dirigo.hw_interfaces.scanner import FastRasterScanner, SlowRasterScanner
-from dirigo.sw_interfaces import Acquisition
+from dirigo.sw_interfaces.acquisition import AcquisitionSpec, Acquisition
 
 
 
-class LineAcquisitionSpec(): # TODO, this could inherit from an overall AcquisitionSpec
+class LineAcquisitionSpec(AcquisitionSpec): 
     def __init__(
             self,
             bidirectional_scanning: bool,
@@ -24,7 +24,9 @@ class LineAcquisitionSpec(): # TODO, this could inherit from an overall Acquisit
             buffers_allocated: int,
             digitizer_profile: str,
             lines_per_buffer: int = None,
+            **kwargs
     ):
+        super().__init__(**kwargs)
         self.bidirectional_scanning = bidirectional_scanning 
         self.line_width = dirigo.Position(line_width)
         self.pixel_size = dirigo.Position(pixel_size)
@@ -63,14 +65,14 @@ class LineAcquisitionSpec(): # TODO, this could inherit from an overall Acquisit
             return self.lines_per_buffer
         
     @property
-    def pixels_per_line(self) -> float:
+    def pixels_per_line(self) -> int:
         """
         Returns the number of pixels per line.
-        
-        Note: The caller must decide how to handle a fractional pixel count 
-        (for instance, by either rounding up or down).
+
+        If the line width is not divisible by pixel size, rounds to nearest 
+        integer pixel.
         """
-        return self.line_width / self.pixel_size
+        return round(self.line_width / self.pixel_size)
 
 
 class LineAcquisition(Acquisition):
@@ -110,14 +112,17 @@ class LineAcquisition(Acquisition):
         try:
             while not self._stop_event.is_set() and \
                 digitizer.acquire.buffers_acquired < self.spec.buffers_per_acquisition:
-                
+
+                #t0 = time.perf_counter()
                 buffer_data = digitizer.acquire.get_next_completed_buffer()
+                #t1 = time.perf_counter()
                 
                 self.data_queue.put(buffer_data)
-                print(f"Got buffer {digitizer.acquire.buffers_acquired}")
+                print(f"{self.native_id} Got buffer {digitizer.acquire.buffers_acquired}.")
 
         finally:
-            # Stop scanner
+            # Put None into queue to signal finished, stop scanning
+            self.data_queue.put(None)
             self.hw.fast_raster_scanner.stop()
 
     def _calculate_record_length(self, round_up: bool = True) -> int | float:

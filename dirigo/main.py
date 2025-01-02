@@ -6,8 +6,10 @@ from platformdirs import user_config_dir
 
 from dirigo.components.io import SystemConfig
 from dirigo.components.hardware import Hardware
-from dirigo.sw_interfaces import Acquisition
-from dirigo.sw_interfaces import Processor
+from dirigo.sw_interfaces import Acquisition, Processor, Display
+from dirigo.builtins.processors import RasterFrameProcessor
+from dirigo.builtins.displays import FrameDisplay
+
 
 
 class Dirigo:
@@ -29,6 +31,8 @@ class Dirigo:
         self.hw = Hardware(self.sys_config) # TODO, should this be 'resources'?
 
         self.data_queue = queue.Queue() 
+        self.processed_queue = queue.Queue()
+        self.display_queue = queue.Queue()
 
 
     def acquisition_factory(self, type: str, spec_name: str = "default") -> Acquisition:
@@ -60,9 +64,14 @@ class Dirigo:
         )
     
     def processor_factory(self, acquisition: Acquisition) -> Processor:
-        # entry points look up
-        acquisition.spec # definitely need to pass the spec
+        # Dynamically load plugin class
+        #entry_pts = importlib.metadata.entry_points(group="dirigo_processors")
+        #TODO finish entry point loading
+
+        return RasterFrameProcessor(acquisition, self.processed_queue)
     
+    def display_factory(self, processor: Processor = None, acquisition: Acquisition = None) -> Display:
+        return FrameDisplay(self.display_queue, acquisition, processor)
     
     def _flush_queue(self):
         """Remove all items from the queue."""
@@ -77,13 +86,16 @@ if __name__ == "__main__":
 
     diri = Dirigo()
     
-    acquisition = diri.acquisition_factory('strip')
+    acquisition = diri.acquisition_factory('frame')
 
-    processor = diri.processor_factory(acquisition, 'foo')
-    # passing acquisition to processor could automatically link them
+    processor = diri.processor_factory(acquisition)
 
-    # spawn Display, Logging threads?
+    display = diri.display_factory(processor)
 
+    # TODO spawn Logging thread
+
+    processor.start()
+    display.start()
     acquisition.start()
 
     acquisition.join(timeout=10.0)
