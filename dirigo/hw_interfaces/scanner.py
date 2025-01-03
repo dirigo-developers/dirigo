@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 
-import dirigo
+from dirigo import units
 from dirigo.hw_interfaces.stage import LinearStage # for z-scanner
 
 """
@@ -33,7 +33,7 @@ class RasterScanner(ABC):
             raise ValueError(
                 f"`angle_limits` must be a dictionary with 'min' and 'max' keys."
             )
-        self._angle_limits = dirigo.AngleRange(**angle_limits)
+        self._angle_limits = units.AngleRange(**angle_limits)
 
     @property
     def axis(self) -> str:
@@ -41,13 +41,13 @@ class RasterScanner(ABC):
         return self._axis
 
     @property
-    def angle_limits(self) -> dirigo.AngleRange:
+    def angle_limits(self) -> units.AngleRange:
         """Returns an object describing the scan angle limits."""
         return self._angle_limits
 
     @property
     @abstractmethod
-    def amplitude(self) -> dirigo.Angle:
+    def amplitude(self) -> units.Angle:
         """
         The peak-to-peak scan amplitude.
 
@@ -62,12 +62,12 @@ class RasterScanner(ABC):
 
     @amplitude.setter
     @abstractmethod
-    def amplitude(self, value: dirigo.Angle):
+    def amplitude(self, value: units.Angle):
         pass
 
     @property
     @abstractmethod
-    def frequency(self) -> dirigo.Frequency:
+    def frequency(self) -> units.Frequency:
         """The scan frequency.
         
         If frequency is not adjustable, implementations should raise 
@@ -77,7 +77,7 @@ class RasterScanner(ABC):
 
     @frequency.setter
     @abstractmethod
-    def frequency(self, value: dirigo.Frequency):
+    def frequency(self, value: units.Frequency):
         pass
 
     @property
@@ -165,7 +165,7 @@ class ResonantScanner(RasterScanner):
     def __init__(self, frequency: str, **kwargs):
         super().__init__(**kwargs)
         
-        frequency_obj = dirigo.Frequency(frequency)
+        frequency_obj = units.Frequency(frequency)
         if frequency_obj <= 0:
             raise ValueError(f"Value for frequency must be positive, "
                              f"got {frequency_obj}")
@@ -173,7 +173,7 @@ class ResonantScanner(RasterScanner):
         self._frequency = frequency_obj
     
     @property
-    def frequency(self) -> dirigo.Frequency:
+    def frequency(self) -> units.Frequency:
         """
         Returns the nominal scanner frequency. 
         
@@ -221,9 +221,9 @@ class PolygonScanner(RasterScanner):
         return self._facet_count
 
     @property
-    def amplitude(self) -> dirigo.AngleRange:
+    def amplitude(self) -> units.AngleRange:
         theta = 360 / self.facet_count
-        return dirigo.AngleRange(min=f"{-theta} deg", max=f"{theta} deg")
+        return units.AngleRange(min=f"{-theta} deg", max=f"{theta} deg")
 
     @amplitude.setter
     def amplitude(self, _):
@@ -257,32 +257,32 @@ class GalvoScanner(RasterScanner):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
 
-        self._amplitude = dirigo.Angle(0.0)
-        self._offset = dirigo.Angle(0.0)
+        self._amplitude = units.Angle(0.0)
+        self._offset = units.Angle(0.0)
         
         self._frequency = None
         self._waveform = None
         self._duty_cycle = None
 
     @property
-    def amplitude(self) -> dirigo.Angle:
+    def amplitude(self) -> units.Angle:
         """
         The peak-to-peak scan amplitude.
         """
         return self._amplitude
     
     @amplitude.setter
-    def amplitude(self, new_amplitude: dirigo.Angle | float):
-        ampl = dirigo.Angle(new_amplitude)
+    def amplitude(self, new_amplitude: units.Angle | float):
+        ampl = units.Angle(new_amplitude)
         
         # Check that proposed waveform will not exceed scanner limits
-        upper = dirigo.Angle(self.offset + ampl/2)
+        upper = units.Angle(self.offset + ampl/2)
         if not self.angle_limits.within_range(upper):
             raise ValueError(
                 f"Error setting amplitude. Scan waveform would exceed scanner "
                 f"upper limit ({self.angle_limits.max_degrees})."
             )
-        lower = dirigo.Angle(self.offset - ampl/2)
+        lower = units.Angle(self.offset - ampl/2)
         if not self.angle_limits.within_range(lower):
             raise ValueError(
                 f"Error setting amplitude. Scan waveform would exceed scanner "
@@ -292,21 +292,21 @@ class GalvoScanner(RasterScanner):
         self._amplitude = ampl
 
     @property
-    def offset(self) -> dirigo.Angle:
+    def offset(self) -> units.Angle:
         return self._offset
     
     @offset.setter
-    def offset(self, new_offset: dirigo.Angle | float):
-        offset = dirigo.Angle(new_offset)
+    def offset(self, new_offset: units.Angle | float):
+        offset = units.Angle(new_offset)
 
         # Check that proposed waveform will not exceed scanner limits
-        upper = dirigo.Angle(offset + self.amplitude/2)
+        upper = units.Angle(offset + self.amplitude/2)
         if not self.angle_limits.within_range(upper):
             raise ValueError(
                 f"Error setting offset. Scan waveform would exceed scanner "
                 f"upper limit ({self.angle_limits.max_degrees})."
             )
-        lower = dirigo.Angle(offset - self.amplitude/2)
+        lower = units.Angle(offset - self.amplitude/2)
         if not self.angle_limits.within_range(lower):
             raise ValueError(
                 f"Error setting offset. Scan waveform would exceed scanner "
@@ -323,8 +323,8 @@ class GalvoScanner(RasterScanner):
         return self._frequency
     
     @frequency.setter
-    def frequency(self, new_frequency: dirigo.Frequency | float):
-        freq = dirigo.Frequency(new_frequency)
+    def frequency(self, new_frequency: units.Frequency | float):
+        freq = units.Frequency(new_frequency)
 
         # Check positive 
         if freq <= 0:

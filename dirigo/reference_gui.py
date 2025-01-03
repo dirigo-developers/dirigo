@@ -1,12 +1,14 @@
 import tkinter as tk
 from tkinter import ttk
 
-import dirigo
+from dirigo import units
 from dirigo.main import Dirigo
 from dirigo.hw_interfaces.digitizer import SampleClock, Channel, Trigger
 from dirigo.hw_interfaces.scanner import FastRasterScanner
 from dirigo.hw_interfaces.stage import MultiAxisStage
 
+
+# OBSOLETE, see new repo
 
 
 class ReferenceGUI(tk.Tk):
@@ -322,7 +324,7 @@ class FastRasterScannerFrame(ttk.LabelFrame):
             wrap=False,
             width=8,
             command=lambda: setattr(
-                scanner, 'amplitude', dirigo.Angle(f"{self.level_var.get()} deg")
+                scanner, 'amplitude', units.Angle(f"{self.level_var.get()} deg")
             )
         )
         self.level_spinbox.grid(row=2, column=1, sticky="e", padx=10, pady=5)
@@ -346,7 +348,7 @@ class StageFrame(ttk.LabelFrame):
             wrap=False,
             width=8,
             command=lambda: stage.x.move_to(
-                dirigo.Position(float(self.x_pos_var.get()) / 1000) # convert from mm to meters
+                units.Position(float(self.x_pos_var.get()) / 1000) # convert from mm to meters
             )
         )
         self.x_pos_spinbox.grid(row=0, column=1, sticky="e", padx=10, pady=5)
@@ -365,7 +367,7 @@ class StageFrame(ttk.LabelFrame):
             wrap=False,
             width=8,
             command=lambda: stage.y.move_to(
-                dirigo.Position(float(self.y_pos_var.get()) / 1000) # convert to meters
+                units.Position(float(self.y_pos_var.get()) / 1000) # convert to meters
             )
         )
         self.y_pos_spinbox.grid(row=1, column=1, sticky="e", padx=10, pady=5)

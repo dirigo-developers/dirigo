@@ -3,7 +3,7 @@ import queue
 import numpy as np
 from numba import njit, prange, types
 
-import dirigo
+from dirigo import units
 from dirigo.sw_interfaces import Processor
 from dirigo.builtins.acquisitions import FrameAcquisitionSpec
 
@@ -14,7 +14,7 @@ TWO_PI = 2* np.pi
 # need to support uint16 and uint8 (rarer)
 
 @njit(
-    types.int16[:,:,:](
+    types.uint16[:,:,:](
         types.uint16[:,:,:], 
         types.UniTuple(types.int64, 3), 
         types.int32[:,:], 
@@ -40,7 +40,7 @@ def dewarp_kernel(
     if Nchannels != Nc:
         raise ValueError("Dimension error: buffer channels does not equal dewarped shape channels")
     
-    dewarped = np.zeros(shape=dewarped_frame_shape, dtype=np.int16) # Is this OK to hardcode to 16-bit?
+    dewarped = np.zeros(shape=dewarped_frame_shape, dtype=np.uint16) # Is this OK to hardcode to 16-bit?
 
     # For non-bidi, start_indices is a single row; for bidi, it is two rows
     # For non-bidi, records per buffer is same as number of lines in final image
@@ -65,13 +65,13 @@ def dewarp_kernel(
 
             if Nsum == 1: # if there is only one sample in the pixel range, then set dewarped value directly
                 for ci in range(Nc):
-                    dewarped[si, fi, ci] = buffer_data[ri, i, ci] - 2**15
+                    dewarped[si, fi, ci] = buffer_data[ri, i, ci] #- 2**15
             else: # average a number of pixels
                 for ci in range(Nc):
                     tmp = types.int32(0)
                     for sample in range(0, Nsum * stride, stride):
                         tmp += buffer_data[ri, i + sample, ci]
-                    dewarped[si, fi, ci] = tmp // Nsum - 2**15
+                    dewarped[si, fi, ci] = tmp // Nsum #- 2**15
 
     return dewarped
         
@@ -80,7 +80,12 @@ class RasterFrameProcessor(Processor):
     def __init__(self, acquisition, processed_queue):
         super().__init__(acquisition, processed_queue) # privately stores queues available
         self._spec: FrameAcquisitionSpec # to refine type hinting
-
+        self.dewarped_shape = (
+                self._spec.lines_per_frame,
+                self._spec.pixels_per_line,
+                self._spec.nchannels
+            )
+        
     def run(self):
         while True: # Loops until receives sentinel None
             data: np.ndarray = self._raw_queue.get(block=True) # we may want to add a timeout
@@ -89,25 +94,18 @@ class RasterFrameProcessor(Processor):
                 # execute any cleanup code here
                 self.processed_queue.put(None) # pass sentinel
                 print('exiting processing thread')
-                return # concludes run() - this thread ends
-            
-            # processing kernel
-            dewarped_shape = (
-                self._spec.lines_per_frame,
-                self._spec.pixels_per_line,
-                self._spec.nchannels
-            )
+                return # concludes run() - this thread ends         
 
             start_indices = self.calculate_start_indices()
             nsamples_to_sum = np.abs(np.diff(start_indices, axis=1)) # put inside kernel
 
-            dewarped = dewarp_kernel(data, dewarped_shape, start_indices, nsamples_to_sum)
+            dewarped = dewarp_kernel(data, self.dewarped_shape, start_indices, nsamples_to_sum)
             print(f"{self.native_id} Processed a frame")
 
             self.processed_queue.put(dewarped)
 
 
-    def calculate_start_indices(self, trigger_phase: dirigo.Angle = dirigo.Angle(0.0)):
+    def calculate_start_indices(self, trigger_phase: units.Angle = units.Angle(0.0)):
         ff = self._spec.fill_fraction
         pixel_edges = np.linspace(ff, -ff, self._spec.pixels_per_line + 1)
 
@@ -129,7 +127,7 @@ class RasterFrameProcessor(Processor):
             temporal_edges_rvs = np.roll(temporal_edges_rvs, shift=-1) # why?
             temporal_edges = np.vstack([temporal_edges_fwd, temporal_edges_rvs]) 
         else:
-            pass
+            temporal_edges = np.vstack([temporal_edges])
 
         period = self._acq.hw.digitizer.sample_clock.rate \
             / self._acq.hw.fast_raster_scanner.frequency # best guess. TODO: use record timestamps

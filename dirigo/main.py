@@ -34,7 +34,12 @@ class Dirigo:
         self.processed_queue = queue.Queue()
         self.display_queue = queue.Queue()
 
-
+    @property
+    def acquisition_types(self) -> set[str]:
+        """Returns a set of the available acquisition types."""
+        entry_pts = importlib.metadata.entry_points(group="dirigo_acquisitions")
+        return {entry_pt.name for entry_pt in entry_pts}
+    
     def acquisition_factory(self, type: str, spec_name: str = "default") -> Acquisition:
         """Returns an initialized acquisition worker object."""
         self._flush_queue()

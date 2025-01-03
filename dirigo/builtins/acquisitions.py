@@ -5,8 +5,7 @@ import time
 
 from platformdirs import user_config_dir
 
-import dirigo
-from dirigo.components.io import load_toml
+from dirigo import units
 from dirigo.hw_interfaces.digitizer import Digitizer
 from dirigo.hw_interfaces.scanner import FastRasterScanner, SlowRasterScanner
 from dirigo.sw_interfaces.acquisition import AcquisitionSpec, Acquisition
@@ -28,8 +27,8 @@ class LineAcquisitionSpec(AcquisitionSpec):
     ):
         super().__init__(**kwargs)
         self.bidirectional_scanning = bidirectional_scanning 
-        self.line_width = dirigo.Position(line_width)
-        self.pixel_size = dirigo.Position(pixel_size)
+        self.line_width = units.Position(line_width)
+        self.pixel_size = units.Position(pixel_size)
         if not (0 < fill_fraction <= 1):
             raise ValueError(f"Invalid fill fraction, got {fill_fraction}. "
                              "Must be between 0.0 and 1.0 (upper bound incl.)")
@@ -44,12 +43,12 @@ class LineAcquisitionSpec(AcquisitionSpec):
 
     # Convenience properties
     @property
-    def scan_width(self) -> dirigo.Position:
+    def scan_width(self) -> units.Position:
         """
         Returns the scan width required to reach the line width with the given
         the fill fraction (scan width > line width).
         """
-        return dirigo.Position(self.line_width / self.fill_fraction)
+        return units.Position(self.line_width / self.fill_fraction)
     
     @property
     def records_per_buffer(self) -> int:
@@ -152,10 +151,10 @@ class FrameAcquisitionSpec(LineAcquisitionSpec):
     def __init__(self, frame_height: str, flyback_periods: int, pixel_height: str = None, **kwargs):
         super().__init__(**kwargs)
 
-        self.frame_height = dirigo.Position(frame_height)
+        self.frame_height = units.Position(frame_height)
 
         if pixel_height is not None:
-            self.pixel_height = dirigo.Position(pixel_height)
+            self.pixel_height = units.Position(pixel_height)
         else:
             # If no pixel height is specified, assume square pixel shape
             self.pixel_height = self.pixel_size
@@ -215,7 +214,4 @@ class FrameAcquisition(LineAcquisition):
 
         finally:
             self.hw.slow_raster_scanner.stop()
-
-
-
 

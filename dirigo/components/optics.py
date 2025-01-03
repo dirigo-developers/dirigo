@@ -1,15 +1,15 @@
-import dirigo
+from dirigo import units
 
 
 # TODO, rework as interface?
 
 class LaserScanningOptics: 
     def __init__(self, objective_focal_length: str, relay_magnification: float):
-        self._objective_focal_length = dirigo.Position(objective_focal_length)
+        self._objective_focal_length = units.Position(objective_focal_length)
         self._relay_magnification = float(relay_magnification)
 
     @property
-    def objective_focal_length(self) -> dirigo.Position:
+    def objective_focal_length(self) -> units.Position:
         """Returns the objective focal length."""
         return self._objective_focal_length
     
@@ -20,18 +20,18 @@ class LaserScanningOptics:
         """
         return self._relay_magnification
 
-    def scan_angle_to_object_position(self, angle: dirigo.Angle) -> dirigo.Position:
+    def scan_angle_to_object_position(self, angle: units.Angle) -> units.Position:
         """
         Return the focus position for a certain scanner angle (optical).
         """
         objective_angle = angle / self.relay_magnification
-        return dirigo.Position(objective_angle * self.objective_focal_length)
+        return units.Position(objective_angle * self.objective_focal_length)
 
-    def object_position_to_scan_angle(self, position: dirigo.Position) -> dirigo.Angle:
+    def object_position_to_scan_angle(self, position: units.Position) -> units.Angle:
         """
         Return the scanner angle (optical) required for a certain focus position.
         """
         objective_angle = position / self.objective_focal_length
         angle = objective_angle * self.relay_magnification
-        return dirigo.Angle(angle)
+        return units.Angle(angle)
 

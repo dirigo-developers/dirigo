@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from abc import ABC, abstractmethod
 import time
 
-import dirigo
+from dirigo import units
 
 
 
@@ -25,7 +25,7 @@ class Stage(ABC):
     Abstract interface for a single stage.
     """
     VALID_AXES = {} # subclasses must overwrite with allowed axes labels e.g. 'x'
-    SLEEP_INTERVAL = dirigo.Time('1 ms')
+    SLEEP_INTERVAL = units.Time('1 ms')
 
     @staticmethod
     def _validate_limits_dict(limits_dict):
@@ -63,18 +63,18 @@ class Stage(ABC):
 
     @property
     @abstractmethod
-    def position_limits(self) -> dirigo.RangeWithUnits:
+    def position_limits(self) -> units.RangeWithUnits:
         """Returns an object describing the stage movement limits."""
         pass
 
     @property
     @abstractmethod
-    def position(self) -> dirigo.UnitQuantity:
+    def position(self) -> units.UnitQuantity:
         """The current position."""
         pass
 
     @abstractmethod 
-    def move_to(self, position: dirigo.UnitQuantity, blocking: bool = False):
+    def move_to(self, position: units.UnitQuantity, blocking: bool = False):
         """
         Initiate move to specified position.
 
@@ -122,7 +122,7 @@ class Stage(ABC):
         
     @property
     @abstractmethod
-    def max_velocity(self) -> dirigo.UnitQuantity:
+    def max_velocity(self) -> units.UnitQuantity:
         """
         Return the current maximum velocity setting.
 
@@ -133,12 +133,12 @@ class Stage(ABC):
 
     @max_velocity.setter
     @abstractmethod
-    def max_velocity(self, value:dirigo.UnitQuantity):
+    def max_velocity(self, value:units.UnitQuantity):
         pass
 
     @property
     @abstractmethod
-    def acceleration(self) -> dirigo.UnitQuantity:
+    def acceleration(self) -> units.UnitQuantity:
         """
         Return the current acceleration used during ramp up/down phase of move.
         """
@@ -146,7 +146,7 @@ class Stage(ABC):
 
     @acceleration.setter
     @abstractmethod
-    def acceleration(self, value: dirigo.UnitQuantity):
+    def acceleration(self, value: units.UnitQuantity):
         pass
 
 
@@ -167,7 +167,7 @@ class LinearStage(Stage):
     #     return self._limits
     
     @abstractmethod 
-    def move_to(self, position: dirigo.Position, blocking: bool = False):
+    def move_to(self, position: units.Position, blocking: bool = False):
         """
         Initiate move to specified spatial position.
 
@@ -178,7 +178,7 @@ class LinearStage(Stage):
     
     @property
     @abstractmethod
-    def max_velocity(self) -> dirigo.Velocity:
+    def max_velocity(self) -> units.Velocity:
         """
         Return the maximum velocity used in move operations.
 
@@ -189,13 +189,13 @@ class LinearStage(Stage):
 
     @max_velocity.setter
     @abstractmethod
-    def max_velocity(self, value:dirigo.Velocity):
+    def max_velocity(self, value:units.Velocity):
         """Sets the maximum velocity."""
         pass
 
     @property
     @abstractmethod
-    def acceleration(self) -> dirigo.Acceleration:
+    def acceleration(self) -> units.Acceleration:
         """
         Return the acceleration used during ramp up/down phase of move.
         """
@@ -203,7 +203,7 @@ class LinearStage(Stage):
 
     @acceleration.setter
     @abstractmethod
-    def acceleration(self, value: dirigo.Acceleration):
+    def acceleration(self, value: units.Acceleration):
         pass
 
 
@@ -240,16 +240,16 @@ class RotationStage(Stage):
 
         # Validate limits
         self._validate_limits_dict(limits)
-        self._limits = dirigo.AngleRange(**limits)
+        self._limits = units.AngleRange(**limits)
 
     @property
-    def position_limits(self) -> dirigo.AngleRange:
+    def position_limits(self) -> units.AngleRange:
         """Returns an object describing the stage angular position limits."""
         # these stages may have no limits, how to handle this?
         return self._limits
     
     @abstractmethod 
-    def move_to(self, angle: dirigo.Angle, blocking: bool = False):
+    def move_to(self, angle: units.Angle, blocking: bool = False):
         """
         Initiate move to specified angular position.
 
@@ -260,7 +260,7 @@ class RotationStage(Stage):
 
     @property
     @abstractmethod
-    def max_velocity(self) -> dirigo.AngularVelocity:
+    def max_velocity(self) -> units.AngularVelocity:
         """
         Return the current maximum angular velocity setting.
 
@@ -271,12 +271,12 @@ class RotationStage(Stage):
 
     @max_velocity.setter
     @abstractmethod
-    def max_velocity(self, value:dirigo.AngularVelocity):
+    def max_velocity(self, value:units.AngularVelocity):
         pass
 
     @property
     @abstractmethod
-    def acceleration(self) -> dirigo.AngularAcceleration:
+    def acceleration(self) -> units.AngularAcceleration:
         """
         Return the angular acceleration used during ramp up/down phase of move.
         """
@@ -284,7 +284,7 @@ class RotationStage(Stage):
 
     @acceleration.setter
     @abstractmethod
-    def acceleration(self, value: dirigo.AngularAcceleration):
+    def acceleration(self, value: units.AngularAcceleration):
         pass
 
 

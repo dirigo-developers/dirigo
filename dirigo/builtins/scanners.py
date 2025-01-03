@@ -6,7 +6,7 @@ import nidaqmx.errors
 from nidaqmx.system import System as NISystem
 from nidaqmx.constants import AcquisitionType, LineGrouping, Edge
 
-import dirigo
+from dirigo import units
 from dirigo.hw_interfaces.scanner import (
     RasterScanner,
     FastRasterScanner, SlowRasterScanner,
@@ -95,26 +95,26 @@ class ResonantScannerViaNI(ResonantScanner, FastRasterScanner):
             raise ValueError(
                 f"analog_control_range must have 'min' and 'max' keys."
             )
-        self._analog_control_range = dirigo.VoltageRange(**analog_control_range)
+        self._analog_control_range = units.VoltageRange(**analog_control_range)
 
         # Default: set amplitude to 0 upon startup
-        self.amplitude = dirigo.Angle(0.0)
+        self.amplitude = units.Angle(0.0)
 
     @property
-    def amplitude(self) -> dirigo.Angle:
+    def amplitude(self) -> units.Angle:
         """Get the peak-to-peak amplitude, in radians optical."""
         return self._amplitude
 
     @amplitude.setter
-    def amplitude(self, new_ampl: dirigo.Angle):
+    def amplitude(self, new_ampl: units.Angle):
         """Set the peak-to-peak amplitude."""
-        if not isinstance(new_ampl, dirigo.Angle):
+        if not isinstance(new_ampl, units.Angle):
             raise ValueError(
                 f"`amplitude` must be set with Angle object. Got {type(new_ampl)}"
             )
 
         # Validate that the value is within the acceptable range
-        if not self.angle_limits.within_range(dirigo.Angle(new_ampl/2)):
+        if not self.angle_limits.within_range(units.Angle(new_ampl/2)):
             raise ValueError(
                 f"Value for 'amplitude' outside settable range "
                 f"{self.angle_limits.min} to {self.angle_limits.max}. "
@@ -124,7 +124,7 @@ class ResonantScannerViaNI(ResonantScanner, FastRasterScanner):
         # Calculate the required analog voltage value, validate within range
         ampl_fraction = new_ampl / self.angle_limits.range
         analog_value =  ampl_fraction * self.analog_control_range.max
-        if not self.analog_control_range.within_range(dirigo.Voltage(analog_value)):
+        if not self.analog_control_range.within_range(units.Voltage(analog_value)):
             raise ValueError(
                 f"Voltage to achieve amplitude={new_ampl} is outside range. "
                 f"Attempted to set {analog_value} V. "
@@ -142,7 +142,7 @@ class ResonantScannerViaNI(ResonantScanner, FastRasterScanner):
         self._amplitude = new_ampl
 
     @property
-    def analog_control_range(self) -> dirigo.VoltageRange:
+    def analog_control_range(self) -> units.VoltageRange:
         """Returns an object describing the analog control range."""
         return self._analog_control_range
 
@@ -168,7 +168,7 @@ class FrameClock:
     def __init__(self, 
                  line_clock_channel: str, 
                  frame_clock_channel: str,
-                 line_clock_frequency: dirigo.Frequency,
+                 line_clock_frequency: units.Frequency,
                  periods_per_frame: int):
         """
         Initializes the FrameClock object.
@@ -193,7 +193,7 @@ class FrameClock:
         validate_ni_channel(line_clock_channel)
         self._line_clock_channel = line_clock_channel
 
-        if not isinstance(line_clock_frequency, dirigo.Frequency):
+        if not isinstance(line_clock_frequency, units.Frequency):
             raise ValueError("`line_clock_frequency` must be a frequency object")
         self._line_clock_frequency = line_clock_frequency
 
@@ -246,7 +246,7 @@ class FrameClock:
 
 
 class GalvoSlowRasterScannerViaNI(GalvoScanner, SlowRasterScanner):
-    REARM_TIME = dirigo.Time("1 ms") # time to allow NI card to rearm after outputing waveform
+    REARM_TIME = units.Time("1 ms") # time to allow NI card to rearm after outputing waveform
 
     def __init__(self, control_channel: str, analog_control_range: dict, 
                  trigger_channel: str, sample_rate: str, 
@@ -266,13 +266,13 @@ class GalvoSlowRasterScannerViaNI(GalvoScanner, SlowRasterScanner):
             raise ValueError(
                 f"`analog_control_range` must be a dictionary with 'min' and 'max' keys."
             )
-        self._analog_control_range = dirigo.VoltageRange(**analog_control_range)
+        self._analog_control_range = units.VoltageRange(**analog_control_range)
 
         # validate trigger channel
         validate_ni_channel(trigger_channel)
         self._trigger_channel = trigger_channel
 
-        self._sample_rate = dirigo.SampleRate(sample_rate)
+        self._sample_rate = units.SampleRate(sample_rate)
 
         self._frame_clock: FrameClock = None # Set later with information from fast scanner
         validate_ni_channel(line_clock_channel) # will be validated again when FrameClock object is made, but that's OK
@@ -407,7 +407,7 @@ if __name__ == "__main__":
     scanner.frequency = 7910 / (256+16)
     scanner.waveform = 'asymmetric triangle'
     scanner.duty_cycle = 0.9
-    scanner.amplitude = dirigo.Angle('10 deg')
+    scanner.amplitude = units.Angle('10 deg')
     scanner.start()
 
     None

@@ -4,7 +4,7 @@ from pathlib import Path
 from platformdirs import user_config_dir
 import numpy as np
 
-import dirigo
+from dirigo import units
 from dirigo.components.io import load_toml
 
 """
@@ -150,17 +150,17 @@ class SampleClock(ABC):
 
     @property
     @abstractmethod
-    def rate(self) -> dirigo.SampleRate:
+    def rate(self) -> units.SampleRate:
         pass
 
     @rate.setter
     @abstractmethod
-    def rate(self, value: dirigo.SampleRate):
+    def rate(self, value: units.SampleRate):
         pass
     
     @property
     @abstractmethod
-    def rate_options(self) -> set[dirigo.SampleRate]:
+    def rate_options(self) -> set[units.SampleRate]:
         pass
 
     @property
@@ -232,19 +232,19 @@ class Trigger(ABC):
 
     @property
     @abstractmethod
-    def level(self) -> dirigo.Voltage:
+    def level(self) -> units.Voltage:
         """Trigger level in volts."""
         pass
     
     @level.setter
     @abstractmethod
-    def level(self, level: dirigo.Voltage):
+    def level(self, level: units.Voltage):
         """Set the trigger level."""
         pass
 
     @property
     @abstractmethod
-    def level_limits(self) -> dirigo.VoltageRange:
+    def level_limits(self) -> units.VoltageRange:
         """Returns an object describing the supported trigger level range."""
         pass
 
@@ -304,7 +304,7 @@ class Acquire(ABC):
 
     @property
     @abstractmethod
-    def trigger_delay(self) -> dirigo.Time:
+    def trigger_delay(self) -> units.Time:
         """Delay between trigger event and acquisition start."""
         # Arguably could be part of Trigger object, but put here because of role
         # in acquisition timing
@@ -312,13 +312,13 @@ class Acquire(ABC):
 
     @trigger_delay.setter
     @abstractmethod
-    def trigger_delay(self, delay: dirigo.Time):
+    def trigger_delay(self, delay: units.Time):
         """Set the trigger delay."""
         pass
 
     @property
     @abstractmethod
-    def trigger_delay_resolution(self) -> dirigo.Time:
+    def trigger_delay_resolution(self) -> units.Time:
         """Resolution of the trigger delay setting."""
         pass
     
@@ -358,7 +358,7 @@ class Acquire(ABC):
 
     @property
     @abstractmethod
-    def record_duration(self) -> dirigo.Time:
+    def record_duration(self) -> units.Time:
         """Record duration.
 
         Use `record_length` for specifying the same setting in terms of number 
