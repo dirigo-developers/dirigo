@@ -11,14 +11,15 @@ authors = [
 ]
 license = {text = "MIT"}
 dependencies = [
-    "platformdirs"
+    "platformdirs",
+    "nidaqmx"
 ]
 
 [project.entry-points."dirigo_acquisitions"]
-linescan = "dirigo.builtin_plugins.acquisitions:LineAcquisition"
-frame = "dirigo.builtin_plugins.acquisitions:FrameAcquisition"
+linescan = "dirigo.plugins.acquisitions:LineAcquisition"
+frame = "dirigo.plugins.acquisitions:FrameAcquisition"
 
 [project.entry-points."dirigo_scanners"]
-resonant_scanner_via_ni = "dirigo.builtin_plugins.scanners:ResonantScannerViaNI"
-galvo_slow_raster_scanner_via_ni = "dirigo.builtin_plugins.scanners:GalvoSlowRasterScannerViaNI"
+resonant_scanner_via_ni = "dirigo.plugins.scanners:ResonantScannerViaNI"
+galvo_slow_raster_scanner_via_ni = "dirigo.plugins.scanners:GalvoSlowRasterScannerViaNI"
 
