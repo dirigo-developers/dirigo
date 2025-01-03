@@ -15,10 +15,10 @@ dependencies = [
 ]
 
 [project.entry-points."dirigo_acquisitions"]
-linescan = "dirigo.builtins.acquisitions:LineAcquisition"
-frame = "dirigo.builtins.acquisitions:FrameAcquisition"
+linescan = "dirigo.builtin_plugins.acquisitions:LineAcquisition"
+frame = "dirigo.builtin_plugins.acquisitions:FrameAcquisition"
 
 [project.entry-points."dirigo_scanners"]
-resonant_scanner_via_ni = "dirigo.builtins.scanners:ResonantScannerViaNI"
-galvo_slow_raster_scanner_via_ni = "dirigo.builtins.scanners:GalvoSlowRasterScannerViaNI"
+resonant_scanner_via_ni = "dirigo.builtin_plugins.scanners:ResonantScannerViaNI"
+galvo_slow_raster_scanner_via_ni = "dirigo.builtin_plugins.scanners:GalvoSlowRasterScannerViaNI"
 

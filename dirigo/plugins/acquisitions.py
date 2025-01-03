@@ -1,7 +1,6 @@
 from pathlib import Path
 import math
 import queue
-import time
 
 from platformdirs import user_config_dir
 

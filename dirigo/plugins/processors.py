@@ -5,7 +5,7 @@ from numba import njit, prange, types
 
 from dirigo import units
 from dirigo.sw_interfaces import Processor
-from dirigo.builtins.acquisitions import FrameAcquisitionSpec
+from dirigo.plugins.acquisitions import FrameAcquisitionSpec
 
 
 TWO_PI = 2* np.pi

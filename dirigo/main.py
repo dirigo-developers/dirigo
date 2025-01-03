@@ -7,8 +7,8 @@ from platformdirs import user_config_dir
 from dirigo.components.io import SystemConfig
 from dirigo.components.hardware import Hardware
 from dirigo.sw_interfaces import Acquisition, Processor, Display
-from dirigo.builtins.processors import RasterFrameProcessor
-from dirigo.builtins.displays import FrameDisplay
+from dirigo.plugins.processors import RasterFrameProcessor
+from dirigo.plugins.displays import FrameDisplay
 
 
 
