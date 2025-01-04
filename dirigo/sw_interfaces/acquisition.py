@@ -1,7 +1,4 @@
-from abc import ABC, abstractmethod
-import threading
-import queue
-
+from dirigo.sw_interfaces.worker import Worker
 from dirigo.components.hardware import Hardware
 from dirigo.components.io import load_toml
 
@@ -17,7 +14,7 @@ class AcquisitionSpec:
         self.nchannels = nchannels
 
 
-class Acquisition(threading.Thread, ABC):
+class Acquisition(Worker):
     """
     Dirigo interface for data acquisition worker thread.
     """
@@ -25,13 +22,11 @@ class Acquisition(threading.Thread, ABC):
     SPEC_LOCATION: str = None
     SPEC_OBJECT: AcquisitionSpec
     
-    def __init__(self, hw: Hardware, data_queue: queue.Queue, spec: AcquisitionSpec):
-        super().__init__()
+    def __init__(self, hw: Hardware, spec: AcquisitionSpec):
+        super().__init__() # sets up Publisher and inbox (Queue) for this thread
         self.hw = hw
         self.check_resources()
-        self.data_queue = data_queue
         self.spec = spec
-        self._stop_event = threading.Event()  # Event to signal thread termination
     
     def check_resources(self):
         """Iterates through class attribute REQUIRED_RESOURCES to check if all 
@@ -59,15 +54,7 @@ class Acquisition(threading.Thread, ABC):
         spec_fn = spec_name + ".toml"
         spec = load_toml(cls.SPEC_LOCATION / spec_fn)
         return cls.SPEC_OBJECT(**spec)
-
-    @abstractmethod
-    def run(self):
-        pass
-
-    def stop(self, blocking=False):
-        """Sets a flag to stop acquisition."""
-        self._stop_event.set()
-
-        if blocking:
-            self.join()  # does not return until thread completes
+    
+    # Note that there is an abstractmethod, run() in the parent class. 
+    # Acquisition subclasses must implement it.
 

@@ -1,6 +1,5 @@
 import importlib.metadata
 from pathlib import Path
-import queue
 
 from platformdirs import user_config_dir
 
@@ -30,10 +29,6 @@ class Dirigo:
 
         self.hw = Hardware(self.sys_config) # TODO, should this be 'resources'?
 
-        self.data_queue = queue.Queue() 
-        self.processed_queue = queue.Queue()
-        self.display_queue = queue.Queue()
-
     @property
     def acquisition_types(self) -> set[str]:
         """Returns a set of the available acquisition types."""
@@ -42,7 +37,6 @@ class Dirigo:
     
     def acquisition_factory(self, type: str, spec_name: str = "default") -> Acquisition:
         """Returns an initialized acquisition worker object."""
-        self._flush_queue()
 
         # Dynamically load plugin class
         entry_pts = importlib.metadata.entry_points(group="dirigo_acquisitions")
@@ -58,7 +52,7 @@ class Dirigo:
                     spec = plugin_class.get_specification(spec_name)
 
                     # Instantiate and return the acquisition worker
-                    return plugin_class(self.hw, self.data_queue, spec)  
+                    return plugin_class(self.hw, spec)  
                 
                 except Exception as e:
                     raise RuntimeError(f"Failed to load Acquisition '{type}': {e}")
@@ -73,18 +67,11 @@ class Dirigo:
         #entry_pts = importlib.metadata.entry_points(group="dirigo_processors")
         #TODO finish entry point loading
 
-        return RasterFrameProcessor(acquisition, self.processed_queue)
+        return RasterFrameProcessor(acquisition)
     
     def display_factory(self, processor: Processor = None, acquisition: Acquisition = None) -> Display:
-        return FrameDisplay(self.display_queue, acquisition, processor)
+        return FrameDisplay(acquisition, processor)
     
-    def _flush_queue(self):
-        """Remove all items from the queue."""
-        while not self.data_queue.empty():
-            try:
-                self.data_queue.get_nowait()
-            except queue.Empty:
-                break
 
         
 if __name__ == "__main__":
@@ -92,12 +79,14 @@ if __name__ == "__main__":
     diri = Dirigo()
     
     acquisition = diri.acquisition_factory('frame')
-
     processor = diri.processor_factory(acquisition)
-
     display = diri.display_factory(processor)
-
     # TODO spawn Logging thread
+
+    # Connect threads (allows arbitrary connections)
+    acquisition.publisher.subscribe(processor.inbox)
+    processor.publisher.subscribe(display.inbox)
+
 
     processor.start()
     display.start()

@@ -8,8 +8,8 @@ from numba import njit, prange, types
 from dirigo.sw_interfaces import Display, Acquisition, Processor
 
 
-# TODO, 16 bit LUT is a bit clunky, investigate whether we can streamline this
 
+# TODO, 16 bit LUT is a bit clunky, investigate whether we can streamline this
 
 # TODO inverted color maps (start triplets not all 0's)
 class LookUpTable:
@@ -144,8 +144,8 @@ class FrameDisplay(Display):
     default_lower_limit = 0
     default_upper_limit = 2**11
 
-    def __init__(self, display_queue: queue.Queue, acquisition: Acquisition, processor: Processor):
-        super().__init__(display_queue, acquisition, processor)
+    def __init__(self, acquisition: Acquisition, processor: Processor):
+        super().__init__(acquisition, processor)
         
         # Create the LUTs
         if acquisition is not None:
@@ -182,17 +182,17 @@ class FrameDisplay(Display):
     def run(self):
         while True:
             t0 = time.perf_counter()
-            data: np.ndarray = self._data_queue.get(block=True) # may want to add a timeout
+            data: np.ndarray = self.inbox.get(block=True) # may want to add a timeout
             t1 = time.perf_counter()
 
             if data is None: # Check for sentinel None
-                self.display_queue.put(None) # pass sentinel
+                self.publisher.publish(None) # pass sentinel
                 print('exiting display thread')
                 return # concludes run() - this thread ends
             
             processed = display_kernel(data, self.luts_array)
 
-            self.display_queue.put(processed)
+            self.publisher.publish(processed)
 
             print(f'Made display frame. Waited {t1-t0}')
 

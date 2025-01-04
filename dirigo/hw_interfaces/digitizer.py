@@ -304,22 +304,36 @@ class Acquire(ABC):
 
     @property
     @abstractmethod
-    def trigger_delay(self) -> units.Time:
-        """Delay between trigger event and acquisition start."""
+    def trigger_delay_samples(self) -> int:
+        """
+        Delay between trigger event and acquisition start, in sample clock periods.
+        
+        Use `trigger_delay_duration` for the same setting in terms of time.
+        """
         # Arguably could be part of Trigger object, but put here because of role
         # in acquisition timing
         pass
 
-    @trigger_delay.setter
+    @trigger_delay_samples.setter
     @abstractmethod
-    def trigger_delay(self, delay: units.Time):
-        """Set the trigger delay."""
+    def trigger_delay_samples(self, samples: int):
+        """Set the trigger delay, in sample clock periods."""
         pass
 
     @property
     @abstractmethod
-    def trigger_delay_resolution(self) -> units.Time:
-        """Resolution of the trigger delay setting."""
+    def trigger_delay_duration(self) -> units.Time:
+        """Delay between trigger event and acquisition start, in units of time.
+        
+        Use `trigger_delay_samples` for the same setting in terms of sample 
+        clock periods. 
+        """
+        pass
+
+    @property
+    @abstractmethod
+    def trigger_delay_sample_resolution(self) -> int:
+        """Resolution of the trigger delay setting, in sample clock periods."""
         pass
     
     # TODO, feasible to merge the next 3 into trigger_delay?
@@ -342,7 +356,7 @@ class Acquire(ABC):
     def record_length(self) -> int:
         """Record length in number samples.
 
-        Use `record_duration` for specifying the same setting in terms of time. 
+        Use `record_duration` for the same setting in terms of time. 
         """
         pass
 
@@ -361,7 +375,7 @@ class Acquire(ABC):
     def record_duration(self) -> units.Time:
         """Record duration.
 
-        Use `record_length` for specifying the same setting in terms of number 
+        Use `record_length` for the same setting in terms of number 
         samples. 
         """
         pass
@@ -422,6 +436,18 @@ class Acquire(ABC):
     @abstractmethod
     def buffers_allocated(self, buffers: int):
         """Set the number of buffers to allocate for an acquisition."""
+        pass
+
+    @property
+    @abstractmethod
+    def timestamps_enabled(self) -> bool:
+        """Enables timestamps on boards supporting them.
+        
+        If timestamps are not available, should raise NotImplementedError"""
+        pass
+
+    @timestamps_enabled.setter
+    def timestamps_enabled(self, enable: bool):
         pass
 
     @abstractmethod

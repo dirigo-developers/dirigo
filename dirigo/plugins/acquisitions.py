@@ -10,6 +10,7 @@ from dirigo.hw_interfaces.scanner import FastRasterScanner, SlowRasterScanner
 from dirigo.sw_interfaces.acquisition import AcquisitionSpec, Acquisition
 
 
+TWO_PI = 2 * math.pi 
 
 class LineAcquisitionSpec(AcquisitionSpec): 
     def __init__(
@@ -78,10 +79,10 @@ class LineAcquisition(Acquisition):
     SPEC_LOCATION = Path(user_config_dir("Dirigo")) / "acquisition/linescan"
     SPEC_OBJECT = LineAcquisitionSpec
     
-    def __init__(self, hw, data_queue: queue.Queue, spec: LineAcquisitionSpec):
+    def __init__(self, hw, spec: LineAcquisitionSpec):
         """Initialize a line acquisition worker."""
         # Tip: since this method runs on main thread, limit to HW init tasks that will return fast, prepend slower tasks to run method
-        super().__init__(hw, data_queue, spec) # stores hw and queue, checks resources
+        super().__init__(hw, spec) # sets up publisher & inbox, stores hw, checks resources
         self.spec: LineAcquisitionSpec # to refine type hints
 
         # Get digitizer default profile, set it
@@ -89,6 +90,8 @@ class LineAcquisition(Acquisition):
 
         # Setup digitizer buffers
         self.hw.digitizer.acquire.pre_trigger_samples = 0 # TODO, maybe allow this to be adjustable?
+        self.hw.digitizer.acquire.timestamps_enabled = True #testing
+        self.hw.digitizer.acquire.trigger_delay_samples = self._calculate_trigger_delay()
         self.hw.digitizer.acquire.record_length = self._calculate_record_length()
         self.hw.digitizer.acquire.records_per_buffer = spec.records_per_buffer
         self.hw.digitizer.acquire.buffers_per_acquisition = spec.buffers_per_acquisition
@@ -114,31 +117,46 @@ class LineAcquisition(Acquisition):
                 #t0 = time.perf_counter()
                 buffer_data = digitizer.acquire.get_next_completed_buffer()
                 #t1 = time.perf_counter()
-                
-                self.data_queue.put(buffer_data)
+                    
+                self.publisher.publish(buffer_data)
                 print(f"{self.native_id} Got buffer {digitizer.acquire.buffers_acquired}.")
 
         finally:
             # Put None into queue to signal finished, stop scanning
-            self.data_queue.put(None)
+            self.publisher.publish(None)
             self.hw.fast_raster_scanner.stop()
 
-    def _calculate_record_length(self, round_up: bool = True) -> int | float:
-        # Calculate record length
-        scan_per = 1 / self.hw.fast_raster_scanner.frequency
-        
-        if self.spec.bidirectional_scanning:
-            record_per = scan_per * math.asin((self.spec.fill_fraction+1) / 2) * 2/math.pi
-        else:
-            record_per = scan_per/2  * math.asin(self.spec.fill_fraction) * 2/math.pi
+    def _calculate_trigger_delay(self, round_down: bool = True) -> int | float:
+        """Compute the number of samples to delay"""
+        scan_period = 1.0 / self.hw.fast_raster_scanner.frequency
 
-        record_len = record_per * self.hw.digitizer.sample_clock.rate
-       
+        start_time = scan_period * math.acos(self.spec.fill_fraction) / (2 * math.pi)
+        start_index = start_time * self.hw.digitizer.sample_clock.rate
+
+        if round_down:
+            tdr = self.hw.digitizer.acquire.trigger_delay_sample_resolution
+            start_index = tdr * int(start_index / tdr)
+
+        return start_index
+
+    def _calculate_record_length(self, round_up: bool = True) -> int | float:
+        ff = self.spec.fill_fraction
+        start = math.acos(ff) / TWO_PI
+
+        if self.spec.bidirectional_scanning:
+            end = 1.0 - start
+        else:
+            end = math.acos(-ff) / TWO_PI
+
+        record_len = (end - start) * self.hw.digitizer.sample_clock.rate \
+            / self.hw.fast_raster_scanner.frequency
+        
         if round_up:
             # Round record length up to the next allowable size (or the min)
             rlr = self.hw.digitizer.acquire.record_length_resolution
             record_len = rlr * int(record_len / rlr + 1) 
 
+            # Also set enforce the min record length requirement
             if record_len < self.hw.digitizer.acquire.record_length_minimum:
                 record_len = self.hw.digitizer.acquire.record_length_minimum
         
@@ -188,8 +206,8 @@ class FrameAcquisition(LineAcquisition):
     SPEC_LOCATION = Path(user_config_dir("Dirigo")) / "acquisition/frame"
     SPEC_OBJECT = FrameAcquisitionSpec
 
-    def __init__(self, hw, data_queue: queue.Queue, spec: FrameAcquisitionSpec):
-        super().__init__(hw, data_queue, spec)
+    def __init__(self, hw, spec: FrameAcquisitionSpec):
+        super().__init__(hw, spec)
         self.spec: FrameAcquisitionSpec
 
         # Set up slow scanner, fast scanner is already set up in super().__init__()
@@ -209,7 +227,7 @@ class FrameAcquisition(LineAcquisition):
         self.hw.slow_raster_scanner.start()
 
         try:
-            super().run()
+            super().run() # The hard work is done by super's run method
 
         finally:
             self.hw.slow_raster_scanner.stop()

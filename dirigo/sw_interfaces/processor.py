@@ -1,22 +1,18 @@
-from abc import ABC, abstractmethod
-import threading
-import queue
-
-from dirigo.sw_interfaces.acquisition import AcquisitionSpec, Acquisition
+from dirigo.sw_interfaces.worker import Worker
+from dirigo.sw_interfaces.acquisition import Acquisition
 
 
-class Processor(threading.Thread, ABC):
+# TODO, 
+# Must a Processor always be associated with an Acquisition? 
+# Can Processors be cascaded?
+# Limitation: currently needs to be linked to Acquisition specifically
+
+class Processor(Worker):
     """
     Dirigo interface for data processing worker thread.
     """
-    def __init__(self, acquisition: Acquisition, processed_queue: queue.Queue):
+    def __init__(self, acquisition: Acquisition):
         super().__init__()
         self._acq = acquisition
         self._spec = acquisition.spec
-        self._raw_queue = acquisition.data_queue # populated by Acquisition worker(s)
-        self.processed_queue = processed_queue # populated by this worker, consumed by Display or Logging
     
-    @abstractmethod
-    def run(self):
-        pass
-

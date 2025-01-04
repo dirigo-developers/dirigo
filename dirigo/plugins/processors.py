@@ -1,5 +1,3 @@
-import queue
-
 import numpy as np
 from numba import njit, prange, types
 
@@ -8,7 +6,7 @@ from dirigo.sw_interfaces import Processor
 from dirigo.plugins.acquisitions import FrameAcquisitionSpec
 
 
-TWO_PI = 2* np.pi
+TWO_PI = 2 * np.pi
 
 # issues:
 # need to support uint16 and uint8 (rarer)
@@ -58,7 +56,7 @@ def dewarp_kernel(
             if Nsum == 0: # No samples exist in pixel range
                 continue # could interpolate a value here?
 
-            i = start_indices[fwd_rvs, fi] * Nc
+            i = start_indices[fwd_rvs, fi]
 
             if (i < 0) or (i > Nsamples): # Requesting indices outside sampled data
                 continue
@@ -77,8 +75,8 @@ def dewarp_kernel(
         
 
 class RasterFrameProcessor(Processor):
-    def __init__(self, acquisition, processed_queue):
-        super().__init__(acquisition, processed_queue) # privately stores queues available
+    def __init__(self, acquisition):
+        super().__init__(acquisition)
         self._spec: FrameAcquisitionSpec # to refine type hinting
         self.dewarped_shape = (
                 self._spec.lines_per_frame,
@@ -88,21 +86,21 @@ class RasterFrameProcessor(Processor):
         
     def run(self):
         while True: # Loops until receives sentinel None
-            data: np.ndarray = self._raw_queue.get(block=True) # we may want to add a timeout
+            data: np.ndarray = self.inbox.get(block=True) # we may want to add a timeout
 
             if data is None: # Check for sentinel None
                 # execute any cleanup code here
-                self.processed_queue.put(None) # pass sentinel
+                self.publisher.publish(None) # pass sentinel
                 print('exiting processing thread')
                 return # concludes run() - this thread ends         
 
-            start_indices = self.calculate_start_indices()
+            start_indices = self.calculate_start_indices() - self._acq.hw.digitizer.acquire.trigger_delay_samples
             nsamples_to_sum = np.abs(np.diff(start_indices, axis=1)) # put inside kernel
 
             dewarped = dewarp_kernel(data, self.dewarped_shape, start_indices, nsamples_to_sum)
             print(f"{self.native_id} Processed a frame")
 
-            self.processed_queue.put(dewarped)
+            self.publisher.publish(dewarped)
 
 
     def calculate_start_indices(self, trigger_phase: units.Angle = units.Angle(0.0)):
@@ -124,7 +122,7 @@ class RasterFrameProcessor(Processor):
         if self._spec.bidirectional_scanning:
             temporal_edges_fwd = temporal_edges
             temporal_edges_rvs = 1.0 - temporal_edges
-            temporal_edges_rvs = np.roll(temporal_edges_rvs, shift=-1) # why?
+            #temporal_edges_rvs = np.roll(temporal_edges_rvs, shift=-1) # why?
             temporal_edges = np.vstack([temporal_edges_fwd, temporal_edges_rvs]) 
         else:
             temporal_edges = np.vstack([temporal_edges])
