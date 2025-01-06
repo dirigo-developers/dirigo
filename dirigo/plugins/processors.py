@@ -90,7 +90,7 @@ class RasterFrameProcessor(Processor):
 
             if data is None: # Check for sentinel None
                 # execute any cleanup code here
-                self.publisher.publish(None) # pass sentinel
+                self.publish(None) # pass sentinel
                 print('exiting processing thread')
                 return # concludes run() - this thread ends         
 
@@ -100,7 +100,7 @@ class RasterFrameProcessor(Processor):
             dewarped = dewarp_kernel(data, self.dewarped_shape, start_indices, nsamples_to_sum)
             print(f"{self.native_id} Processed a frame")
 
-            self.publisher.publish(dewarped)
+            self.publish(dewarped)
 
 
     def calculate_start_indices(self, trigger_phase: units.Angle = units.Angle(0.0)):

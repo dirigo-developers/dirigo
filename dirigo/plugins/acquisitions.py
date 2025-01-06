@@ -82,7 +82,7 @@ class LineAcquisition(Acquisition):
     def __init__(self, hw, spec: LineAcquisitionSpec):
         """Initialize a line acquisition worker."""
         # Tip: since this method runs on main thread, limit to HW init tasks that will return fast, prepend slower tasks to run method
-        super().__init__(hw, spec) # sets up publisher & inbox, stores hw, checks resources
+        super().__init__(hw, spec) # sets up thread, inbox, stores hw, checks resources
         self.spec: LineAcquisitionSpec # to refine type hints
 
         # Get digitizer default profile, set it
@@ -118,12 +118,12 @@ class LineAcquisition(Acquisition):
                 buffer_data = digitizer.acquire.get_next_completed_buffer()
                 #t1 = time.perf_counter()
                     
-                self.publisher.publish(buffer_data)
+                self.publish(buffer_data)
                 print(f"{self.native_id} Got buffer {digitizer.acquire.buffers_acquired}.")
 
         finally:
             # Put None into queue to signal finished, stop scanning
-            self.publisher.publish(None)
+            self.publish(None)
             self.hw.fast_raster_scanner.stop()
 
     def _calculate_trigger_delay(self, round_down: bool = True) -> int | float:

@@ -81,12 +81,11 @@ if __name__ == "__main__":
     acquisition = diri.acquisition_factory('frame')
     processor = diri.processor_factory(acquisition)
     display = diri.display_factory(processor)
-    # TODO spawn Logging thread
+    # logging = diri.logging_factory()
 
-    # Connect threads (allows arbitrary connections)
-    acquisition.publisher.subscribe(processor.inbox)
-    processor.publisher.subscribe(display.inbox)
-
+    # Connect threads
+    acquisition.add_subscriber(processor)
+    processor.add_subscriber(display)
 
     processor.start()
     display.start()

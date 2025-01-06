@@ -4,37 +4,21 @@ import queue
 
 
 
-class Publisher:
-    """A multi-Queue distribution system."""
-    def __init__(self):
-        self.subscribers: list[queue.Queue] = []  # List of queues for subscribers
-
-    def subscribe(self, subscriber_queue: queue.Queue):
-        """Add a new subscriber queue."""
-        self.subscribers.append(subscriber_queue)
-
-    def unsubscribe(self, subscriber_queue: queue.Queue):
-        """Remove a subscriber queue."""
-        self.subscribers.remove(subscriber_queue)
-
-    def publish(self, data):
-        """Send data to all subscribers.
-        
-        Similar to Queue.put(data), but automatically sends to multiple queues.
-        """
-        for q in self.subscribers:
-            q.put(data) # "I'm thrilled to share ..."
-
-
 class Worker(threading.Thread, ABC):
     def __init__(self):
-        """Sets up a worker Thread object with a Publisher to send out data and
-        an inbox (Queue) to recieve data.
+        """
+        Sets up a worker Thread object with internal publisher-subscriber model.
+
+        Each Worker has a queue.Queue `inbox` which it can call `get()` on to
+        obtain incoming data. Each worker can send out data using the `publish`
+        method to any subscribers 
         """
         super().__init__() # Sets up Thread
-        self.publisher = Publisher()
-        self.inbox = queue.Queue()
         self._stop_event = threading.Event()  # Event to signal thread termination
+
+        # Publisher-subscriber objects
+        self.inbox = queue.Queue()
+        self._subscribers: list['Worker'] = []
 
     @abstractmethod
     def run():
@@ -47,4 +31,20 @@ class Worker(threading.Thread, ABC):
         if blocking:
             self.join() # does not return until thread completes
 
+    # Publisher-Subscriber model
+    def add_subscriber(self, subscriber: 'Worker'):
+        """Add a reference to a new subscriber."""
+        self._subscribers.append(subscriber)
+
+    def remove_subscriber(self, subscriber: 'Worker'):
+        """Remove reference to a subscriber."""
+        self._subscribers.remove(subscriber)
+
+    def publish(self, data):
+        """Send data to all subscribers.
+        
+        Similar to Queue.put(data), but automatically sends to multiple queues.
+        """
+        for subscriber in self._subscribers:
+            subscriber.inbox.put(data) # "Thrilled to share ..."
 

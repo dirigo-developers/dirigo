@@ -23,7 +23,7 @@ class Acquisition(Worker):
     SPEC_OBJECT: AcquisitionSpec
     
     def __init__(self, hw: Hardware, spec: AcquisitionSpec):
-        super().__init__() # sets up Publisher and inbox (Queue) for this thread
+        super().__init__()
         self.hw = hw
         self.check_resources()
         self.spec = spec

@@ -8,7 +8,7 @@ class Display(Worker):
     Dirigo interface for display processing.
     """
     def __init__(self, acquisition: Acquisition = None, processor: Processor = None):
-        # Instantiate with a display queue and either an Acquisition or Processor
+        """Instantiate with a display queue and either an Acquisition or Processor"""
         super().__init__()
 
         if (acquisition is not None) and (processor is not None):
@@ -21,3 +21,10 @@ class Display(Worker):
         self._acquisition = acquisition
         self._processor = processor
 
+    @property
+    def nchannels(self):
+        """Returns the number of channels expected from Acquisition or Processor."""
+        if self._acquisition is not None:
+            return self._acquisition.spec.nchannels
+        else:
+            return self._processor._spec.nchannels
