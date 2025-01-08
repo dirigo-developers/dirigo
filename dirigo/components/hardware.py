@@ -1,4 +1,5 @@
 import importlib.metadata
+from dataclasses import dataclass
 
 from dirigo.components.io import SystemConfig
 from dirigo.components.optics import LaserScanningOptics
@@ -6,6 +7,15 @@ from dirigo.hw_interfaces.digitizer import Digitizer
 from dirigo.hw_interfaces.stage import MultiAxisStage
 from dirigo.hw_interfaces.scanner import FastRasterScanner, SlowRasterScanner
 
+
+@dataclass
+class ValueRange:
+    min: int
+    max: int
+
+    @property
+    def range(self) -> int:
+        return self.max - self.min
 
 
 class Hardware:
@@ -47,3 +57,30 @@ class Hardware:
                 ConcreteClass = entry_point.load()
                 return ConcreteClass(**default_config)
         raise ValueError(f"No {group} plugin found for: {default_config['type']}")
+    
+    @property
+    def nchannels(self) -> int:
+        """Returns the number channels present on the primary data acquisitoin 
+        device.
+        """
+        # TODO is this a good strategy? Are other devices multichannel?
+        if hasattr(self, 'digitizer'):
+            return len(self.digitizer.channels)
+        elif hasattr(self, 'camera'):
+            return 1 # monochrome only for now, but RGB cameras should be 3-channel
+        else:
+            return 0 # or raise error?
+        
+    @property
+    def data_range(self) -> ValueRange:
+        """Returns the range: min (inclusive) - max (exclusive)"""
+        if hasattr(self, 'digitizer'):
+            bytes_per_sample = (self.digitizer.bit_depth-1) // 8 + 1
+            return ValueRange( 
+                min=0,
+                max=2**(8*bytes_per_sample) # This is assuming that all digitizers use the most significant bits
+            )
+        elif hasattr(self, 'camera'):
+            return 1 # monochrome only for now, but RGB cameras should be 3-channel
+        else:
+            return 0 # or raise error?

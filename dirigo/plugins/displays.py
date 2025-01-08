@@ -1,9 +1,11 @@
-from enum import Enum
+import time
 
 import numpy as np
 from numba import njit, prange, types
 
 from dirigo.sw_interfaces import Display, Acquisition, Processor
+from dirigo.sw_interfaces.display import ColorVector, DisplayChannel
+
 
 
 # Generate gamma correction LUT
@@ -19,13 +21,15 @@ gamma_lut = np.round((2**8 - 1) * x**(1/gamma)).astype(np.uint8)
 def additive_display_kernel(data: np.ndarray, luts: np.ndarray) -> np.ndarray:
     """Applies LUTs and blends channels additively."""
     Ny, Nx, Nc = data.shape
+    transfer_function_max_index = 2**16 - 1
     
     image = np.zeros(shape=(Ny, Nx, 3), dtype=np.uint8)
 
     for yi in prange(Ny):
         for xi in prange(Nx):
 
-            r, g, b = types.uint32(0), types.uint32(0), types.uint32(0)  
+            #r, g, b = types.uint32(0), types.uint32(0), types.uint32(0)
+            r, g, b = 0, 0, 0  # Explicitly typing these as uint32 for some reason triggers a conversion to float64 which can't be used to index
             for ci in range(Nc):
                 lut_index = data[yi, xi, ci]
                 r += luts[ci, lut_index, 0]
@@ -33,9 +37,9 @@ def additive_display_kernel(data: np.ndarray, luts: np.ndarray) -> np.ndarray:
                 b += luts[ci, lut_index, 2]
             
             # Gamma correct blended values and assign to output image 
-            image[yi, xi, 0] = gamma_lut[min(r, 2**16-1)]
-            image[yi, xi, 1] = gamma_lut[min(g, 2**16-1)]
-            image[yi, xi, 2] = gamma_lut[min(b, 2**16-1)]
+            image[yi, xi, 0] = gamma_lut[min(r, transfer_function_max_index)]
+            image[yi, xi, 1] = gamma_lut[min(g, transfer_function_max_index)]
+            image[yi, xi, 2] = gamma_lut[min(b, transfer_function_max_index)]
 
     return image
 
@@ -53,7 +57,8 @@ def subtractive_display_kernel(data: np.ndarray, luts: np.ndarray) -> np.ndarray
     for yi in prange(Ny):
         for xi in prange(Nx):
 
-            r, g, b = types.int32(2**16-1), types.int32(2**16-1), types.int32(2**16-1)  
+            #r, g, b = types.int32(2**16-1), types.int32(2**16-1), types.int32(2**16-1)  
+            r, g, b = 2**16-1, 2**16-1, 2**16-1
             for ci in range(Nc):
                 lut_index = data[yi, xi, ci]
                 r -= luts[ci, lut_index, 0]
@@ -68,15 +73,6 @@ def subtractive_display_kernel(data: np.ndarray, luts: np.ndarray) -> np.ndarray
     return image
 
 
-class AdditiveColorMap(Enum):
-    GRAY =    [1, 1, 1]
-    RED =     [1, 0, 0]
-    GREEN =   [0, 1, 0]
-    BLUE =    [0, 0, 1]
-    CYAN =    [0, 1, 1]
-    MAGENTA = [1, 0, 1]
-    YELLOW =  [1, 1, 0]
-
 
 def default_colormap_lists(nchannels: int) -> list[str]:
     if nchannels == 1:
@@ -89,83 +85,25 @@ def default_colormap_lists(nchannels: int) -> list[str]:
         return ['cyan', 'magenta', 'yellow', 'gray']
 
 
-class DisplayChannel:
-    """Controls an individual display channel"""
-    def __init__(self, colormap: AdditiveColorMap, display_min: int, display_max: int):
-        # should it know its channel index?
-        self.enabled: bool = True
-        self._display_min = display_min
-        self._display_max = display_max
-        self._colormap = colormap
-
-        self._input_dtype = np.uint16 # make this adjustable, not hardcoded
-
-        self._update_lut()
-
-    @property
-    def input_min(self) -> int:
-        return np.iinfo(self._input_dtype).min
-    
-    @property
-    def input_max(self) -> int:
-        return np.iinfo(self._input_dtype).max
-
-    @property
-    def input_range(self) -> int:
-        return self.input_max - self.input_min
-    
-    @property
-    def display_min(self) -> int:
-        return self._display_min
-    
-    @property
-    def colormap(self) -> AdditiveColorMap:
-        return self._colormap
-
-    @colormap.setter
-    def colormap(self, colormap: AdditiveColorMap):
-        self._colormap = colormap
-        self._update_lut()
-
-    @display_min.setter
-    def display_min(self, value: int):
-        self._display_min = int(value)
-        self._update_lut()
-
-    @property
-    def display_max(self) -> int:
-        return self._display_max
-    
-    @display_max.setter
-    def display_max(self, value: int):
-        self._display_max = int(value)
-        self._update_lut()
-
-    def _update_lut(self):
-        x = np.arange(self.input_min, self.input_max+1)
-        y_norm = np.clip(
-            (x - self.display_min) / (self._display_max - self._display_min),
-            a_min=0,
-            a_max=1
-        )
-        cmap = np.array(self._colormap.value)
-        lut_norm = cmap[np.newaxis, :] * y_norm[:, np.newaxis]
-        self._lut = np.round((2**16 - 1) * lut_norm).astype(np.uint16)
-
-    @property
-    def lut(self) -> np.ndarray:
-        return self._lut
-
-
 class FrameDisplay(Display):
-    # Output display bit depth
+    """Worker to perform processing for display (blending, LUTs, etc)"""
 
-    def __init__(self, acquisition: Acquisition, processor: Processor):
-        super().__init__(acquisition, processor)
+    def __init__(self, acq: Acquisition, proc: Processor):
+        super().__init__(acq, proc)
 
-        self.display_channels = []
+        data_range = acq.hw.data_range if acq else proc._acq.hw.data_range 
+
+        self.luts = np.zeros(shape=(self.nchannels, data_range.range, 3), dtype=np.uint16)
+
+        self.display_channels: list[DisplayChannel] = []
+
         for ci, colormap_name in enumerate(default_colormap_lists(self.nchannels)):
-            dc = DisplayChannel(AdditiveColorMap[colormap_name.upper()])
+            dc = DisplayChannel(
+                lut_slice=self.luts[ci],
+                color_vector=ColorVector[colormap_name.upper()],
+                display_min=data_range.min,
+                display_max=data_range.max - 1
+            )
             self.display_channels.append(dc)
 
         # TODO: something with these attributes
@@ -183,13 +121,19 @@ class FrameDisplay(Display):
                 print('exiting display thread')
                 return # concludes run() - this thread ends
             
-            processed = additive_display_kernel(data, self.luts_array)
+            t0 = time.perf_counter()
+            if self.blending_mode == 'additive':
+                processed = additive_display_kernel(data, self.luts)
+            elif self.blending_mode == 'subtractive':
+                processed = subtractive_display_kernel(data, self.luts)
+            t1 = time.perf_counter()
+            print(f"Channel blending: {1000*(t1-t0):.1f}ms")
 
             self.publish(processed)
 
 
 # for testing
 if __name__ == "__main__":
-
-    dc = DisplayChannel(AdditiveColorMap.YELLOW, 0, 2**14)
-    print(dc.lut)
+    luts = np.zeros(shape=(2, 2**16, 3), dtype=np.uint16)
+    dc = DisplayChannel(luts[0], ColorVector.YELLOW, 0, 2**14)
+    print(dc._lut)

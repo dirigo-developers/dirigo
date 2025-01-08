@@ -72,6 +72,28 @@ class Dirigo:
     def display_factory(self, processor: Processor = None, acquisition: Acquisition = None) -> Display:
         return FrameDisplay(acquisition, processor)
     
+    def acquisition_spec(self, acquisition_type: str, spec_name: str = "default"):
+        # Dynamically load plugin class
+        entry_pts = importlib.metadata.entry_points(group="dirigo_acquisitions")
+
+        # Look for the specified plugin by name
+        for entry_pt in entry_pts:
+            if entry_pt.name == acquisition_type:
+                # Load and instantiate the plugin class
+                try:
+                    plugin_class: Acquisition = entry_pt.load()
+                    
+                    # Get the acquisition specification
+                    return plugin_class.get_specification(spec_name)
+
+                except Exception as e:
+                    raise RuntimeError(f"Failed to load Acquisition '{type}': {e}")
+                                
+        # If the plugin was not found, raise an error
+        raise ValueError(
+            f"Acquisition '{type}' not found in entry points."
+        )
+    
 
         
 if __name__ == "__main__":

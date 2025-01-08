@@ -549,3 +549,9 @@ class Digitizer(ABC):
         self.trigger.source = profile["trigger"]["source"]
         self.trigger.slope = profile["trigger"]["slope"]
         self.trigger.level = 0
+
+    @property
+    @abstractmethod
+    def bit_depth(self) -> int:
+        """Returns the bit depth (sample resolution) of the digitizer."""
+        pass
