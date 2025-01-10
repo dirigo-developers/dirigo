@@ -9,7 +9,8 @@ from dirigo.sw_interfaces import Acquisition, Processor
 
 
 @njit(
-    (types.uint16[:], types.int64, types.int64, types.UniTuple(types.float64, 3), types.uint16[:,:])
+    (types.uint16[:], types.int64, types.int64, types.UniTuple(types.float64, 3), types.uint16[:,:]),
+    cache=True
 )
 def _update_lut(input_values, display_min, display_max, colormap, lut):
     N = input_values.size

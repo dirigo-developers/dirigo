@@ -44,33 +44,33 @@ def additive_display_kernel(data: np.ndarray, luts: np.ndarray) -> np.ndarray:
     return image
 
 
-@njit(
-    types.uint8[:,:,:](types.uint16[:,:,:], types.uint16[:,:,:]), 
-    nogil=True, parallel=True, fastmath=True, cache=True
-)
-def subtractive_display_kernel(data: np.ndarray, luts: np.ndarray) -> np.ndarray:
-    """Applies LUTs and blends channels subtractively."""
-    Ny, Nx, Nc = data.shape
+# @njit(
+#     types.uint8[:,:,:](types.uint16[:,:,:], types.uint16[:,:,:]), 
+#     nogil=True, parallel=True, fastmath=True, cache=True
+# )
+# def subtractive_display_kernel(data: np.ndarray, luts: np.ndarray) -> np.ndarray:
+#     """Applies LUTs and blends channels subtractively."""
+#     Ny, Nx, Nc = data.shape
     
-    image = np.zeros(shape=(Ny, Nx, 3), dtype=np.uint8)
+#     image = np.zeros(shape=(Ny, Nx, 3), dtype=np.uint8)
 
-    for yi in prange(Ny):
-        for xi in prange(Nx):
+#     for yi in prange(Ny):
+#         for xi in prange(Nx):
 
-            #r, g, b = types.int32(2**16-1), types.int32(2**16-1), types.int32(2**16-1)  
-            r, g, b = 2**16-1, 2**16-1, 2**16-1
-            for ci in range(Nc):
-                lut_index = data[yi, xi, ci]
-                r -= luts[ci, lut_index, 0]
-                g -= luts[ci, lut_index, 1] 
-                b -= luts[ci, lut_index, 2]
+#             #r, g, b = types.int32(2**16-1), types.int32(2**16-1), types.int32(2**16-1)  
+#             r, g, b = 2**16-1, 2**16-1, 2**16-1
+#             for ci in range(Nc):
+#                 lut_index = data[yi, xi, ci]
+#                 r -= luts[ci, lut_index, 0]
+#                 g -= luts[ci, lut_index, 1] 
+#                 b -= luts[ci, lut_index, 2]
             
-            # Gamma correct blended values and assign to output image 
-            image[yi, xi, 0] = gamma_lut[max(r, 0)]
-            image[yi, xi, 1] = gamma_lut[max(g, 0)]
-            image[yi, xi, 2] = gamma_lut[max(b, 0)]
+#             # Gamma correct blended values and assign to output image 
+#             image[yi, xi, 0] = gamma_lut[max(r, 0)]
+#             image[yi, xi, 1] = gamma_lut[max(g, 0)]
+#             image[yi, xi, 2] = gamma_lut[max(b, 0)]
 
-    return image
+#     return image
 
 
 
@@ -127,7 +127,7 @@ class FrameDisplay(Display):
             elif self.blending_mode == 'subtractive':
                 processed = subtractive_display_kernel(data, self.luts)
             t1 = time.perf_counter()
-            print(f"Channel blending: {1000*(t1-t0):.1f}ms")
+            #print(f"Channel blending: {1000*(t1-t0):.1f}ms")
 
             self.publish(processed)
 

@@ -119,7 +119,8 @@ class Angle(UnitQuantity):
     Represents an angular value with units (e.g. rad, deg).
     """
     ALLOWED_UNITS_AND_MULTIPLIERS = {
-        "rad": 1,               # Base unit: radians
+        "rad": 1,               # base unit: radians
+        "mrad": 1e-3,           # millradians to radians
         "deg": math.pi / 180    # degrees to radians
     }
 

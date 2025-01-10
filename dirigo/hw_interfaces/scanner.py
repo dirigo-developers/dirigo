@@ -117,6 +117,14 @@ class RasterScanner(ABC):
         pass
 
     @abstractmethod
+    def park(self):
+        """Positions the scanner at the angle limit minimum.
+        
+        Scanners that can not be positioned arbitrarily should raise a 
+        NotImplementedError.
+        """
+
+    @abstractmethod
     def start(self):
         pass
 
@@ -202,6 +210,9 @@ class ResonantScanner(RasterScanner):
         raise NotImplementedError(
             "Waveform duty cycle is not adjustable with resonant scanners."
         )
+    
+    def park(self):
+        raise NotImplemented("Resonant scanners can not be parked.")
 
 
 class PolygonScanner(RasterScanner):
@@ -249,6 +260,10 @@ class PolygonScanner(RasterScanner):
         raise NotImplementedError(
             "Waveform duty cycle is not adjustable with polygon scanners."
         )
+    
+    def park(self):
+        raise NotImplemented("Polygon scanners can not be parked.")
+
 
 
 class GalvoScanner(RasterScanner):

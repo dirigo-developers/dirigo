@@ -1,10 +1,11 @@
 import math
+from functools import cached_property
 
 import numpy as np
 import nidaqmx
 import nidaqmx.errors
 from nidaqmx.system import System as NISystem
-from nidaqmx.constants import AcquisitionType, LineGrouping, Edge
+from nidaqmx.constants import AcquisitionType, LineGrouping, Edge, AOIdleOutputBehavior
 
 from dirigo import units
 from dirigo.hw_interfaces.scanner import (
@@ -246,7 +247,7 @@ class FrameClock:
 
 
 class GalvoSlowRasterScannerViaNI(GalvoScanner, SlowRasterScanner):
-    REARM_TIME = units.Time("1 ms") # time to allow NI card to rearm after outputing waveform
+    REARM_TIME = units.Time("0.5 ms") # time to allow NI card to rearm after outputing waveform
 
     def __init__(self, control_channel: str, analog_control_range: dict, 
                  trigger_channel: str, sample_rate: str, 
@@ -280,18 +281,22 @@ class GalvoSlowRasterScannerViaNI(GalvoScanner, SlowRasterScanner):
         validate_ni_channel(frame_clock_channel)
         self._frame_clock_channel = frame_clock_channel
 
-    @property
-    def samples_per_period(self) -> int:
-        """
-        Number of analog output samples per slow axis scanner period.
-        
-        """
-        period = 1 / self.frequency
-        # The actual scan period is reduced by the scan re-arm time, which
-        # should occur within the flyback time.
-        samples = (period - self.REARM_TIME) * self._sample_rate
+        self.park() # Park itself at min angle
 
-        return int(samples)
+    @property
+    def _samples_per_period(self) -> float:
+        """
+        Exact number of output sample clock periods per slow axis scanner period.
+        """
+        return self._sample_rate / self.frequency
+    
+    @property
+    def _waveform_length(self) -> int:
+        """
+        Number of samples in output waveform. This is reduce by the rearm time
+        and rounded to an integer.
+        """
+        return round(self._samples_per_period - self.REARM_TIME * self._sample_rate)
     
     def prepare_frame_clock(self, fast_scanner: RasterScanner, acquisition_spec):
         """Prepares the fast scanner"""
@@ -328,7 +333,7 @@ class GalvoSlowRasterScannerViaNI(GalvoScanner, SlowRasterScanner):
         # It may be possible to 'stream' output data to the device in case of a 
         # large output waveform, but not yet tested. Also, it's easy enough to 
         # reduce the sample output rate.
-        if self.samples_per_period > self._task.out_stream.output_onbrd_buf_size:
+        if self._waveform_length > self._task.out_stream.output_onbrd_buf_size:
             raise RuntimeError(
                 "Error loading slow axis scan waveform to card: too many samples. "
                 "Try reducing the sample rate."
@@ -338,7 +343,7 @@ class GalvoSlowRasterScannerViaNI(GalvoScanner, SlowRasterScanner):
         self._task.timing.cfg_samp_clk_timing(
             rate=self._sample_rate,
             sample_mode=AcquisitionType.FINITE,
-            samps_per_chan=self.samples_per_period
+            samps_per_chan=self._waveform_length
         )
 
         self._task.triggers.start_trigger.cfg_dig_edge_start_trig(
@@ -348,66 +353,52 @@ class GalvoSlowRasterScannerViaNI(GalvoScanner, SlowRasterScanner):
         #self._task.out_stream.regen_mode = RegenerationMode.DONT_ALLOW_REGENERATION
 
         # Write the waveform to the buffer
-        waveform_radians = self.generate_waveform()
-        volts_per_radian = self._analog_control_range.range / self.angle_limits.range
-        waveform_volts = waveform_radians * volts_per_radian
+        waveform_radians = self._generate_waveform()
+        waveform_volts = waveform_radians * self._volts_per_radian
         self._task.write(waveform_volts, auto_start=True) # still requires triggering for output
 
         # Start frame clock
         self._frame_clock.start()
 
     def stop(self):
-        self._task.stop()
+        #self._task.stop()
         self._task.close()
+        self.park() # Parks itself at min angle
+
         self._frame_clock.stop()
         self._frame_clock = None
 
-    def generate_waveform(self):
+    def park(self):
+        """Positions the scanner the angle limit minimum."""
+        analog_value = self.angle_limits.min * self._volts_per_radian
+        try:
+            with nidaqmx.Task() as task: 
+                task.ao_channels.add_ao_voltage_chan(self._control_channel)
+                task.write(analog_value, auto_start=True)
+        except nidaqmx.DaqError as e:
+            raise RuntimeError(f"Failed to park scanner: {e}") from e
+
+    def _generate_waveform(self):
         """Returns are waveform vector in units of radian."""
         amp_rad = self.amplitude / 2 # divide pk-pk amplitude by 2 to get amplitude (converts to radians)
-        nsamples = self.samples_per_period
 
         # TODO, adjustable phase?
         if self.waveform == 'sinusoid':
-            t = np.linspace(start=0, stop=2*np.pi, num=nsamples)
+            t = np.linspace(start=0, stop=2*np.pi, num=self._waveform_length)
             return amp_rad * np.cos(t)
+        
         elif self.waveform in {'triangle', 'asymmetric triangle', 'sawtooth'}:
-            num_up = math.ceil(nsamples * self.duty_cycle)
-            num_down = math.floor(nsamples * (1-self.duty_cycle))
+            num_up = math.ceil(self._samples_per_period * self.duty_cycle)
+            num_down = self._waveform_length - num_up
             parts = (
                 np.linspace(start=-amp_rad, stop=amp_rad, num=num_up),
                 np.linspace(start=amp_rad, stop=-amp_rad, num=num_down)
             )
             return np.concatenate(parts, axis=0)
+    
+    @cached_property
+    def _volts_per_radian(self) -> float:
+        """Scaling factor between analog control voltge and optical scan angle."""
+        return self._analog_control_range.range / self.angle_limits.range
  
 
-# Testing
-if __name__ == "__main__":
-    # config = {
-    #     "axis": "y",
-    #     "angle_limits": {"min": "-13.0 deg", "max": "13.0 deg"},
-    #     "analog_control_range" : {"min": "0 V", "max": "5 V"},
-    #     "frequency": "7910 Hz",
-    #     "amplitude_control_channel": "Dev1/ao2"
-    # }
-    # scanner = ResonantScannerViaNI(**config)
-
-    config = {
-        "axis": "x",
-        "angle_limits": {"min": "-20.0 deg", "max": "20.0 deg"},
-        "analog_control_range": {"min": "-10 V", "max": "10 V"},
-        "control_channel": "Dev1/ao3",
-        "trigger_channel": "/Dev1/PFI14",
-        "frame_clock_channel": "Dev1/port0/line5",
-        "line_clock_channel": "/Dev1/PFI0",
-        "sample_rate": "100 kS/s"
-    }
-    scanner = GalvoSlowRasterScannerViaNI(**config)
-
-    scanner.frequency = 7910 / (256+16)
-    scanner.waveform = 'asymmetric triangle'
-    scanner.duty_cycle = 0.9
-    scanner.amplitude = units.Angle('10 deg')
-    scanner.start()
-
-    None

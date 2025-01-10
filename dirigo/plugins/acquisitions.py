@@ -114,17 +114,25 @@ class LineAcquisition(Acquisition):
             while not self._stop_event.is_set() and \
                 digitizer.acquire.buffers_acquired < self.spec.buffers_per_acquisition:
 
-                #t0 = time.perf_counter()
-                buffer_data = digitizer.acquire.get_next_completed_buffer()
-                #t1 = time.perf_counter()
-                    
-                self.publish(buffer_data)
-                print(f"{self.native_id} Got buffer {digitizer.acquire.buffers_acquired}.")
+                buffer = digitizer.acquire.get_next_completed_buffer()
+                if hasattr(self.hw, 'stage'):
+                    buffer.positions = self.read_positions()
+                self.publish(buffer)
 
         finally:
-            # Put None into queue to signal finished, stop scanning
-            self.publish(None)
-            self.hw.fast_raster_scanner.stop()
+            self._finally()
+
+    def _finally(self):
+        self.hw.digitizer.acquire.stop()
+        self.hw.fast_raster_scanner.stop()
+
+        # Put None into queue to signal finished, stop scanning
+        self.publish(None)
+
+    def read_positions(self):
+        """Subclasses can override this method to provide position readout from
+        stages or linear position encoders."""
+        return (self.hw.stage.x.position, self.hw.stage.y.position)
 
     def _calculate_trigger_delay(self, round_down: bool = True) -> int | float:
         """Compute the number of samples to delay"""
@@ -226,9 +234,11 @@ class FrameAcquisition(LineAcquisition):
     def run(self):
         self.hw.slow_raster_scanner.start()
 
-        try:
-            super().run() # The hard work is done by super's run method
+        super().run() # The hard work is done by super's run method
 
-        finally:
-            self.hw.slow_raster_scanner.stop()
+    def _finally(self):
+        """Over-ride LineAcquisition's finally method to alter the HW stop order"""
+        self.hw.slow_raster_scanner.stop()
+        super()._finally()
+
 

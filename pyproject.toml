@@ -11,6 +11,7 @@ authors = [
 ]
 license = {text = "MIT"}
 dependencies = [
+    "toml",
     "platformdirs",
     "nidaqmx"
 ]
