@@ -5,6 +5,7 @@ from dirigo.components.io import SystemConfig
 from dirigo.components.optics import LaserScanningOptics
 from dirigo.hw_interfaces.digitizer import Digitizer
 from dirigo.hw_interfaces.stage import MultiAxisStage
+from dirigo.hw_interfaces.encoder import MultiAxisLinearEncoder
 from dirigo.hw_interfaces.scanner import FastRasterScanner, SlowRasterScanner
 
 
@@ -33,9 +34,14 @@ class Hardware:
             default_config=default_config.digitizer
         )
 
-        self.stage: MultiAxisStage = self.get_hardware_plugin(
-            group="dirigo_stages",
-            default_config=default_config.stage
+        # self.stage: MultiAxisStage = self.get_hardware_plugin(
+        #     group="dirigo_stages",
+        #     default_config=default_config.stage
+        # )
+
+        self.encoders: MultiAxisLinearEncoder = self.get_hardware_plugin(
+            group="dirigo_encoders",
+            default_config=default_config.encoders
         )
 
         self.fast_raster_scanner: FastRasterScanner = self.get_hardware_plugin(
@@ -47,6 +53,7 @@ class Hardware:
             group="dirigo_scanners",
             default_config=default_config.slow_raster_scanner
         )
+
 
     def get_hardware_plugin(self, group, default_config):
         entry_pts = importlib.metadata.entry_points(group=group)

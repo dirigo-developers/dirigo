@@ -20,6 +20,9 @@ dependencies = [
 linescan = "dirigo.plugins.acquisitions:LineAcquisition"
 frame = "dirigo.plugins.acquisitions:FrameAcquisition"
 
+[project.entry-points."dirigo_encoders"]
+linear_encoders_via_ni = "dirigo.plugins.encoders:MultiAxisLinearEncodersViaNI"
+
 [project.entry-points."dirigo_scanners"]
 resonant_scanner_via_ni = "dirigo.plugins.scanners:ResonantScannerViaNI"
 galvo_slow_raster_scanner_via_ni = "dirigo.plugins.scanners:GalvoSlowRasterScannerViaNI"

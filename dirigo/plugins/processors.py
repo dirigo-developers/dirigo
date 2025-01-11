@@ -103,11 +103,6 @@ class RasterFrameProcessor(Processor):
     def __init__(self, acquisition):
         super().__init__(acquisition)
         self._spec: FrameAcquisitionSpec # to refine type hinting
-
-        # if hasattr(self._spec, 'lines_per_frame'):
-        #     lines_per_frame = self._spec.lines_per_frame
-        # else:
-        #     lines_per_frame = self._spec.lines_per_buffer # fallback
         self.dewarped_shape = (
                 self._spec.lines_per_frame,
                 self._spec.pixels_per_line,
