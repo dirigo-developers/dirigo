@@ -92,9 +92,11 @@ class FrameDisplay(Display):
             if data is None: # Check for sentinel None
                 self.publish(None) # pass sentinel
                 print('exiting display thread')
-                return # concludes run() - this thread ends
+                # Ends thread, but this object can still be used (ie to adjust 
+                # the appearance of the last acquire frame)
+                return 
             
-            self._prev_data = data # store data for use after thread finishes
+            self._prev_data = data # store reference for use after thread finishes
             t0 = time.perf_counter()
             if self.blending_mode == 'additive':
                 processed = additive_display_kernel(data, self.luts)

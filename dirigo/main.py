@@ -5,9 +5,10 @@ from platformdirs import user_config_dir
 
 from dirigo.components.io import SystemConfig
 from dirigo.components.hardware import Hardware
-from dirigo.sw_interfaces import Acquisition, Processor, Display
+from dirigo.sw_interfaces import Acquisition, Processor, Display, Logger
 from dirigo.plugins.processors import RasterFrameProcessor
 from dirigo.plugins.displays import FrameDisplay
+from dirigo.plugins.loggers import TiffLogger
 
 
 
@@ -72,6 +73,9 @@ class Dirigo:
     def display_factory(self, processor: Processor = None, acquisition: Acquisition = None) -> Display:
         return FrameDisplay(acquisition, processor)
     
+    def logger_factory(self, processor: Processor = None, acquisition: Acquisition = None) -> Logger:
+        return TiffLogger(acquisition, processor)
+    
     def acquisition_spec(self, acquisition_type: str, spec_name: str = "default"):
         # Dynamically load plugin class
         entry_pts = importlib.metadata.entry_points(group="dirigo_acquisitions")
@@ -103,16 +107,16 @@ if __name__ == "__main__":
     acquisition = diri.acquisition_factory('frame')
     processor = diri.processor_factory(acquisition)
     display = diri.display_factory(processor)
-    #logging = diri.logging_factory()
+    logging = diri.logger_factory(processor)
 
     # Connect threads
     acquisition.add_subscriber(processor)
     processor.add_subscriber(display)
-    #processor.add_subscriber(logging)
+    processor.add_subscriber(logging)
 
     processor.start()
     display.start()
-    #logging.start()
+    logging.start()
     acquisition.start()
 
     acquisition.join(timeout=20.0)

@@ -142,7 +142,7 @@ class Display(Worker):
     Dirigo interface for display processing.
     """
     def __init__(self, acquisition: Acquisition = None, processor: Processor = None):
-        """Instantiate with a display queue and either an Acquisition or Processor"""
+        """Instantiate with either an Acquisition or Processor"""
         super().__init__()
 
         if (acquisition is not None) and (processor is not None):
@@ -151,7 +151,6 @@ class Display(Worker):
         elif (acquisition is None) and (processor is None):
             raise ValueError("Error creating Display worker: "
                              "Provide either acquisition or processor.")
-        
         self._acquisition = acquisition
         self._processor = processor
 

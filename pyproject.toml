@@ -13,6 +13,7 @@ license = {text = "MIT"}
 dependencies = [
     "toml",
     "platformdirs",
+    "tifffile",
     "nidaqmx"
 ]
 
