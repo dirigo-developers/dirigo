@@ -44,36 +44,6 @@ def additive_display_kernel(data: np.ndarray, luts: np.ndarray) -> np.ndarray:
     return image
 
 
-# @njit(
-#     types.uint8[:,:,:](types.uint16[:,:,:], types.uint16[:,:,:]), 
-#     nogil=True, parallel=True, fastmath=True, cache=True
-# )
-# def subtractive_display_kernel(data: np.ndarray, luts: np.ndarray) -> np.ndarray:
-#     """Applies LUTs and blends channels subtractively."""
-#     Ny, Nx, Nc = data.shape
-    
-#     image = np.zeros(shape=(Ny, Nx, 3), dtype=np.uint8)
-
-#     for yi in prange(Ny):
-#         for xi in prange(Nx):
-
-#             #r, g, b = types.int32(2**16-1), types.int32(2**16-1), types.int32(2**16-1)  
-#             r, g, b = 2**16-1, 2**16-1, 2**16-1
-#             for ci in range(Nc):
-#                 lut_index = data[yi, xi, ci]
-#                 r -= luts[ci, lut_index, 0]
-#                 g -= luts[ci, lut_index, 1] 
-#                 b -= luts[ci, lut_index, 2]
-            
-#             # Gamma correct blended values and assign to output image 
-#             image[yi, xi, 0] = gamma_lut[max(r, 0)]
-#             image[yi, xi, 1] = gamma_lut[max(g, 0)]
-#             image[yi, xi, 2] = gamma_lut[max(b, 0)]
-
-#     return image
-
-
-
 def default_colormap_lists(nchannels: int) -> list[str]:
     if nchannels == 1:
         return ['gray']
@@ -93,6 +63,8 @@ class FrameDisplay(Display):
 
         data_range = acq.hw.data_range if acq else proc._acq.hw.data_range 
 
+        self._prev_data = None # Indicates that no data has been acquired yet
+
         self.luts = np.zeros(shape=(self.nchannels, data_range.range, 3), dtype=np.uint16)
 
         self.display_channels: list[DisplayChannel] = []
@@ -102,7 +74,8 @@ class FrameDisplay(Display):
                 lut_slice=self.luts[ci],
                 color_vector=ColorVector[colormap_name.upper()],
                 display_min=data_range.min,
-                display_max=data_range.max - 1
+                display_max=data_range.max - 1,
+                update_method=self.update_display
             )
             self.display_channels.append(dc)
 
@@ -121,19 +94,32 @@ class FrameDisplay(Display):
                 print('exiting display thread')
                 return # concludes run() - this thread ends
             
+            self._prev_data = data # store data for use after thread finishes
             t0 = time.perf_counter()
             if self.blending_mode == 'additive':
                 processed = additive_display_kernel(data, self.luts)
-            elif self.blending_mode == 'subtractive':
-                processed = subtractive_display_kernel(data, self.luts)
+            # elif self.blending_mode == 'subtractive':
+            #     processed = subtractive_display_kernel(data, self.luts)
             t1 = time.perf_counter()
             #print(f"Channel blending: {1000*(t1-t0):.1f}ms")
 
             self.publish(processed)
 
+    def update_display(self, skip_when_acquisition_in_progress: bool = True):
+        """On demand reprocessing of the last acquired frame for display.
+        
+        Used when the acquisition is stopped and need to update the appearance  
+        of the last acquired frame.
+        """
+        if self.is_alive() and skip_when_acquisition_in_progress:
+            # Don't update if acquisition is in progress
+            return
+        
+        if self._prev_data is None:
+            # Don't update if no previous data exists
+            return
+        
+        processed = additive_display_kernel(self._prev_data, self.luts)
+        self.publish(processed)
 
-# for testing
-if __name__ == "__main__":
-    luts = np.zeros(shape=(2, 2**16, 3), dtype=np.uint16)
-    dc = DisplayChannel(luts[0], ColorVector.YELLOW, 0, 2**14)
-    print(dc._lut)
+

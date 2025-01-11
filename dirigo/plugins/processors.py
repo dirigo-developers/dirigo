@@ -103,6 +103,11 @@ class RasterFrameProcessor(Processor):
     def __init__(self, acquisition):
         super().__init__(acquisition)
         self._spec: FrameAcquisitionSpec # to refine type hinting
+
+        # if hasattr(self._spec, 'lines_per_frame'):
+        #     lines_per_frame = self._spec.lines_per_frame
+        # else:
+        #     lines_per_frame = self._spec.lines_per_buffer # fallback
         self.dewarped_shape = (
                 self._spec.lines_per_frame,
                 self._spec.pixels_per_line,
@@ -128,7 +133,8 @@ class RasterFrameProcessor(Processor):
                 print('Exiting processing thread')
                 return # concludes run() - this thread ends
 
-            print(f'processor got positions: {buf.positions}')     
+            if buf.positions is not None:
+                print(f'processor got positions: {buf.positions[0]}')
 
             t0 = time.perf_counter()
             dewarp_kernel(buf.data, self.dewarped, start_indices, nsamples_to_sum)

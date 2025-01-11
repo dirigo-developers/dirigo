@@ -1,4 +1,5 @@
 from enum import Enum
+from typing import Callable
 
 import numpy as np
 from numba import njit, types
@@ -56,7 +57,8 @@ class ColorVector(Enum):
 
 class DisplayChannel(): #ABC?
     """Represents an individual channel to be processed for display."""
-    def __init__(self, lut_slice: np.ndarray, color_vector: ColorVector, display_min: int, display_max: int):
+    def __init__(self, lut_slice: np.ndarray, color_vector: ColorVector, 
+                 display_min: int, display_max: int, update_method: Callable[[], None]):
         """Constructs a DisplayChannel object
         
         Args:
@@ -68,6 +70,7 @@ class DisplayChannel(): #ABC?
         if not isinstance(lut_slice, np.ndarray) or (lut_slice.base is None):
             raise ValueError("`lut_slice` property must be a numpy slice.")
         self._lut = lut_slice # reference to this channel's 'slice' of multichannel LUT
+        self._update_display_method = update_method
 
         # Adjustable parameters (see getter/setters)
         self._enabled = True
@@ -130,6 +133,7 @@ class DisplayChannel(): #ABC?
             colormap=self._color_vector.value if self.enabled else (0.0, 0.0, 0.0),
             lut=self._lut
         )
+        self._update_display_method()
 
 
 
