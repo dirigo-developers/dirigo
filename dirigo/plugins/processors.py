@@ -172,7 +172,6 @@ class RasterFrameProcessor(Processor):
         if self._spec.bidirectional_scanning:
             temporal_edges_fwd = temporal_edges
             temporal_edges_rvs = 1.0 - temporal_edges
-            #temporal_edges_rvs = np.roll(temporal_edges_rvs, shift=-1) # why?
             temporal_edges = np.vstack([temporal_edges_fwd, temporal_edges_rvs]) 
         else:
             temporal_edges = np.vstack([temporal_edges])
@@ -180,7 +179,6 @@ class RasterFrameProcessor(Processor):
         p = self._acq.hw.digitizer.sample_clock.rate / self._fast_scanner_frequency 
         
         starts_exact = (temporal_edges - (trigger_phase / TWO_PI)) * p 
-
         start_indices = np.ceil(starts_exact).astype(np.int32)
 
         return start_indices
@@ -188,7 +186,6 @@ class RasterFrameProcessor(Processor):
     def measure_phase(self, data: np.ndarray) -> units.Angle:
         """Measure the apparent fast raster scanner trigger phase for bidirectional acquisitions."""
         UPSAMPLE = 4
-        #t0 = time.perf_counter()
 
         data_window = window_bidi_data(data)
         F = fft.rfft(data_window, axis=1, workers=4)
@@ -203,8 +200,6 @@ class RasterFrameProcessor(Processor):
         phase = units.Angle(
             TWO_PI * (shift / UPSAMPLE) * self._fast_scanner_frequency / self._sample_clock_rate
         )
-
-        #t1 = time.perf_counter()
 
         print(f"Estimated shift: {phase}")
 

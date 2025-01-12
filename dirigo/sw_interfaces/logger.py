@@ -22,8 +22,9 @@ class Logger(Worker):
         self._acquisition = acquisition
         self._processor = processor
 
-        self._save_path = None
-        self._append = False
+        self.basename: str = None
+        self.save_path: str = None # potentially this could be a kwarg
+        self.frames_per_file: int = None
         # Track frames/buffers saved
 
     @abstractmethod

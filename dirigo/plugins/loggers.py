@@ -1,10 +1,11 @@
-from datetime import datetime
+from functools import cached_property
 
 import numpy as np
 import tifffile
+from platformdirs import user_documents_path
 
 from dirigo.sw_interfaces import Logger, Acquisition, Processor
-
+from dirigo.plugins.acquisitions import FrameAcquisitionSpec
 
 
 
@@ -13,11 +14,14 @@ class TiffLogger(Logger):
     def __init__(self, acquisition: Acquisition = None, processor: Processor = None):
         super().__init__(acquisition, processor)
 
-        self.append = True
-        self.save_path = "C:/github/data/"
-        self._writer = tifffile.TiffWriter(self.save_path + "append.tif") \
-            if self.append else None
+        self.frames_per_file = 10 # add validation
+        self.basename = "experiment"
+        self.save_path = user_documents_path() / "Dirigo"
 
+        self._writer = None # generated upon attempt to save first frame
+        self.frames_saved = 0
+        self.files_saved = 0
+         
     def run(self):
         try:
             while True:
@@ -35,28 +39,61 @@ class TiffLogger(Logger):
                 self._writer.close()
                 self._writer = None
 
-
     def save_data(self, data):
-        """Save the data to a TIFF file."""
-        if self.append:
-            # Append to an existing multi-page TIFF file
-            self._writer.write(
+        """Save data to a TIFF file"""
+        if self._writer is None:
+            fn = self.save_path / f"{self.basename}_{self.files_saved}.tif"
+            self._writer = tifffile.TiffWriter(fn, bigtiff=self._use_big_tiff)
+
+        self._writer.write(
                 data, 
                 photometric='minisblack',
                 planarconfig='contig',
+                resolution=(self._x_dpi, self._y_dpi),
                 contiguous=True # The dataset size must not change
             )
+        self.frames_saved += 1
+
+        if self.frames_saved % self.frames_per_file == 0:
+            # when reaching number of frames per file, close writer
+            self._writer.close()
+            self._writer = None
+            self.files_saved += 1
+
+    @cached_property
+    def _use_big_tiff(self) -> bool:
+        if self.frames_per_file == 1:
+            return False
         else:
-            # Save as a new file (each frame is a separate file)
-            file_name = self._generate_filename()
-            tifffile.imwrite(
-                self.save_path + file_name, 
-                data, 
-                photometric='minisblack',
-                planarconfig='contig' 
-            )
+            return True 
+        
+    # This uses the acquisition or processor references to retrieve resolution
+    # An alternative would be to pass resolution (and other metadata) in the queue
+    @property
+    def _fast_axis_dpi(self) -> float:
+        acq = self._acquisition if self._acquisition else self._processor._acq
+        spec: FrameAcquisitionSpec = acq.spec
+        
+        pixel_width_inches = ((spec.pixel_size * 1000) / 25.4)
+        return 1 / pixel_width_inches
+        
+    @property
+    def _slow_axis_dpi(self) -> float:
+        acq = self._acquisition if self._acquisition else self._processor._acq
+        spec: FrameAcquisitionSpec = acq.spec
+
+        pixel_height_inches = ((spec.pixel_height * 1000) / 25.4)
+        return 1 / pixel_height_inches
     
-    def _generate_filename(self) -> str:
-        """Generate a unique filename for new files."""
-        # Use a timestamp or sequential naming for uniqueness
-        return f"{datetime.now().strftime('%Y%m%d_%H%M%S%f')}.tif"
+    @cached_property
+    def _x_dpi(self) -> float:
+        acq = self._acquisition if self._acquisition else self._processor._acq
+        fast_axis =  acq.hw.fast_raster_scanner.axis
+        return self._fast_axis_dpi if fast_axis == 'x' else self._slow_axis_dpi
+    
+    @cached_property
+    def _y_dpi(self) -> float:
+        acq = self._acquisition if self._acquisition else self._processor._acq
+        slow_axis =  acq.hw.slow_raster_scanner.axis
+        return self._slow_axis_dpi if slow_axis == 'y' else self._fast_axis_dpi
+
