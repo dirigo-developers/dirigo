@@ -1,4 +1,5 @@
 import time
+import threading
 
 import numpy as np
 from numba import njit, prange, types
@@ -6,6 +7,27 @@ from numba import njit, prange, types
 from dirigo.sw_interfaces import Display, Acquisition, Processor
 from dirigo.sw_interfaces.display import ColorVector, DisplayChannel
 
+
+
+@njit(
+    (types.uint16[:,:,:,:], types.int64, types.uint16[:,:,:]),
+    nogil=True, parallel=True, fastmath=True, cache=True
+)
+def rolling_average_kernel(ring_buffer: np.ndarray, frame_index: int, averaged: np.ndarray) -> np.ndarray:
+    Nf, Ny, Nx, Nc = ring_buffer.shape
+    d = min(Nf, frame_index + 1)
+
+    for iy in prange(Ny):
+        for ix in prange(Nx):
+            for ic in range(Nc):
+
+                tmp = 0
+                for iframe in range(Nf):
+                    tmp += ring_buffer[iframe, iy, ix, ic]
+
+                averaged[iy, ix, ic] = tmp // d
+
+    return averaged
 
 
 # Generate gamma correction LUT
@@ -61,10 +83,14 @@ class FrameDisplay(Display):
     def __init__(self, acq: Acquisition, proc: Processor):
         super().__init__(acq, proc)
 
-        data_range = acq.hw.data_range if acq else proc._acq.hw.data_range 
+        self._n_frame_average = 8
 
-        self._prev_data = None # Indicates that no data has been acquired yet
+        self._prev_data = None # None indicates that no data has been acquired yet
+        self._average_buffer = None
+        self._i: int = 0 # tracks rolling average index
+        self._average_buffer_lock = threading.Lock()  # Add a lock for thread safety
 
+        data_range = acq.hw.data_range if acq else proc._acq.hw.data_range
         self.luts = np.zeros(shape=(self.nchannels, data_range.range, 3), dtype=np.uint16)
 
         self.display_channels: list[DisplayChannel] = []
@@ -79,10 +105,6 @@ class FrameDisplay(Display):
             )
             self.display_channels.append(dc)
 
-        # TODO: something with these attributes
-        self.blending_mode = 'additive'
-        self.gamma = 1.0 # 2.2 is common
-
 
     def run(self):
         while True:
@@ -96,16 +118,39 @@ class FrameDisplay(Display):
                 # the appearance of the last acquire frame)
                 return 
             
-            self._prev_data = data # store reference for use after thread finishes
             t0 = time.perf_counter()
-            if self.blending_mode == 'additive':
-                processed = additive_display_kernel(data, self.luts)
-            # elif self.blending_mode == 'subtractive':
-            #     processed = subtractive_display_kernel(data, self.luts)
-            t1 = time.perf_counter()
-            #print(f"Channel blending: {1000*(t1-t0):.1f}ms")
+            with self._average_buffer_lock:
+                # _average_buffer is initially None and the first frame establishes height, width, etc
+                # Averaging can also be reset or changed by setting this to None, prompting reallocation
+                if self._average_buffer is None:
+                    buffer_shape = (self.n_frame_average,) + data.shape
+                    self._average_buffer = np.zeros(buffer_shape, dtype=np.uint16)
+                    averaged_frame = np.zeros(data.shape, np.uint16)
+                    self._i = 0
 
-            self.publish(processed)
+                self._average_buffer[self._i % self.n_frame_average] = data
+
+                rolling_average_kernel(self._average_buffer, self._i, averaged_frame)
+                processed = additive_display_kernel(averaged_frame, self.luts)
+
+                self.publish(processed)
+                self._prev_data = averaged_frame # store reference for use after thread finishes  
+
+            t1 = time.perf_counter()
+            self._i += 1
+            print(f"Channel display processing: {1000*(t1-t0):.1f}ms")
+                     
+    @property
+    def n_frame_average(self) -> int:
+        return self._n_frame_average
+    
+    @n_frame_average.setter
+    def n_frame_average(self, n_frames: int):
+        if not isinstance(n_frames, int) or n_frames < 1:
+            raise ValueError("Rolling frame average must be an integer >= 1.")
+        with self._average_buffer_lock:
+            self._n_frame_average = n_frames
+            self._average_buffer = None # Triggers reset of the average buffer 
 
     def update_display(self, skip_when_acquisition_in_progress: bool = True):
         """On demand reprocessing of the last acquired frame for display.

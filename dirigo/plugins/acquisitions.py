@@ -85,44 +85,58 @@ class LineAcquisition(Acquisition):
         super().__init__(hw, spec) # sets up thread, inbox, stores hw, checks resources
         self.spec: LineAcquisitionSpec # to refine type hints
 
-        # Get digitizer default profile, set it
-        self.hw.digitizer.load_profile("default")
-
-        # Setup digitizer buffers
-        self.hw.digitizer.acquire.pre_trigger_samples = 0 # TODO, maybe allow this to be adjustable?
-        self.hw.digitizer.acquire.timestamps_enabled = True #testing
-        self.hw.digitizer.acquire.trigger_delay_samples = self._calculate_trigger_delay()
-        self.hw.digitizer.acquire.record_length = self._calculate_record_length()
-        self.hw.digitizer.acquire.records_per_buffer = spec.records_per_buffer
-        self.hw.digitizer.acquire.buffers_per_acquisition = spec.buffers_per_acquisition
-        self.hw.digitizer.acquire.buffers_allocated = spec.buffers_allocated
-
+        self.configure_digitizer(profile_name=self.spec.digitizer_profile)
+        
         # Setup scanner
         self.hw.fast_raster_scanner.amplitude = \
             self.hw.optics.object_position_to_scan_angle(self.spec.scan_width)
         # for res scanner: frequency is set (fixed), waveform is set (fixed), duty cycle is set (fixed)
         # for other scanners--TBD
 
+    def configure_digitizer(self, profile_name: str):
+        """
+        Loads digitizer profile and sets record and buffer settings.
+
+        Digitizer profile is a set of user-modifiable settings, like channels
+        enabled, voltage ranges, impedances, trigger source, sample rate, etc.
+
+        Record and buffer settings, such as record length, number of records per
+        buffer, etc. are automatically calculated for the profile, acquisition
+        specificiaton, and other system properties.
+        """
+        digi = self.hw.digitizer # for brevity
+
+        digi.load_profile(profile_name)
+
+        digi.acquire.pre_trigger_samples = 0 # TODO, maybe allow this to be adjustable?
+        digi.acquire.timestamps_enabled = True #testing
+        digi.acquire.trigger_delay_samples = self._calculate_trigger_delay()
+        digi.acquire.record_length = self._calculate_record_length()
+        digi.acquire.records_per_buffer = self.spec.records_per_buffer
+        digi.acquire.buffers_per_acquisition = self.spec.buffers_per_acquisition
+        digi.acquire.buffers_allocated = self.spec.buffers_allocated
+
     def run(self):
-        digitizer = self.hw.digitizer # for brevity in this method
+        digi = self.hw.digitizer # for brevity
 
         # Start scanner & digitizer
         self.hw.fast_raster_scanner.start()        
-        digitizer.acquire.start() # This includes the buffer allocation
+        digi.acquire.start() # This includes the buffer allocation
 
         try:
             while not self._stop_event.is_set() and \
-                digitizer.acquire.buffers_acquired < self.spec.buffers_per_acquisition:
+                digi.acquire.buffers_acquired < self.spec.buffers_per_acquisition:
 
-                buffer = digitizer.acquire.get_next_completed_buffer()
+                buffer = digi.acquire.get_next_completed_buffer()
                 if hasattr(self.hw, 'stage'):
                     buffer.positions = self.read_positions()
                 self.publish(buffer)
 
         finally:
-            self._finally()
+            self.cleanup()
 
-    def _finally(self):
+    def cleanup(self):
+        """Closes resources started during the acquisition."""
         self.hw.digitizer.acquire.stop()
         self.hw.fast_raster_scanner.stop()
 
@@ -135,16 +149,25 @@ class LineAcquisition(Acquisition):
         return (self.hw.stage.x.position, self.hw.stage.y.position)
 
     def _calculate_trigger_delay(self, round_down: bool = True) -> int | float:
-        """Compute the number of samples to delay"""
+        """Compute the number of samples to delay
+        
+        Set round_down to True (default value), to automatically round to
+        digitizer-compatible increment.
+        """
         scan_period = 1.0 / self.hw.fast_raster_scanner.frequency
 
         start_time = scan_period * math.acos(self.spec.fill_fraction) / (2 * math.pi)
+        # For tolerance to sync signal phase error and/or initial scanner 
+        # frequency error, make sure to start earlier than absolutely required
+        start_time *= 0.995
+
         start_index = start_time * self.hw.digitizer.sample_clock.rate
 
         if round_down:
             tdr = self.hw.digitizer.acquire.trigger_delay_sample_resolution
             start_index = tdr * int(start_index / tdr)
 
+        print("start index", start_index)
         return start_index
 
     def _calculate_record_length(self, round_up: bool = True) -> int | float:
@@ -159,6 +182,9 @@ class LineAcquisition(Acquisition):
         record_len = (end - start) * self.hw.digitizer.sample_clock.rate \
             / self.hw.fast_raster_scanner.frequency
         
+        # For tolerance to error in initial frequency, extend record length
+        record_len *= 1.01
+        
         if round_up:
             # Round record length up to the next allowable size (or the min)
             rlr = self.hw.digitizer.acquire.record_length_resolution
@@ -167,7 +193,7 @@ class LineAcquisition(Acquisition):
             # Also set enforce the min record length requirement
             if record_len < self.hw.digitizer.acquire.record_length_minimum:
                 record_len = self.hw.digitizer.acquire.record_length_minimum
-        
+        print("record length", record_len)
         return record_len
 
 
@@ -236,9 +262,9 @@ class FrameAcquisition(LineAcquisition):
 
         super().run() # The hard work is done by super's run method
 
-    def _finally(self):
+    def cleanup(self):
         """Over-ride LineAcquisition's finally method to alter the HW stop order"""
         self.hw.slow_raster_scanner.stop()
-        super()._finally()
+        super().cleanup()
 
 

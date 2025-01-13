@@ -254,7 +254,7 @@ class GalvoSlowRasterScannerViaNI(GalvoScanner, SlowRasterScanner):
                  line_clock_channel: str, frame_clock_channel: str,
                  **kwargs):
         super().__init__(**kwargs)
-
+        
         # validated and set amplitude control analog channel
         validate_ni_channel(control_channel)
         self._control_channel = control_channel

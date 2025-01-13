@@ -1,3 +1,4 @@
+from abc import abstractmethod
 from enum import Enum
 from typing import Callable
 
@@ -164,4 +165,18 @@ class Display(Worker):
         else:
             return self._processor._spec.nchannels
 
+    @property
+    @abstractmethod
+    def n_frame_average(self) -> int:
+        """The number of frames used in the rolling average.
+        
+        To enable averaging, set with an integer greater than 1. Setting 1 will
+        disable averaging.
+        """
+        pass
+
+    @n_frame_average.setter
+    @abstractmethod
+    def n_frame_average(self, frames: int):
+        pass
 

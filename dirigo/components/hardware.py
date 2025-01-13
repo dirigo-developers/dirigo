@@ -34,10 +34,10 @@ class Hardware:
             default_config=default_config.digitizer
         )
 
-        # self.stage: MultiAxisStage = self.get_hardware_plugin(
-        #     group="dirigo_stages",
-        #     default_config=default_config.stage
-        # )
+        self.stage: MultiAxisStage = self.get_hardware_plugin(
+            group="dirigo_stages",
+            default_config=default_config.stage
+        )
 
         self.encoders: MultiAxisLinearEncoder = self.get_hardware_plugin(
             group="dirigo_encoders",
