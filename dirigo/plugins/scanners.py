@@ -1,6 +1,7 @@
 import math
 from functools import cached_property
 
+import nidaqmx.task
 import numpy as np
 import nidaqmx
 import nidaqmx.errors
@@ -248,11 +249,11 @@ class FrameClock:
 
 class GalvoSlowRasterScannerViaNI(GalvoScanner, SlowRasterScanner):
     REARM_TIME = units.Time("0.5 ms") # time to allow NI card to rearm after outputing waveform
+    AO_TIMEBASE = units.Frequency("100 MHz") # NIDAQ cards use 100 MHz timebase divided down to generate frequency
 
     def __init__(self, control_channel: str, analog_control_range: dict, 
-                 trigger_channel: str, sample_rate: str, 
-                 line_clock_channel: str, frame_clock_channel: str,
-                 **kwargs):
+                 trigger_channel: str, line_clock_channel: str, 
+                 frame_clock_channel: str, **kwargs):
         super().__init__(**kwargs)
         
         # validated and set amplitude control analog channel
@@ -273,8 +274,6 @@ class GalvoSlowRasterScannerViaNI(GalvoScanner, SlowRasterScanner):
         validate_ni_channel(trigger_channel)
         self._trigger_channel = trigger_channel
 
-        self._sample_rate = units.SampleRate(sample_rate)
-
         self._frame_clock: FrameClock = None # Set later with information from fast scanner
         validate_ni_channel(line_clock_channel) # will be validated again when FrameClock object is made, but that's OK
         self._line_clock_channel = line_clock_channel
@@ -283,6 +282,28 @@ class GalvoSlowRasterScannerViaNI(GalvoScanner, SlowRasterScanner):
 
         self.park() # Park itself at min angle
 
+    @cached_property
+    def _output_buffer_size(self) -> int:
+        """Returns the hardware output buffer size in samples."""
+        # We will make a throwaway task to detect the output buffer size value
+        task = nidaqmx.Task()
+        task.ao_channels.add_ao_voltage_chan(
+            physical_channel=self._control_channel
+        )
+        buffer_size = task.out_stream.output_onbrd_buf_size
+        task.close()
+        return buffer_size
+
+    @property
+    def _sample_rate(self) -> int:
+        if not self.frequency:
+            raise RuntimeError(
+                "Slow scanner `frequency` must be set before preparing frame clock."
+            )
+        exact_sample_rate = self.frequency * self._output_buffer_size
+        x = math.ceil(self.AO_TIMEBASE / exact_sample_rate) 
+        return units.SampleRate(self.AO_TIMEBASE / x)
+     
     @property
     def _samples_per_period(self) -> float:
         """
@@ -328,16 +349,6 @@ class GalvoSlowRasterScannerViaNI(GalvoScanner, SlowRasterScanner):
         self._task.ao_channels.add_ao_voltage_chan(
             physical_channel=self._control_channel
         )
-
-        # Check whether hardware output buffer size is large enough
-        # It may be possible to 'stream' output data to the device in case of a 
-        # large output waveform, but not yet tested. Also, it's easy enough to 
-        # reduce the sample output rate.
-        if self._waveform_length > self._task.out_stream.output_onbrd_buf_size:
-            raise RuntimeError(
-                "Error loading slow axis scan waveform to card: too many samples. "
-                "Try reducing the sample rate."
-            )
         
         # Set task timings
         self._task.timing.cfg_samp_clk_timing(
