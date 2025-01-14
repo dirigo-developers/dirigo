@@ -398,8 +398,10 @@ class GalvoScanner(RasterScanner):
     
 
 class ObjectiveZScanner(LinearStage):
-    """Despite inheriting functionality from LinearStage, the function of an 
+    """Abstraction for a objective lens motorized Z-axis stage.
+    
+    Despite inheriting functionality from LinearStage, the function of an 
     objective scanner is to move the beam through the sample, which is the 
     Dirigo definition of a scanner.
     """
-    pass
+    VALID_AXES = {'z'}
