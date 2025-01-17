@@ -95,9 +95,8 @@ class UnitQuantity(float):
         return str(self)
     
     def __neg__(self):
-        # Return new instance of this class with negated value.
-        negated_str = f"{-float(self)} {self.unit}"
-        return type(self)(negated_str)
+        """Return new instance of this class with negated value."""
+        return type(self)(-float(self))
     
     def __add__(self, other):
         # Check if other is also a UnitQuantity, ensure both are same subclass (like Position + Position)
@@ -105,12 +104,8 @@ class UnitQuantity(float):
             return NotImplemented  # Defer to other __radd__ or raise TypeError
         if type(self) != type(other):
             raise TypeError("Cannot add different UnitQuantity subclasses.")
-        
-        sum_value_base = float(self) + float(other)
-        
-        # Construct a string with units and return new instance
-        sum_str = f"{sum_value_base} {self.unit}"
-        return type(self)(sum_str)
+                
+        return type(self)(float(self) + float(other))
     
     def __sub__(self, other):
         # Check if other is also a UnitQuantity, ensure both are same subclass (like Position + Position)
@@ -118,35 +113,16 @@ class UnitQuantity(float):
             return NotImplemented  # Defer to other __radd__ or raise TypeError
         if type(self) != type(other):
             raise TypeError("Cannot subtract different UnitQuantity subclasses.")
+
+        return type(self)(float(self) - float(other))
         
-        dif_value_base = float(self) - float(other)
-        
-        # Construct a string with units and return new instance
-        dif_str = f"{dif_value_base} {self.unit}"
-        return type(self)(dif_str)
-    
-    def __sub__(self, other):
-        # Check if other is also a UnitQuantity, ensure both are same subclass (like Position + Position)
-        if not isinstance(other, UnitQuantity):
-            return NotImplemented  # Defer to other __radd__ or raise TypeError
-        if type(self) != type(other):
-            raise TypeError("Cannot subtract different UnitQuantity subclasses.")
-        
-        dif_value_base = float(self) - float(other)
-        
-        # Construct a string with units and return new instance
-        dif_str = f"{dif_value_base} {self.unit}"
-        return type(self)(dif_str)
-    
     def __mul__(self, other):
         """
         Multiply this quantity by a dimensionless scalar (int or float),
         returning a new instance of the same subclass with the same unit.
         """
         if isinstance(other, (int, float)):
-            new_base_value = float(self) * other
-            new_str = f"{new_base_value} {self.unit}"
-            return type(self)(new_str)
+            return type(self)(float(self) * other)
         return NotImplemented  # For any other type, we can't handle it
 
     def __rmul__(self, other):
@@ -155,6 +131,16 @@ class UnitQuantity(float):
         In practice, for int/float, we want the same behavior as __mul__.
         """
         return self.__mul__(other)
+    
+    def __truediv__(self, other):
+        """
+        Divide this quantity by a dimensionless scalar (int or float),
+        returning a new instance of the same subclass with the same unit.
+        """
+        if isinstance(other, (int, float)):
+            return type(self)(float(self) / other)
+        return NotImplemented  # For any other type, we can't handle it
+
 
 
 class Voltage(UnitQuantity):
@@ -398,5 +384,5 @@ class FrequencyRange(RangeWithUnits):
 if __name__ == "__main__":
 
     print(
-        (Position("1 mm") + Position("0.04 m")) * math.pi
+        SampleRate("1 MS/s") * math.pi / 2 - SampleRate("10 kS/s")
     )
