@@ -36,7 +36,7 @@ class Dirigo:
         entry_pts = importlib.metadata.entry_points(group="dirigo_acquisitions")
         return {entry_pt.name for entry_pt in entry_pts}
     
-    def acquisition_factory(self, type: str, spec_name: str = "default") -> Acquisition:
+    def acquisition_factory(self, type: str, spec_name: str = "capture") -> Acquisition:
         """Returns an initialized acquisition worker object."""
 
         # Dynamically load plugin class

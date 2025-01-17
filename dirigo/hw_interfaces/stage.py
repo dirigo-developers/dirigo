@@ -22,7 +22,7 @@ class StageInfo:
 
 class Stage(ABC):
     """
-    Abstract interface for a single stage.
+    Abstract interface for a single stage. Can be linear or rotational.
     """
     VALID_AXES = {} # subclasses must overwrite with allowed axes labels e.g. 'x'
     SLEEP_INTERVAL = units.Time('1 ms')
@@ -87,6 +87,13 @@ class Stage(ABC):
     @abstractmethod
     def moving(self) -> bool:   
         """Return True if the stage axis is currently moving."""
+        pass
+
+    @abstractmethod
+    def move_velocity(self, velocity: units.Velocity):
+        """"
+        Initiate movement at velocity until stopped.
+        """
         pass
 
     def wait_until_move_finished(self): # TODO, timeout

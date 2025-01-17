@@ -35,9 +35,21 @@ class LineAcquisitionSpec(AcquisitionSpec):
         self.fill_fraction = fill_fraction
         # TODO validate lines per buffer
         self.lines_per_buffer = lines_per_buffer
-        if isinstance(buffers_per_acquisition, float) and not buffers_per_acquisition == float('inf'):
-            raise ValueError(f"`buffers_per_acquisition` cannot be a non-infinite float.")
+
+        # Validate buffers per acquisition
+        if isinstance(buffers_per_acquisition, str):
+            if buffers_per_acquisition.lower() == "inf":
+                buffers_per_acquisition = float('inf')
+            else:
+                raise ValueError(f"`buffers_per_acquisition` must be a finite int or a string, 'inf'.")
+        elif isinstance(buffers_per_acquisition, float) and not buffers_per_acquisition == float('inf'):
+            raise ValueError(f"`buffers_per_acquisition` must be integer or string 'inf'.")
+        elif not isinstance(buffers_per_acquisition, int):
+            raise ValueError(f"`buffers_per_acquisition` must be integer or string, 'inf'.")
+        elif buffers_per_acquisition < 1:
+            raise ValueError(f"`buffers_per_acquisition` must be > 0.")
         self.buffers_per_acquisition = buffers_per_acquisition
+
         self.buffers_allocated = buffers_allocated
         self.digitizer_profile = digitizer_profile    
 
@@ -92,6 +104,8 @@ class LineAcquisition(Acquisition):
             self.hw.optics.object_position_to_scan_angle(self.spec.scan_width)
         # for res scanner: frequency is set (fixed), waveform is set (fixed), duty cycle is set (fixed)
         # for other scanners--TBD
+
+        testing = self._calculate_trigger_delay()
 
     def configure_digitizer(self, profile_name: str):
         """

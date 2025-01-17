@@ -543,7 +543,7 @@ class Digitizer(ABC):
         profile = load_toml(self.PROFILE_LOCATION / profile_fn)
         
         self.sample_clock.source = profile["sample_clock"]["clock_source"]
-        self.sample_clock.rate = profile["sample_clock"]["rate"]
+        self.sample_clock.rate = profile["sample_clock"]["rate"] # rate setter method should handle converting string representation into units.SampleRate
         self.sample_clock.edge = profile["sample_clock"]["edge"]
 
         for i, channel in enumerate(self.channels):

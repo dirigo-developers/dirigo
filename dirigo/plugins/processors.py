@@ -31,20 +31,19 @@ def dewarp_kernel(buffer_data: np.ndarray, dewarped: np.ndarray,
     # For bidid, there will be half as many records per buffer as lines
     Ndirections = start_indices.shape[0]
     
+    for d in prange(Ndirections):
+        for fi in prange(Nf):
+            # Clip to valid indices of sample
+            start_indices[d, fi] = min(max(start_indices[d, fi], 0), Nsamples)
+    
     for si in prange(Ns): # si = Slow pixel Index
         fwd_rvs = si % Ndirections # denotes 'forward' (0) or 'reverse' (1) scan (unidirectional scanning is only 'forward')
         ri = si // Ndirections # record index (for unidirectional scanning ri=si)
         stride = 1 - 2 * fwd_rvs # for stride in range later, 0 -> 1 and 1 -> -1 
 
-        for fi in prange(Nf): # fi = Fast pixel index
+        for fi in range(Nf): # fi = Fast pixel index
             Nsum = nsamples_to_sum[fwd_rvs, fi]
             start = start_indices[fwd_rvs, fi]
-
-            #Requesting indices outside sampled data: skip
-            if (start < 0) or (start > Nsamples):
-                dewarped[si, fi, 0] = 0
-                dewarped[si, fi, 1] = 0
-                continue
 
             tmp0 = types.int32(0)
             tmp1 = types.int32(0)
@@ -56,7 +55,6 @@ def dewarp_kernel(buffer_data: np.ndarray, dewarped: np.ndarray,
             dewarped[si, fi, 1] = tmp1 // Nsum
 
     return dewarped
-
 
 
 @njit(
@@ -154,7 +152,7 @@ class RasterFrameProcessor(Processor):
             self.publish(self.dewarped) # sends off to Logger or Display workers
             t1 = time.perf_counter()
             
-            #print(f"{self.native_id} [max sum: {np.max(nsamples_to_sum)}] Processed a frame in {1000*(t1-t0):.02f} ms")
+            print(f"{self.native_id} [max sum: {np.max(nsamples_to_sum)}] Processed a frame in {1000*(t1-t0):.02f} ms")
 
             # If timestamps are assigned (default is None)
             if isinstance(buf.timestamps, np.ndarray):
