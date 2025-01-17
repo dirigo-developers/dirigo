@@ -40,8 +40,7 @@ class UnitQuantity(float):
 
         # Use float's __new__ to initialize the value
         instance = super().__new__(cls, base_value)
-        instance._original_value = value
-        instance._unit = unit
+        instance.unit = next(iter(cls.ALLOWED_UNITS_AND_MULTIPLIERS))
         return instance
 
     @staticmethod
@@ -87,11 +86,6 @@ class UnitQuantity(float):
         smallest_unit, smallest_multiplier = sorted_units[-1]
         return self / smallest_multiplier, smallest_unit
 
-    @property
-    def unit(self) -> str:
-        """Get the original unit."""
-        return self._unit
-
     def __str__(self) -> str:
         """Return a human-readable string with the optimal unit."""
         value, unit = self._get_optimal_unit()
@@ -99,6 +93,68 @@ class UnitQuantity(float):
 
     def __repr__(self):
         return str(self)
+    
+    def __neg__(self):
+        # Return new instance of this class with negated value.
+        negated_str = f"{-float(self)} {self.unit}"
+        return type(self)(negated_str)
+    
+    def __add__(self, other):
+        # Check if other is also a UnitQuantity, ensure both are same subclass (like Position + Position)
+        if not isinstance(other, UnitQuantity):
+            return NotImplemented  # Defer to other __radd__ or raise TypeError
+        if type(self) != type(other):
+            raise TypeError("Cannot add different UnitQuantity subclasses.")
+        
+        sum_value_base = float(self) + float(other)
+        
+        # Construct a string with units and return new instance
+        sum_str = f"{sum_value_base} {self.unit}"
+        return type(self)(sum_str)
+    
+    def __sub__(self, other):
+        # Check if other is also a UnitQuantity, ensure both are same subclass (like Position + Position)
+        if not isinstance(other, UnitQuantity):
+            return NotImplemented  # Defer to other __radd__ or raise TypeError
+        if type(self) != type(other):
+            raise TypeError("Cannot subtract different UnitQuantity subclasses.")
+        
+        dif_value_base = float(self) - float(other)
+        
+        # Construct a string with units and return new instance
+        dif_str = f"{dif_value_base} {self.unit}"
+        return type(self)(dif_str)
+    
+    def __sub__(self, other):
+        # Check if other is also a UnitQuantity, ensure both are same subclass (like Position + Position)
+        if not isinstance(other, UnitQuantity):
+            return NotImplemented  # Defer to other __radd__ or raise TypeError
+        if type(self) != type(other):
+            raise TypeError("Cannot subtract different UnitQuantity subclasses.")
+        
+        dif_value_base = float(self) - float(other)
+        
+        # Construct a string with units and return new instance
+        dif_str = f"{dif_value_base} {self.unit}"
+        return type(self)(dif_str)
+    
+    def __mul__(self, other):
+        """
+        Multiply this quantity by a dimensionless scalar (int or float),
+        returning a new instance of the same subclass with the same unit.
+        """
+        if isinstance(other, (int, float)):
+            new_base_value = float(self) * other
+            new_str = f"{new_base_value} {self.unit}"
+            return type(self)(new_str)
+        return NotImplemented  # For any other type, we can't handle it
+
+    def __rmul__(self, other):
+        """
+        Called if __mul__ is not implemented for the 'other' operand.
+        In practice, for int/float, we want the same behavior as __mul__.
+        """
+        return self.__mul__(other)
 
 
 class Voltage(UnitQuantity):
@@ -289,7 +345,7 @@ class RangeWithUnits:
     @property
     def range(self) -> UnitQuantity:
         """Get the range as the difference between max and min."""
-        return self.UNIT_QUANTITY_CLASS(str(self.max - self.min) + " " + self.unit)
+        return self.UNIT_QUANTITY_CLASS(str(float(self.max) - float(self.min)) + " " + self.unit)
 
     def __str__(self) -> str:
         """Return a human-readable string representation of the range."""
@@ -338,10 +394,9 @@ class FrequencyRange(RangeWithUnits):
 
 
 
+# For quick tests
+if __name__ == "__main__":
 
-# # For testing
-# if __name__ == "__main__":
-
-#     angle_range = AngleRange(min="-6 deg", max="6 deg")
-
-#     assert angle_range.within_range(Angle("1.2 deg"))
+    print(
+        (Position("1 mm") + Position("0.04 m")) * math.pi
+    )
