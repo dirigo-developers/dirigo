@@ -12,7 +12,7 @@ Built-in plugins:
 Continuous or finite 1D (e.g. line scan) acquisition.
 
 - **FrameAcquisition** \
-Continuous or finite 2D (e.g. frame) acquisition
+A subclass of LineAcquisition. Continuous or finite 2D (e.g. frame) acquisition
 
 
 ## Hardware
