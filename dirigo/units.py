@@ -7,9 +7,25 @@ class UnitQuantity(float):
     """
     Represents a single value with an associated unit and supports unit conversion.
 
+    Supported mathematical operations (implemented with dunder methods, eg. 
+    __add__, __truediv__, etc.):
+    - Add two UnitQuantity of same class, returns new instance of that class
+    - Subtract UnitQuantity of same class, returns new instance of that class
+    - Negate UnitQuantity, returns new instance of that class
+    - Multiplication of UnitQuantity and a generic float/int, returns new 
+        instance of that class.
+    - Multiplication of a UnitQuantity with another different UnitQuantity class:
+        Permitted only if DIMENSIONAL_QUANTITY cancels, returns a generic float.
+    - Division of UnitQuantity by a generic float/int, returns new instance of 
+        that class.
+    - Division of a UnitQuantity with a UnitQuantity of the same 
+        DIMENSIONAL_QUANTITY, returns a generic float
+
+
     Attributes:
     - unit (str): The original unit of the quantity (e.g., "V", "mV").
     """
+    DIMENSIONAL_QUANTITY: tuple[str] = ('1', '1') # Interpret as unity over unity (ie dimensionless)
     ALLOWED_UNITS_AND_MULTIPLIERS: Dict[str, float] = None  # Define allowed units and their factors in subclasses
 
     def __new__(cls, quantity: str | float):
@@ -121,6 +137,12 @@ class UnitQuantity(float):
         Multiply this quantity by a dimensionless scalar (int or float),
         returning a new instance of the same subclass with the same unit.
         """
+        if isinstance(other, UnitQuantity):
+            if self.DIMENSIONAL_QUANTITY == tuple(reversed(other.DIMENSIONAL_QUANTITY)):
+                # if the two UnitQuantity classes dimensions cancel, then allow it
+                return float(self) * float(other)
+            else:
+                return NotImplemented # Don't allow mixed unit multiplication (yet)
         if isinstance(other, (int, float)):
             return type(self)(float(self) * other)
         return NotImplemented  # For any other type, we can't handle it
@@ -137,6 +159,11 @@ class UnitQuantity(float):
         Divide this quantity by a dimensionless scalar (int or float),
         returning a new instance of the same subclass with the same unit.
         """
+        if isinstance(other, UnitQuantity):
+            if self.DIMENSIONAL_QUANTITY == other.DIMENSIONAL_QUANTITY:
+                return float(self) / float(other) # allow division by SAME unit type
+            else:
+                return NotImplemented # Don't allow mixed unit division
         if isinstance(other, (int, float)):
             return type(self)(float(self) / other)
         return NotImplemented  # For any other type, we can't handle it
@@ -147,6 +174,7 @@ class Voltage(UnitQuantity):
     """
     Represents a voltage value with units (e.g., V, mV, kV, etc.).
     """
+    DIMENSIONAL_QUANTITY = ('LLM', 'TTTI') # T^-3 L^2 M I^-1
     ALLOWED_UNITS_AND_MULTIPLIERS = {
         "V": 1,        # base unit: volts
         "mV": 1e-3,    # millivolts to volts
@@ -160,6 +188,7 @@ class Angle(UnitQuantity):
     """
     Represents an angular value with units (e.g. rad, deg).
     """
+    DIMENSIONAL_QUANTITY = ('1', '1') # Angle has no dimension
     ALLOWED_UNITS_AND_MULTIPLIERS = {
         "rad": 1,               # base unit: radians
         "mrad": 1e-3,           # millradians to radians
@@ -171,6 +200,7 @@ class Frequency(UnitQuantity):
     """
     Represents a frequency value with units (e.g. Hz, kHz, MHz, GHz, or rpm).
     """
+    DIMENSIONAL_QUANTITY = ('1', 'T')
     ALLOWED_UNITS_AND_MULTIPLIERS = {
         "Hz": 1,        # base unit: hertz
         "kHz": 1e3,     # kilohertz to hertz
@@ -187,6 +217,7 @@ class SampleRate(UnitQuantity):
     Dimensionally equivalent to Frequency, but with slight modification to unit
     labels to benefit specific situations (e.g. digitizer rate).
     """
+    DIMENSIONAL_QUANTITY = ('1', 'T')
     ALLOWED_UNITS_AND_MULTIPLIERS = {
         "S/s": 1,       # base unit: samples per second
         "kS/s": 1e3,    # kilo samples per second to samples per second
@@ -199,6 +230,7 @@ class Time(UnitQuantity):
     """
     Represents a time value with units (e.g. s, ms, μs, ns, min, hr, days)
     """
+    DIMENSIONAL_QUANTITY = ('T', '1')
     ALLOWED_UNITS_AND_MULTIPLIERS = {
         "s": 1,         # base unit: seconds
         "ms": 1e-3,     # milliseconds to seconds
@@ -214,6 +246,7 @@ class Position(UnitQuantity):
     """
     Represents a spatial position value with units (e.g. m, mm, μm, nm, km)
     """
+    DIMENSIONAL_QUANTITY = ('L', '1')
     ALLOWED_UNITS_AND_MULTIPLIERS = {
         "m": 1,         # base unit: meters
         "mm": 1e-3,     # millimeters to meters
@@ -227,6 +260,7 @@ class Velocity(UnitQuantity):
     """
     Represents a velocity value with units (e.g. m/s, mm/s, μm/s)
     """
+    DIMENSIONAL_QUANTITY = ('L', 'T')
     ALLOWED_UNITS_AND_MULTIPLIERS = {
         "m/s": 1,       # base unit: meters per second
         "mm/s": 1e-3,   # millimeters per second to meters per second
@@ -238,6 +272,7 @@ class AngularVelocity(UnitQuantity):
     """
     Represents an angular velocity value with units (e.g. rad/s, deg/s)
     """
+    DIMENSIONAL_QUANTITY = ('1', 'T')
     ALLOWED_UNITS_AND_MULTIPLIERS = {
         "rad/s": 1,             # base unit: radians per second
         "deg/s": math.pi / 180  # degrees per second to radians per second
@@ -248,6 +283,7 @@ class Acceleration(UnitQuantity):
     """
     Represents a velocity value with units (e.g. m/s^2, mm/s^2, μm/s^2)
     """
+    DIMENSIONAL_QUANTITY = ('L', 'TT')
     ALLOWED_UNITS_AND_MULTIPLIERS = {
         "m/s^2": 1,     # base unit: meters per second squared
         "mm/s^2": 1e-3, # millimeters per second squared to meters per second squared
@@ -259,6 +295,7 @@ class AngularAcceleration(UnitQuantity):
     """
     Represents an angular velocity value with units (e.g. rad/s, deg/s)
     """
+    DIMENSIONAL_QUANTITY = ('1', 'TT')
     ALLOWED_UNITS_AND_MULTIPLIERS = {
         "rad/s^2": 1,               # base unit: radians per second squared
         "deg/s^2": math.pi / 180    # degrees per second squared to radians per second squared
@@ -383,6 +420,8 @@ class FrequencyRange(RangeWithUnits):
 # For quick tests
 if __name__ == "__main__":
 
+    travel_per_rev = "0.1 mm"
+    step_angle = "2 deg"
     print(
-        SampleRate("1 MS/s") * math.pi / 2 - SampleRate("10 kS/s")
+        Position(travel_per_rev) * (Angle(step_angle) / Angle("360 deg"))
     )
