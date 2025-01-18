@@ -40,7 +40,7 @@ class Stage(ABC):
             )
         # if no error raised, then limits_dict is OK
 
-    def __init__(self, axis: str):
+    def __init__(self, axis: str, **kwargs):
         # Validate axis label
         if axis not in self.VALID_AXES:
             raise ValueError(f"axis must be one of {self.VALID_AXES}")

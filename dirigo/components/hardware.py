@@ -6,7 +6,7 @@ from dirigo.components.optics import LaserScanningOptics
 from dirigo.hw_interfaces.digitizer import Digitizer
 from dirigo.hw_interfaces.stage import MultiAxisStage
 from dirigo.hw_interfaces.encoder import MultiAxisLinearEncoder
-from dirigo.hw_interfaces.scanner import FastRasterScanner, SlowRasterScanner
+from dirigo.hw_interfaces.scanner import FastRasterScanner, SlowRasterScanner, ObjectiveZScanner
 
 
 @dataclass
@@ -26,7 +26,7 @@ class Hardware:
     """
     # Note: the point of this class is to hold several 
     # hardware references, not to implement functionality
-    def __init__(self, default_config:SystemConfig):
+    def __init__(self, default_config: SystemConfig):
         self.optics = LaserScanningOptics(**default_config.optics)
 
         self.digitizer: Digitizer = self.get_hardware_plugin(
@@ -37,6 +37,13 @@ class Hardware:
         self.stage: MultiAxisStage = self.get_hardware_plugin(
             group="dirigo_stages",
             default_config=default_config.stage
+        )
+
+        # motorized objective is considered a 'scanner' because it move the beam 
+        # through the sample, as opposed to moving the sample (stage).
+        self.objective_scanner: ObjectiveZScanner = self.get_hardware_plugin(
+            group="dirigo_scanners", 
+            default_config=default_config.objective_scanner
         )
 
         self.encoders: MultiAxisLinearEncoder = self.get_hardware_plugin(

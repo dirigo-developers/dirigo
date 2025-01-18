@@ -405,7 +405,16 @@ class GalvoSlowRasterScannerViaNI(GalvoScanner, SlowRasterScanner):
                 np.linspace(start=-amp_rad, stop=amp_rad, num=num_up),
                 np.linspace(start=amp_rad, stop=-amp_rad, num=num_down)
             )
-            return np.concatenate(parts, axis=0)
+            waveform = np.concatenate(parts, axis=0)
+            # if True:
+            #     window_width = 100
+
+            #     # Create the kernel (rolling average filter)
+            #     kernel = np.ones(window_width) / window_width
+
+            #     # Apply convolution. The mode 'valid' returns output only where the kernel fully overlaps the signal.
+            #     waveform = np.convolve(waveform, kernel, mode='same')
+            return waveform
     
     @cached_property
     def _volts_per_radian(self) -> float:

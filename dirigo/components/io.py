@@ -21,6 +21,7 @@ class SystemConfig:
     optics: dict
     digitizer: dict
     stage: dict
+    objective_scanner: dict
     encoders: dict
     fast_raster_scanner: dict # It may be better to make these dicts and have the plugin determine what is needed
     slow_raster_scanner: dict
@@ -32,6 +33,7 @@ class SystemConfig:
             optics=data['optics'],
             digitizer=data["digitizer"],
             stage=data["stage"],
+            objective_scanner=data["objective_scanner"],
             encoders=data["encoders"],
             fast_raster_scanner=data["fast_raster_scanner"],
             slow_raster_scanner=data["slow_raster_scanner"]
