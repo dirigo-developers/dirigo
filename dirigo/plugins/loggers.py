@@ -1,10 +1,10 @@
 from functools import cached_property
 
-import numpy as np
 import tifffile
 from platformdirs import user_documents_path
 
-from dirigo.sw_interfaces import Logger, Acquisition, Processor
+from dirigo.sw_interfaces.processor import Processor, ProcessedFrame
+from dirigo.sw_interfaces import Logger, Acquisition
 from dirigo.plugins.acquisitions import FrameAcquisitionSpec
 
 
@@ -25,14 +25,14 @@ class TiffLogger(Logger):
     def run(self):
         try:
             while True:
-                data: np.ndarray = self.inbox.get(block=True)
+                buf: ProcessedFrame = self.inbox.get(block=True)
 
-                if data is None: # Check for sentinel None
+                if buf is None: # Check for sentinel None
                     self.publish(None) # pass sentinel
                     print('Exiting TiffLogger thread')
                     return # thread ends
                 
-                self.save_data(data)
+                self.save_data(buf.data)
 
         finally:
             if self._writer:

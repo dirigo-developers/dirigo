@@ -160,7 +160,11 @@ class LineAcquisition(Acquisition):
     def read_positions(self):
         """Subclasses can override this method to provide position readout from
         stages or linear position encoders."""
-        return (self.hw.stage.x.position, self.hw.stage.y.position)
+        return (
+            self.hw.stage.x.position, 
+            self.hw.stage.y.position,
+            self.hw.objective_scanner.position
+        )
 
     def _calculate_trigger_delay(self, round_down: bool = True) -> int | float:
         """Compute the number of samples to delay

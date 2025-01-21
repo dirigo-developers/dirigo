@@ -7,7 +7,7 @@ from scipy import fft
 
 from dirigo import units
 from dirigo.hw_interfaces import digitizer
-from dirigo.sw_interfaces import Processor
+from dirigo.sw_interfaces.processor import Processor, ProcessedFrame
 from dirigo.plugins.acquisitions import FrameAcquisitionSpec
 
 
@@ -144,15 +144,17 @@ class RasterFrameProcessor(Processor):
                 print('Exiting processing thread')
                 return # concludes run() - this thread ends
 
-            # if buf.positions is not None:
-            #     print(f'processor got positions: {buf.positions[0]}')
-
             t0 = time.perf_counter()
             dewarp_kernel(buf.data, self.dewarped, start_indices, nsamples_to_sum)
-            self.publish(self.dewarped) # sends off to Logger or Display workers
+            
+            self.publish(ProcessedFrame(
+                data=self.dewarped, 
+                timestamps=buf.timestamps,
+                positions=buf.positions
+            )) # sends off to Logger and/or Display workers
             t1 = time.perf_counter()
             
-            print(f"{self.native_id} [max sum: {np.max(nsamples_to_sum)}] Processed a frame in {1000*(t1-t0):.02f} ms")
+            print(f"{self.native_id} Processed a frame in {1000*(t1-t0):.02f} ms")
 
             # If timestamps are assigned (default is None)
             if isinstance(buf.timestamps, np.ndarray):

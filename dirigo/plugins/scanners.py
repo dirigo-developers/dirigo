@@ -247,7 +247,7 @@ class FrameClock:
         self._task.close()
 
 
-class GalvoSlowRasterScannerViaNI(GalvoScanner, SlowRasterScanner):
+class GalvoRasterScannerViaNI(GalvoScanner):
     REARM_TIME = units.Time("0.5 ms") # time to allow NI card to rearm after outputing waveform
     AO_TIMEBASE = units.Frequency("100 MHz") # NIDAQ cards use 100 MHz timebase divided down to generate frequency
 
@@ -422,3 +422,11 @@ class GalvoSlowRasterScannerViaNI(GalvoScanner, SlowRasterScanner):
         return self._analog_control_range.range / self.angle_limits.range
  
 
+class GalvoFastRasterScannerViaNI(GalvoRasterScannerViaNI, FastRasterScanner):
+    """The faster of a galvo-galvo pair. """
+    pass
+
+
+class GalvoSlowRasterScannerViaNI(GalvoRasterScannerViaNI, SlowRasterScanner):
+    """Galvo paired with a fast scanner (resonant, polygon, etc)"""
+    pass

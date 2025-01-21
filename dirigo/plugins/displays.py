@@ -4,7 +4,8 @@ import threading
 import numpy as np
 from numba import njit, prange, types
 
-from dirigo.sw_interfaces import Display, Acquisition, Processor
+from dirigo.sw_interfaces.processor import Processor, ProcessedFrame
+from dirigo.sw_interfaces import Display, Acquisition
 from dirigo.sw_interfaces.display import ColorVector, DisplayChannel
 
 
@@ -22,7 +23,7 @@ def rolling_average_kernel(ring_buffer: np.ndarray, frame_index: int, averaged: 
             for ic in range(Nc):
 
                 tmp = 0
-                for iframe in range(Nf):
+                for iframe in range(d):
                     tmp += ring_buffer[iframe, iy, ix, ic]
 
                 averaged[iy, ix, ic] = tmp // d
@@ -86,7 +87,11 @@ class FrameDisplay(Display):
         self._n_frame_average = 8
 
         self._prev_data = None # None indicates that no data has been acquired yet
+        self._prev_position = None
         self._average_buffer = None
+        self._reset_average_xy_cutoff_sqr = (proc._acq.spec.pixel_size) ** 2 # TODO, may require some tuning to remove unwanted resets
+        self._reset_average_z_cutoff = proc._acq.spec.pixel_size # TODO, dido
+        # Either of these may need some cumulative measurement
         self._i: int = 0 # tracks rolling average index
         self._average_buffer_lock = threading.Lock()  # Add a lock for thread safety
 
@@ -109,26 +114,53 @@ class FrameDisplay(Display):
     def run(self):
         while True:
             # Get new data from inbox
-            data: np.ndarray = self.inbox.get(block=True) # may want to add a timeout
+            buf: ProcessedFrame = self.inbox.get(block=True) # may want to add a timeout
 
-            if data is None: # Check for sentinel None
+            if buf is None: # Check for sentinel None
                 self.publish(None) # pass sentinel
                 print('exiting display thread')
                 # Ends thread, but this object can still be used (ie to adjust 
-                # the appearance of the last acquire frame)
+                # the appearance of the last acquired frame)
                 return 
+            
+            # Check whether position has changed
+            if buf.positions is not None:
+                if (self._prev_position is not None):
+                    if isinstance(buf.positions, np.ndarray):
+                        current_positions = buf.positions[-1,:] # use the final the position reading
+                    elif isinstance(buf.positions, tuple):
+                        current_positions = buf.positions
+
+                    dr2 = (current_positions[0] - self._prev_position[0])**2  \
+                        + (current_positions[1] - self._prev_position[1])**2
+                    
+                    if dr2 > self._reset_average_xy_cutoff_sqr: 
+                        # if the Euclidean exceeds from last frame exceeds pixel size, then reset the rolling average index
+                        # Setting _i = 0, will cause this frame to be sliced into the ring buffer at the first position
+                        # and the averaging kernel will only average that 1 frame (effectively no averaging)
+                        # this allows reusing the _average_buffer object.
+                        self._i = 0
+
+                    elif len(current_positions) > 2: # Z axis also included
+                        dz = abs(current_positions[2] - self._prev_position[2])
+                        if dz > self._reset_average_z_cutoff:
+                            # Similarly, reset _i if z position changes
+                            self._i = 0
+                
+                self._prev_position = buf.positions
             
             t0 = time.perf_counter()
             with self._average_buffer_lock:
                 # _average_buffer is initially None and the first frame establishes height, width, etc
                 # Averaging can also be reset or changed by setting this to None, prompting reallocation
                 if self._average_buffer is None:
-                    buffer_shape = (self.n_frame_average,) + data.shape
+                    buf_shape = buf.data.shape
+                    buffer_shape = (self.n_frame_average,) + buf_shape
                     self._average_buffer = np.zeros(buffer_shape, dtype=np.uint16)
-                    averaged_frame = np.zeros(data.shape, np.uint16)
+                    averaged_frame = np.zeros(buf_shape, np.uint16)
                     self._i = 0
 
-                self._average_buffer[self._i % self.n_frame_average] = data
+                self._average_buffer[self._i % self.n_frame_average] = buf.data
 
                 rolling_average_kernel(self._average_buffer, self._i, averaged_frame)
                 processed = additive_display_kernel(averaged_frame, self.luts)
@@ -138,7 +170,7 @@ class FrameDisplay(Display):
 
             t1 = time.perf_counter()
             self._i += 1
-            print(f"Channel display processing: {1000*(t1-t0):.1f}ms")
+            print(f"Channel display processing: {1000*(t1-t0):.1f}ms. Position data shape: {buf.positions}")
                      
     @property
     def n_frame_average(self) -> int:
