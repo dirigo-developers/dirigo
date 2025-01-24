@@ -1,6 +1,9 @@
 from functools import cached_property
+import base64
+import json
 
 import tifffile
+import numpy as np
 from platformdirs import user_documents_path
 
 from dirigo.sw_interfaces.processor import Processor, ProcessedFrame
@@ -18,50 +21,101 @@ class TiffLogger(Logger):
         self.basename = "experiment"
         self.save_path = user_documents_path() / "Dirigo"
 
+        self._fn = None
         self._writer = None # generated upon attempt to save first frame
         self.frames_saved = 0
         self.files_saved = 0
+
+        self.timestamps = []
+        self.positions = []
+        self.blank_metadata = None
          
     def run(self):
         try:
             while True:
-                buf: ProcessedFrame = self.inbox.get(block=True)
+                frame: ProcessedFrame = self.inbox.get(block=True)
 
-                if buf is None: # Check for sentinel None
+                if frame is None: # Check for sentinel None
                     self.publish(None) # pass sentinel
                     print('Exiting TiffLogger thread')
                     return # thread ends
                 
-                self.save_data(buf.data)
+                self.save_data(frame)
 
         finally:
-            if self._writer:
-                self._writer.close()
-                self._writer = None
+            self._close_and_write_metadata()
 
-    def save_data(self, data):
-        """Save data to a TIFF file"""
+    def save_data(self, frame: ProcessedFrame):
+        """Save data and metadata to a TIFF file"""
+
+        # Create the writer object if necessary
         if self._writer is None:
-            fn = self.save_path / f"{self.basename}_{self.files_saved}.tif"
-            self._writer = tifffile.TiffWriter(fn, bigtiff=self._use_big_tiff)
+            
+            if self.frames_per_file == float('inf'):
+                # if we are writing an indeterminately long file, defer saving metadata
+                self.blank_metadata = None
+            else:
+                # Generate some blank metadata to overwrite later
+                if frame.timestamps is not None:
+                    # For line by line timestamps
+                    timestamps_shape = (self.frames_per_file,) + frame.timestamps.shape
+                    timestamps = np.zeros(timestamps_shape, dtype=np.float64)
+                if frame.positions is not None:
+                    pass
+                self.blank_metadata = {
+                    'timestamps': base64.b64encode(timestamps.tobytes()).decode('ascii'),
+                }
+                
+            self._fn = self.save_path / f"{self.basename}_{self.files_saved}.tif"
+            self._writer = tifffile.TiffWriter(self._fn, bigtiff=self._use_big_tiff)
+
+        # Accumulate metadata
+        self.timestamps.append(frame.timestamps)
+        self.positions.append(frame.positions)
 
         self._writer.write(
-                data, 
+                frame.data, 
                 photometric='minisblack',
                 planarconfig='contig',
                 resolution=(self._x_dpi, self._y_dpi),
+                metadata=self.blank_metadata,
                 contiguous=True # The dataset size must not change
             )
         self.frames_saved += 1
 
+        # when number of frames per file reached, close writer & write metadata
         if self.frames_saved % self.frames_per_file == 0:
-            # when reaching number of frames per file, close writer
+            self._close_and_write_metadata()
+           
+    def _close_and_write_metadata(self):
+        if self._writer:
             self._writer.close()
             self._writer = None
             self.files_saved += 1
 
+            if self.frames_per_file == float('inf'):
+                # If the total metadata size is not known a priori, skip
+                # TODO, re-write the file
+                pass
+            else:
+                # Re-open and overwite blank metadata
+                serialized_timestamps = base64.b64encode(np.array(self.timestamps).tobytes()).decode('ascii')
+                with tifffile.TiffFile(self._fn, mode="r+b") as tif:
+                    tif.pages[0].tags['ImageDescription'].overwrite(
+                        json.dumps({'timestamps': serialized_timestamps})
+                    )
+
+            # Clear accumulants
+            self.timestamps = []
+            self.positions = []
+
     @cached_property
     def _use_big_tiff(self) -> bool:
+        """Returns False (don't use BigTiff) when frames per file is 1.
+        
+        This strategy was chosen because little disadvantage to using BigTiff.
+        Subclass and overwrite to provide different logic
+        """
         if self.frames_per_file == 1:
             return False
         else:
