@@ -17,7 +17,7 @@ class TiffLogger(Logger):
     def __init__(self, acquisition: Acquisition = None, processor: Processor = None):
         super().__init__(acquisition, processor)
 
-        self.frames_per_file = 10 # add validation
+        self.frames_per_file = 100 # add validation
         self.basename = "experiment"
         self.save_path = user_documents_path() / "Dirigo"
 
@@ -57,13 +57,18 @@ class TiffLogger(Logger):
             else:
                 # Generate some blank metadata to overwrite later
                 if frame.timestamps is not None:
-                    # For line by line timestamps
+                    # For multi-line timestamps
                     timestamps_shape = (self.frames_per_file,) + frame.timestamps.shape
                     timestamps = np.zeros(timestamps_shape, dtype=np.float64)
                 if frame.positions is not None:
-                    pass
+                    if isinstance(frame.positions, np.ndarray):
+                        positions_shape = (self.frames_per_file,) + frame.positions.shape
+                    else:
+                        positions_shape = (self.frames_per_file, len(frame.positions))
+                    positions = np.zeros(positions_shape, dtype=np.float64)
                 self.blank_metadata = {
                     'timestamps': base64.b64encode(timestamps.tobytes()).decode('ascii'),
+                    'positions': base64.b64encode(positions.tobytes()).decode('ascii'),
                 }
                 
             self._fn = self.save_path / f"{self.basename}_{self.files_saved}.tif"
@@ -99,10 +104,14 @@ class TiffLogger(Logger):
                 pass
             else:
                 # Re-open and overwite blank metadata
-                serialized_timestamps = base64.b64encode(np.array(self.timestamps).tobytes()).decode('ascii')
+                serialized_timestamps = base64.b64encode(np.array(self.timestamps).tobytes())
+                serialized_positions = base64.b64encode(np.array(self.positions).tobytes())
                 with tifffile.TiffFile(self._fn, mode="r+b") as tif:
                     tif.pages[0].tags['ImageDescription'].overwrite(
-                        json.dumps({'timestamps': serialized_timestamps})
+                        json.dumps({
+                            'timestamps': serialized_timestamps.decode('ascii'),
+                            'positions': serialized_positions.decode('ascii')
+                        })
                     )
 
             # Clear accumulants

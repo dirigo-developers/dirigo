@@ -1,6 +1,5 @@
 from pathlib import Path
 import math
-import queue
 
 from platformdirs import user_config_dir
 
@@ -105,8 +104,6 @@ class LineAcquisition(Acquisition):
         # for res scanner: frequency is set (fixed), waveform is set (fixed), duty cycle is set (fixed)
         # for other scanners--TBD
 
-        testing = self._calculate_trigger_delay()
-
     def configure_digitizer(self, profile_name: str):
         """
         Loads digitizer profile and sets record and buffer settings.
@@ -185,7 +182,6 @@ class LineAcquisition(Acquisition):
             tdr = self.hw.digitizer.acquire.trigger_delay_sample_resolution
             start_index = tdr * int(start_index / tdr)
 
-        print("start index", start_index)
         return start_index
 
     def _calculate_record_length(self, round_up: bool = True) -> int | float:

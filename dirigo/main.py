@@ -119,7 +119,7 @@ if __name__ == "__main__":
     logging.start()
     acquisition.start()
 
-    acquisition.join(timeout=20.0)
+    acquisition.join(timeout=100.0)
     processor.stop()
 
     print("Acquisition complete")

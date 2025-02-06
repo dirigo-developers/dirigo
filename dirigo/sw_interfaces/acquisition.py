@@ -49,7 +49,7 @@ class Acquisition(Worker):
                 )
             
     @classmethod
-    def get_specification(cls, spec_name: str = "default"):
+    def get_specification(cls, spec_name: str = "default") -> AcquisitionSpec:
         """Return the associated Specification object"""
         spec_fn = spec_name + ".toml"
         spec = load_toml(cls.SPEC_LOCATION / spec_fn)
