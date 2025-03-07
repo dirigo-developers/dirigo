@@ -1,5 +1,6 @@
 import importlib.metadata
 from dataclasses import dataclass
+from typing import Optional
 
 from dirigo.components.io import SystemConfig
 from dirigo.components.optics import LaserScanningOptics
@@ -7,6 +8,7 @@ from dirigo.hw_interfaces.digitizer import Digitizer
 from dirigo.hw_interfaces.stage import MultiAxisStage
 from dirigo.hw_interfaces.encoder import MultiAxisLinearEncoder
 from dirigo.hw_interfaces.scanner import FastRasterScanner, SlowRasterScanner, ObjectiveZScanner
+from dirigo.hw_interfaces.camera import FrameGrabber
 
 
 @dataclass
@@ -29,48 +31,68 @@ class Hardware:
     def __init__(self, default_config: SystemConfig):
         self.optics = LaserScanningOptics(**default_config.optics)
 
-        self.digitizer: Digitizer = self.get_hardware_plugin(
+        self.digitizer: Digitizer = self._try_instantiate(
             group="dirigo_digitizers",
-            default_config=default_config.digitizer
+            config=default_config.digitizer
         )
 
-        self.stage: MultiAxisStage = self.get_hardware_plugin(
+        self.stage: MultiAxisStage = self._try_instantiate(
             group="dirigo_stages",
-            default_config=default_config.stage
+            config=default_config.stage
         )
 
         # motorized objective is considered a 'scanner' because it move the beam 
         # through the sample, as opposed to moving the sample (stage).
-        self.objective_scanner: ObjectiveZScanner = self.get_hardware_plugin(
+        self.objective_scanner: ObjectiveZScanner = self._try_instantiate(
             group="dirigo_scanners", 
-            default_config=default_config.objective_scanner
+            config=default_config.objective_scanner
         )
 
-        self.encoders: MultiAxisLinearEncoder = self.get_hardware_plugin(
+        self.encoders: MultiAxisLinearEncoder = self._try_instantiate(
             group="dirigo_encoders",
-            default_config=default_config.encoders
+            config=default_config.encoders
         )
 
-        self.fast_raster_scanner: FastRasterScanner = self.get_hardware_plugin(
+        self.fast_raster_scanner: FastRasterScanner = self._try_instantiate(
             group="dirigo_scanners",
-            default_config=default_config.fast_raster_scanner
+            config=default_config.fast_raster_scanner
         )
 
-        self.slow_raster_scanner: SlowRasterScanner = self.get_hardware_plugin(
+        self.slow_raster_scanner: SlowRasterScanner = self._try_instantiate(
             group="dirigo_scanners",
-            default_config=default_config.slow_raster_scanner
+            config=default_config.slow_raster_scanner
         )
 
+        self.frame_grabber: FrameGrabber = self._try_instantiate(
+            group="dirigo_frame_grabbers",
+            config=default_config.frame_grabber
+        )
 
-    def get_hardware_plugin(self, group, default_config):
+        # frame grabber must be instantiated before line scan camera
+        self.line_scan_camera = self._try_instantiate(
+            group="dirigo_line_scan_cameras",
+            config=default_config.line_scan_camera,
+            extra_args={"frame_grabber": self.frame_grabber}
+        )
+
+        a = None
+
+
+    def _try_instantiate(self, group: str, config: Optional[dict], extra_args=None):
+        if config is None:
+            return None
+        
+        if extra_args is None:
+            extra_args = {}
+
         entry_pts = importlib.metadata.entry_points(group=group)
-
         for entry_point in entry_pts:
-            if entry_point.name.lower() == default_config['type'].lower():
+            if entry_point.name.lower() == config['type'].lower():
                 # Dynamically load and return the plugin class
                 ConcreteClass = entry_point.load()
-                return ConcreteClass(**default_config)
-        raise ValueError(f"No {group} plugin found for: {default_config['type']}")
+                return ConcreteClass(**{**config, **extra_args})
+            
+        raise ValueError(f"No {group} plugin found for: {config['type']}")
     
     @property
     def nchannels(self) -> int:
