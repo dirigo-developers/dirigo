@@ -32,6 +32,7 @@ class SystemConfig:
     slow_raster_scanner: Optional[dict] = None
     frame_grabber: Optional[dict] = None
     line_scan_camera: Optional[dict] = None
+    illuminator: Optional[dict] = None
 
     @classmethod
     def from_toml(cls, toml_path: Path) -> 'SystemConfig':
@@ -45,5 +46,6 @@ class SystemConfig:
             fast_raster_scanner=toml_data.get("fast_raster_scanner"),
             slow_raster_scanner=toml_data.get("slow_raster_scanner"),
             frame_grabber=toml_data.get("frame_grabber"),
-            line_scan_camera=toml_data.get("line_scan_camera")
+            line_scan_camera=toml_data.get("line_scan_camera"),
+            illuminator=toml_data.get("illuminator")
         )

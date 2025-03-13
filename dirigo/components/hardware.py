@@ -8,7 +8,8 @@ from dirigo.hw_interfaces.digitizer import Digitizer
 from dirigo.hw_interfaces.stage import MultiAxisStage
 from dirigo.hw_interfaces.encoder import MultiAxisLinearEncoder
 from dirigo.hw_interfaces.scanner import FastRasterScanner, SlowRasterScanner, ObjectiveZScanner
-from dirigo.hw_interfaces.camera import FrameGrabber
+from dirigo.hw_interfaces.camera import FrameGrabber, LineScanCamera
+from dirigo.hw_interfaces.illuminator import Illuminator
 
 
 @dataclass
@@ -69,10 +70,15 @@ class Hardware:
         )
 
         # frame grabber must be instantiated before line scan camera
-        self.line_scan_camera = self._try_instantiate(
+        self.line_scan_camera: LineScanCamera = self._try_instantiate(
             group="dirigo_line_scan_cameras",
             config=default_config.line_scan_camera,
             extra_args={"frame_grabber": self.frame_grabber}
+        )
+        
+        self.illuminator: Illuminator = self._try_instantiate(
+            group="dirigo_illuminators",
+            config=default_config.illuminator
         )
 
         a = None

@@ -21,6 +21,34 @@ class FrameGrabber(ABC):
     def serial_read(self):
         pass
 
+    @property
+    @abstractmethod
+    def roi_height(self):
+        pass
+
+    @property
+    @abstractmethod
+    def roi_width(self):
+        pass
+
+    @property
+    @abstractmethod
+    def bytes_per_pixel(self):
+        pass
+
+    @property
+    def bytes_per_buffer(self):
+        return self.roi_height * self.roi_width * self.bytes_per_pixel
+
+    @abstractmethod
+    def prepare_buffers(self, nbuffers: int):
+        pass
+
+    @property
+    @abstractmethod
+    def buffers_acquired(self) -> int:
+        pass
+
 
 class Camera(ABC):
     def __init__(self, frame_grabber: Optional[FrameGrabber], **kwargs):
@@ -83,3 +111,7 @@ class Camera(ABC):
     @abstractmethod
     def stop(self):
         pass
+
+
+class LineScanCamera(Camera):
+    pass

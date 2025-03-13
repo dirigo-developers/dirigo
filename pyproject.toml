@@ -28,3 +28,5 @@ linear_encoders_via_ni = "dirigo.plugins.encoders:MultiAxisLinearEncodersViaNI"
 resonant_scanner_via_ni = "dirigo.plugins.scanners:ResonantScannerViaNI"
 galvo_slow_raster_scanner_via_ni = "dirigo.plugins.scanners:GalvoSlowRasterScannerViaNI"
 
+[project.entry-points."dirigo_illuminators"]
+led_via_ni = "dirigo.plugins.illuminators:LEDViaNI"
