@@ -244,11 +244,12 @@ class Time(UnitQuantity):
 
 class Position(UnitQuantity):
     """
-    Represents a spatial position value with units (e.g. m, mm, μm, nm, km)
+    Represents a spatial position value with units (e.g. m, cm, mm, μm, nm, km)
     """
     DIMENSIONAL_QUANTITY = ('L', '1')
     ALLOWED_UNITS_AND_MULTIPLIERS = {
         "m": 1,         # base unit: meters
+        "cm": 1e-2,     # centimeters to meters
         "mm": 1e-3,     # millimeters to meters
         "μm": 1e-6,     # micrometers to meters
         "nm": 1e-9,     # nanometers to meters
@@ -258,11 +259,12 @@ class Position(UnitQuantity):
 
 class Velocity(UnitQuantity):
     """
-    Represents a velocity value with units (e.g. m/s, mm/s, μm/s)
+    Represents a velocity value with units (e.g. m/s, cm/s, mm/s, μm/s)
     """
     DIMENSIONAL_QUANTITY = ('L', 'T')
     ALLOWED_UNITS_AND_MULTIPLIERS = {
         "m/s": 1,       # base unit: meters per second
+        "cm/s": 1e-2,   # centimeters per second to meters per second
         "mm/s": 1e-3,   # millimeters per second to meters per second
         "μm/s": 1e-6,   # micrometers per second to meters per second
     }
