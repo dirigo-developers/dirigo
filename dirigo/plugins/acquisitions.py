@@ -1,5 +1,6 @@
 from pathlib import Path
 import math
+from typing import Optional
 
 from platformdirs import user_config_dir
 
@@ -14,13 +15,13 @@ TWO_PI = 2 * math.pi
 class LineAcquisitionSpec(AcquisitionSpec): 
     def __init__(
             self,
-            bidirectional_scanning: bool,
             line_width: str,
             pixel_size: str,
-            fill_fraction: float,
             buffers_per_acquisition: int | float, # float('inf')
-            buffers_allocated: int,
-            digitizer_profile: str,
+            bidirectional_scanning: bool = False,
+            fill_fraction: float = 1.0,
+            digitizer_profile: Optional[str] = None,
+            buffers_allocated: Optional[int] = None,
             lines_per_buffer: int = None,
             **kwargs
     ):
@@ -41,8 +42,9 @@ class LineAcquisitionSpec(AcquisitionSpec):
                 buffers_per_acquisition = float('inf')
             else:
                 raise ValueError(f"`buffers_per_acquisition` must be a finite int or a string, 'inf'.")
-        elif isinstance(buffers_per_acquisition, float) and not buffers_per_acquisition == float('inf'):
-            raise ValueError(f"`buffers_per_acquisition` must be integer or string 'inf'.")
+        elif isinstance(buffers_per_acquisition, float):
+            if not buffers_per_acquisition == float('inf'):
+                raise ValueError(f"`buffers_per_acquisition` must be integer or string 'inf'.")
         elif not isinstance(buffers_per_acquisition, int):
             raise ValueError(f"`buffers_per_acquisition` must be integer or string, 'inf'.")
         elif buffers_per_acquisition < 1:

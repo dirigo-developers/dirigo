@@ -44,6 +44,14 @@ class FrameGrabber(ABC):
     def prepare_buffers(self, nbuffers: int):
         pass
 
+    @abstractmethod
+    def start(self):
+        pass
+
+    @abstractmethod
+    def stop(self):
+        pass
+
     @property
     @abstractmethod
     def buffers_acquired(self) -> int:
@@ -52,14 +60,15 @@ class FrameGrabber(ABC):
 
 class Camera(ABC):
     def __init__(self, frame_grabber: Optional[FrameGrabber], **kwargs):
-
         self._frame_grabber = frame_grabber 
 
     # essential parameters
     # sensor shape (max resolution)
     # roi shape
     # frame rate / interval
-    # 
+    
+    @property
+
 
     @property
     @abstractmethod
@@ -114,4 +123,19 @@ class Camera(ABC):
 
 
 class LineScanCamera(Camera):
-    pass
+    VALID_AXES = {'x', 'y'}
+
+    def __init__(self, axis: str, **kwargs):
+        super().__init__(**kwargs)
+        self.axis = axis
+
+    @property
+    def axis(self):
+        return self._axis
+    
+    @axis.setter
+    def axis(self, new_axis: str):
+        if new_axis in self.VALID_AXES:
+            self._axis = new_axis
+        else:
+            raise ValueError(f"Error setting encoder axis: Got '{new_axis}'")

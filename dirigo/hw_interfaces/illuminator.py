@@ -16,6 +16,10 @@ class Illuminator(ABC):
     @abstractmethod
     def turn_off(self):
         pass
+
+    @abstractmethod
+    def close(self):
+        pass
     
     @property
     @abstractmethod

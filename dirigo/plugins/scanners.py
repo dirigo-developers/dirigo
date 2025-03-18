@@ -104,7 +104,7 @@ class ResonantScannerViaNI(ResonantScanner, FastRasterScanner):
 
     @property
     def amplitude(self) -> units.Angle:
-        """Get the peak-to-peak amplitude, in radians optical."""
+        """Get the peak-to-peak amplitude, in optical angle."""
         return self._amplitude
 
     @amplitude.setter
