@@ -2,25 +2,50 @@ from abc import ABC, abstractmethod
 
 import numpy as np
 
+from dirigo import units
 
 
 class LinearEncoder(ABC):
-    """Abstraction of a linear encoder channel"""
+    """
+    Abstraction of a linear encoder. Linear encoders can be used to either log
+    stage axis position at triggered times (for post-hoc motion correction) or 
+    to derive a linearized capture trigger (e.g. to provide to a line-scan
+    camera). Use method start_logging() with read() for position capture and use 
+    method start_triggering() for linearized trigger out. If either is not 
+    implemented, raises NotImplementedError.
+    """
+    VALID_AXES = {'x', 'y', 'z'}
+
     def __init__(self, axis: str, **kwargs):
-        self._axis = axis # TODO, check valid axis?
+        self.axis = axis
+
+    @property
+    def axis(self):
+        return self._axis
+    
+    @axis.setter
+    def axis(self, new_axis: str):
+        if new_axis in self.VALID_AXES:
+            self._axis = new_axis
+        else:
+            raise ValueError(f"Error setting encoder axis: Got '{new_axis}'")
 
     @abstractmethod
-    def start(self):
+    def start_logging(self):
+        pass
+
+    @abstractmethod
+    def read(self, nsamples: int) -> np.ndarray:
+        pass
+
+    @abstractmethod
+    def start_triggering(self, distance_per_trigger: units.Position):
         pass
 
     @abstractmethod
     def stop(self):
         pass
     
-    @abstractmethod
-    def read(self, nsamples: int) -> np.ndarray:
-        pass
-
 
 class MultiAxisLinearEncoder(ABC):
     """
@@ -47,7 +72,7 @@ class MultiAxisLinearEncoder(ABC):
         pass
 
     @abstractmethod
-    def start(self):
+    def start_logging(self):
         """Starts all the available encoders."""
         pass
 
@@ -63,3 +88,4 @@ class MultiAxisLinearEncoder(ABC):
     def stop(self):
         """Stops all the available encoders."""
         pass
+

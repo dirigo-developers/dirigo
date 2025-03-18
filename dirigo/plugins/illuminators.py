@@ -11,12 +11,6 @@ class LEDViaNI(Illuminator):
 
         validate_ni_channel(enable_channel)
         self._enable_channel = enable_channel
-
-        self._task = nidaqmx.Task("Line illumination")
-        self._task.do_channels.add_do_chan(
-            lines=enable_channel,
-            line_grouping=LineGrouping.CHAN_PER_LINE
-        )
         
         # implement initial state
         if initial_state:
@@ -25,10 +19,24 @@ class LEDViaNI(Illuminator):
             self.turn_off()
 
     def turn_on(self):
-        self._task.write(True)
+        with nidaqmx.Task("Line illumination") as task:
+            task.do_channels.add_do_chan(
+                lines=self._enable_channel,
+                line_grouping=LineGrouping.CHAN_PER_LINE
+            )
+            task.write(True)
 
     def turn_off(self):
-        self._task.write(False)
+        with nidaqmx.Task("Line illumination") as task:
+            task.do_channels.add_do_chan(
+                lines=self._enable_channel,
+                line_grouping=LineGrouping.CHAN_PER_LINE
+            )
+            task.write(False)
+
+    def close(self):
+        pass
+
 
     @property
     def intensity(self):
