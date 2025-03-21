@@ -5,8 +5,8 @@ import numpy as np
 from numba import njit, prange, types
 
 from dirigo.sw_interfaces.processor import Processor, ProcessedFrame
-from dirigo.sw_interfaces import Display, Acquisition
-from dirigo.sw_interfaces.display import ColorVector, DisplayChannel
+from dirigo.sw_interfaces.acquisition import Acquisition, AcquisitionBuffer
+from dirigo.sw_interfaces.display import Display, ColorVector, DisplayChannel, DisplayPixelFormat
 
 
 
@@ -44,9 +44,10 @@ gamma_lut = np.round((2**8 - 1) * x**(1/gamma)).astype(np.uint8)
 def additive_display_kernel(data: np.ndarray, luts: np.ndarray) -> np.ndarray:
     """Applies LUTs and blends channels additively."""
     Ny, Nx, Nc = data.shape
+    bpp = luts.shape[2]
     transfer_function_max_index = 2**16 - 1
     
-    image = np.zeros(shape=(Ny, Nx, 3), dtype=np.uint8)
+    image = np.zeros(shape=(Ny, Nx, bpp), dtype=np.uint8)
 
     for yi in prange(Ny):
         for xi in prange(Nx):
@@ -81,22 +82,25 @@ def default_colormap_lists(nchannels: int) -> list[str]:
 class FrameDisplay(Display):
     """Worker to perform processing for display (blending, LUTs, etc)"""
 
-    def __init__(self, acq: Acquisition, proc: Processor):
+    def __init__(self, acq: Acquisition, proc: Processor, 
+                 display_pixel_format = DisplayPixelFormat.RGB24):
         super().__init__(acq, proc)
-
-        self._n_frame_average = 8
 
         self._prev_data = None # None indicates that no data has been acquired yet
         self._prev_position = None
-        self._average_buffer = None
-        self._reset_average_xy_cutoff_sqr = (proc._acq.spec.pixel_size) ** 2 # TODO, may require some tuning to remove unwanted resets
-        self._reset_average_z_cutoff = proc._acq.spec.pixel_size # TODO, dido
+        
+        self._reset_average_xy_cutoff_sqr = self.pixel_size ** 2 # TODO, may require some tuning to remove unwanted resets
+        self._reset_average_z_cutoff = self.pixel_size # TODO, dido
         # Either of these may need some cumulative measurement
+
+        # Frame averaging-related
+        self._n_frame_average = 1
+        self._average_buffer = None
         self._i: int = 0 # tracks rolling average index
         self._average_buffer_lock = threading.Lock()  # Add a lock for thread safety
 
-        data_range = acq.hw.data_range if acq else proc._acq.hw.data_range
-        self.luts = np.zeros(shape=(self.nchannels, data_range.range, 3), dtype=np.uint16)
+        bpp = 3 if display_pixel_format == DisplayPixelFormat.RGB24 else 4
+        self.luts = np.zeros(shape=(self.nchannels, self.data_range.range, bpp), dtype=np.uint16)
 
         self.display_channels: list[DisplayChannel] = []
 
@@ -104,8 +108,9 @@ class FrameDisplay(Display):
             dc = DisplayChannel(
                 lut_slice=self.luts[ci],
                 color_vector=ColorVector[colormap_name.upper()],
-                display_min=data_range.min,
-                display_max=data_range.max - 1,
+                display_min=self.data_range.min,
+                display_max=self.data_range.max - 1,
+                pixel_format=display_pixel_format,
                 update_method=self.update_display
             )
             self.display_channels.append(dc)
@@ -114,7 +119,7 @@ class FrameDisplay(Display):
     def run(self):
         while True:
             # Get new data from inbox
-            buf: ProcessedFrame = self.inbox.get(block=True) # may want to add a timeout
+            buf: AcquisitionBuffer | ProcessedFrame = self.inbox.get(block=True) # may want to add a timeout
 
             if buf is None: # Check for sentinel None
                 self.publish(None) # pass sentinel

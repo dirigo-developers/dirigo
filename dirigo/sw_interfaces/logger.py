@@ -19,8 +19,12 @@ class Logger(Worker):
         elif (acquisition is None) and (processor is None):
             raise ValueError("Error creating Display worker: "
                              "Provide either acquisition or processor.")
-        self._acquisition = acquisition
-        self._processor = processor
+        if processor:
+            self._processor = processor
+            self._acquisition = processor._acq
+        else:
+            self._processor = None
+            self._acquisition = acquisition
 
         self.basename: str = None
         self.save_path: str = None # potentially this could be a kwarg

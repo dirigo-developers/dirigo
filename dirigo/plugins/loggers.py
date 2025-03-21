@@ -1,5 +1,5 @@
 from functools import cached_property
-import base64
+from base64 import b64encode
 import json
 
 import tifffile
@@ -7,18 +7,24 @@ import numpy as np
 from platformdirs import user_documents_path
 
 from dirigo.sw_interfaces.processor import Processor, ProcessedFrame
-from dirigo.sw_interfaces import Logger, Acquisition
+from dirigo.sw_interfaces import Logger
+from dirigo.sw_interfaces.acquisition import Acquisition, AcquisitionBuffer
 from dirigo.plugins.acquisitions import FrameAcquisitionSpec
 
 
 
 class TiffLogger(Logger):
 
-    def __init__(self, acquisition: Acquisition = None, processor: Processor = None):
+    def __init__(self, 
+                 acquisition: Acquisition = None, 
+                 processor: Processor = None,
+                 max_frames_per_file: int | float = 1,
+                 basename: str = "experiment"
+                 ):
         super().__init__(acquisition, processor)
 
-        self.frames_per_file = 100 # add validation
-        self.basename = "experiment"
+        self.frames_per_file = max_frames_per_file # TODO add validation
+        self.basename = basename
         self.save_path = user_documents_path() / "Dirigo"
 
         self._fn = None
@@ -28,12 +34,12 @@ class TiffLogger(Logger):
 
         self.timestamps = []
         self.positions = []
-        self.blank_metadata = None
+        self.metadata = None
          
     def run(self):
         try:
             while True:
-                frame: ProcessedFrame = self.inbox.get(block=True)
+                frame: AcquisitionBuffer | ProcessedFrame = self.inbox.get(block=True)
 
                 if frame is None: # Check for sentinel None
                     self.publish(None) # pass sentinel
@@ -45,32 +51,32 @@ class TiffLogger(Logger):
         finally:
             self._close_and_write_metadata()
 
-    def save_data(self, frame: ProcessedFrame):
+    def save_data(self, frame: AcquisitionBuffer | ProcessedFrame):
         """Save data and metadata to a TIFF file"""
 
         # Create the writer object if necessary
         if self._writer is None:
-            
+            self.metadata = {}
             if self.frames_per_file == float('inf'):
                 # if we are writing an indeterminately long file, defer saving metadata
-                self.blank_metadata = None
+                pass
             else:
-                # Generate some blank metadata to overwrite later
+                # Otherwise, if we can predict the metadata size a priori, 
+                # generate some blank (serialized) metadata to overwrite later
                 if frame.timestamps is not None:
                     # For multi-line timestamps
                     timestamps_shape = (self.frames_per_file,) + frame.timestamps.shape
                     timestamps = np.zeros(timestamps_shape, dtype=np.float64)
+                    self.metadata['timestamps'] = b64encode(timestamps.tobytes()).decode('ascii')
+
                 if frame.positions is not None:
                     if isinstance(frame.positions, np.ndarray):
                         positions_shape = (self.frames_per_file,) + frame.positions.shape
                     else:
                         positions_shape = (self.frames_per_file, len(frame.positions))
                     positions = np.zeros(positions_shape, dtype=np.float64)
-                self.blank_metadata = {
-                    'timestamps': base64.b64encode(timestamps.tobytes()).decode('ascii'),
-                    'positions': base64.b64encode(positions.tobytes()).decode('ascii'),
-                }
-                
+                    self.metadata['positions'] = b64encode(positions.tobytes()).decode('ascii')
+
             self._fn = self.save_path / f"{self.basename}_{self.files_saved}.tif"
             self._writer = tifffile.TiffWriter(self._fn, bigtiff=self._use_big_tiff)
 
@@ -81,9 +87,9 @@ class TiffLogger(Logger):
         self._writer.write(
                 frame.data, 
                 photometric='minisblack',
-                planarconfig='contig',
+                #planarconfig='contig',
                 resolution=(self._x_dpi, self._y_dpi),
-                metadata=self.blank_metadata,
+                metadata=self.metadata,
                 contiguous=True # The dataset size must not change
             )
         self.frames_saved += 1
@@ -98,21 +104,20 @@ class TiffLogger(Logger):
             self._writer = None
             self.files_saved += 1
 
+            metadata = {}
             if self.frames_per_file == float('inf'):
                 # If the total metadata size is not known a priori, skip
                 # TODO, re-write the file
                 pass
             else:
                 # Re-open and overwite blank metadata
-                serialized_timestamps = base64.b64encode(np.array(self.timestamps).tobytes())
-                serialized_positions = base64.b64encode(np.array(self.positions).tobytes())
+                if self.timestamps[0] is not None:
+                    metadata['timestamps'] = b64encode(np.array(self.timestamps).tobytes()).decode('ascii')
+                if self.positions[0] is not None:
+                    metadata['positions'] = b64encode(np.array(self.positions).tobytes()).decode('ascii')
+
                 with tifffile.TiffFile(self._fn, mode="r+b") as tif:
-                    tif.pages[0].tags['ImageDescription'].overwrite(
-                        json.dumps({
-                            'timestamps': serialized_timestamps.decode('ascii'),
-                            'positions': serialized_positions.decode('ascii')
-                        })
-                    )
+                    tif.pages[0].tags['ImageDescription'].overwrite(json.dumps(metadata))
 
             # Clear accumulants
             self.timestamps = []

@@ -6,6 +6,7 @@ from platformdirs import user_config_dir
 from dirigo.components.io import SystemConfig
 from dirigo.components.hardware import Hardware
 from dirigo.sw_interfaces import Acquisition, Processor, Display, Logger
+from dirigo.sw_interfaces.display import DisplayPixelFormat
 from dirigo.plugins.processors import RasterFrameProcessor
 from dirigo.plugins.displays import FrameDisplay
 from dirigo.plugins.loggers import TiffLogger
@@ -70,8 +71,12 @@ class Dirigo:
 
         return RasterFrameProcessor(acquisition)
     
-    def display_factory(self, processor: Processor = None, acquisition: Acquisition = None) -> Display:
-        return FrameDisplay(acquisition, processor)
+    def display_factory(self, 
+                        processor: Processor = None, 
+                        acquisition: Acquisition = None,
+                        display_pixel_format: DisplayPixelFormat = DisplayPixelFormat.RGB24
+                        ) -> Display:
+        return FrameDisplay(acquisition, processor, display_pixel_format)
     
     def logger_factory(self, processor: Processor = None, acquisition: Acquisition = None) -> Logger:
         return TiffLogger(acquisition, processor)

@@ -1,6 +1,7 @@
 from abc import abstractmethod
 from enum import Enum
 from typing import Callable
+from dataclasses import dataclass
 
 import numpy as np
 from numba import njit, types
@@ -10,8 +11,18 @@ from dirigo.sw_interfaces import Acquisition, Processor
 
 
 
+@dataclass
+class ValueRange:
+    min: int
+    max: int
+
+    @property
+    def range(self) -> int:
+        return self.max - self.min
+
+
 @njit(
-    (types.uint16[:], types.int64, types.int64, types.UniTuple(types.float64, 3), types.uint16[:,:]),
+    (types.uint16[:], types.int64, types.int64, types.float64[:], types.uint16[:,:]),
     cache=True
 )
 def _update_lut(input_values, display_min, display_max, colormap, lut):
@@ -55,11 +66,16 @@ class ColorVector(Enum):
         """
         return [name.capitalize() for name in cls.__members__.keys()]
 
+class DisplayPixelFormat(Enum):
+    RGB24   = 0     # red, green, blue, each 8-bits (Tkinter)
+    BGRX32  = 1     # blue, green, red, and 1 ignored, each 8 bits (PyQt/PySide)
+
 
 class DisplayChannel(): #ABC?
     """Represents an individual channel to be processed for display."""
     def __init__(self, lut_slice: np.ndarray, color_vector: ColorVector, 
-                 display_min: int, display_max: int, update_method: Callable[[], None]):
+                 display_min: int, display_max: int, update_method: Callable[[], None],
+                 pixel_format: DisplayPixelFormat):
         """Constructs a DisplayChannel object
         
         Args:
@@ -71,6 +87,7 @@ class DisplayChannel(): #ABC?
         if not isinstance(lut_slice, np.ndarray) or (lut_slice.base is None):
             raise ValueError("`lut_slice` property must be a numpy slice.")
         self._lut = lut_slice # reference to this channel's 'slice' of multichannel LUT
+        self._pixel_format = pixel_format
         self._update_display_method = update_method
 
         # Adjustable parameters (see getter/setters)
@@ -79,9 +96,13 @@ class DisplayChannel(): #ABC?
         self._display_min = display_min 
         self._display_max = display_max
 
-        input_dtype = np.uint16 # make these adjustable, not hardcoded
         input_min = 0
-        input_max = 2**16 - 1
+        input_max = lut_slice.shape[0] - 1
+        if input_max > 255:
+            input_dtype = np.uint16 
+        else:
+            input_dtype = np.uint8
+
         self._input_values = np.arange(input_min, input_max+1, dtype=input_dtype)
 
         self._update_lut()
@@ -127,15 +148,19 @@ class DisplayChannel(): #ABC?
         self._update_lut()
 
     def _update_lut(self):
+        if self._pixel_format == DisplayPixelFormat.RGB24:
+            colormap = self._color_vector.value if self.enabled else (0.0, 0.0, 0.0)
+        elif self._pixel_format == DisplayPixelFormat.BGRX32:
+            colormap = tuple(reversed(self._color_vector.value)) + (0.0,) if self.enabled else (0.0, 0.0, 0.0, 0.0)
+
         _update_lut(
             input_values=self._input_values,
             display_min=self.display_min,
             display_max=self.display_max,
-            colormap=self._color_vector.value if self.enabled else (0.0, 0.0, 0.0),
+            colormap=np.array(colormap),
             lut=self._lut
         )
         self._update_display_method()
-
 
 
 class Display(Worker):
@@ -152,18 +177,19 @@ class Display(Worker):
         elif (acquisition is None) and (processor is None):
             raise ValueError("Error creating Display worker: "
                              "Provide either acquisition or processor.")
-        self._acquisition = acquisition
-        self._processor = processor
+        if processor:
+            self._processor = processor
+            self._acquisition = processor._acq
+        else:
+            self._processor = None
+            self._acquisition = acquisition
 
         self.display_channels: list[DisplayChannel] = []
 
     @property
     def nchannels(self):
         """Returns the number of channels expected from Acquisition or Processor."""
-        if self._acquisition is not None:
-            return self._acquisition.spec.nchannels
-        else:
-            return self._processor._spec.nchannels
+        return self._acquisition.spec.nchannels
 
     @property
     @abstractmethod
@@ -179,4 +205,13 @@ class Display(Worker):
     @abstractmethod
     def n_frame_average(self, frames: int):
         pass
+
+    @property
+    def pixel_size(self):
+        return self._acquisition.spec.pixel_size
+        
+    @property
+    def data_range(self) -> ValueRange:
+        bpp = self._acquisition.data_acquisition_device.bit_depth
+        return ValueRange(min=0, max=2**bpp)
 
