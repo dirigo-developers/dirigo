@@ -1,7 +1,8 @@
 import numpy as np
 import nidaqmx
 from nidaqmx.constants import (
-    AcquisitionType, EncoderType, EncoderZIndexPhase, AngleUnits, ExportAction
+    AcquisitionType, EncoderType, EncoderZIndexPhase, AngleUnits, ExportAction,
+    TimeUnits
 )
 
 from dirigo import units
@@ -16,6 +17,7 @@ class LinearEncoderViaNI(LinearEncoder):
                  signal_a_channel: str, signal_b_channel: str,
                  distance_per_pulse: units.Position, 
                  sample_clock_channel: str = None, trigger_channel: str = None,
+                 timestamp_counter_name: str = None,
                  samples_per_channel:int = 2048, # Size of the buffer--set to 2X the expected number of samples to read at once
                  **kwargs):
         super().__init__(**kwargs) # sets axis
@@ -23,6 +25,10 @@ class LinearEncoderViaNI(LinearEncoder):
         if not isinstance(counter_name, str):
             raise ValueError("`counter_name` must be a string.")
         self._counter_name = counter_name
+
+        if not (isinstance(timestamp_counter_name, str) or (timestamp_counter_name is None)):
+            raise ValueError("`counter_name` must be a string.")
+        self._timestamp_counter_name = timestamp_counter_name
 
         # A & B quadrature encoder signals (required)
         validate_ni_channel(signal_a_channel)
@@ -53,32 +59,47 @@ class LinearEncoderViaNI(LinearEncoder):
 
     def start_logging(self, initial_position: units.Position, expected_sample_rate: units.SampleRate):
         """Sets up the counter input task and starts it."""
-        self._task = nidaqmx.Task() # TODO give it a name
+        self._encoder_task = nidaqmx.Task() # TODO give it a name
 
-        self._task.ci_channels.add_ci_lin_encoder_chan(
+        self._encoder_task.ci_channels.add_ci_lin_encoder_chan(
             counter=self._counter_name,
             name_to_assign_to_channel=f"{self.axis} encoder",
             dist_per_pulse=self._distance_per_pulse,
             initial_pos=initial_position
         )
 
-        self._task.ci_channels[0].ci_encoder_a_input_term = self._signal_a_channel
-        self._task.ci_channels[0].ci_encoder_b_input_term = self._signal_b_channel
+        self._encoder_task.ci_channels[0].ci_encoder_a_input_term = self._signal_a_channel
+        self._encoder_task.ci_channels[0].ci_encoder_b_input_term = self._signal_b_channel
 
-        self._task.timing.cfg_samp_clk_timing(
-            rate=expected_sample_rate * 1.05, # this is the max expected rate, provide 5% higher rate
+        self._encoder_task.timing.cfg_samp_clk_timing(
+            rate=expected_sample_rate * 1.1, # this is the max expected rate, provide 10% higher rate
             source=self._sample_clock_channel,
             sample_mode=AcquisitionType.CONTINUOUS,
             samps_per_chan=self._samples_per_channel
         )
 
-    def read(self, n: int):
+    def read_positions(self, n: int):
         """Read n position samples from the task."""
         if not isinstance(n, int):
             raise ValueError("`n_samples` to read must be an integer.")
         if n < 1:
             raise ValueError("Must read at least 1 sample.")
-        return self._task.read(n)
+        return self._encoder_task.read(n)
+    
+    def read_timestamps(self, n: int):
+        """Read n timestamp samples from the task."""
+        if not isinstance(n, int):
+            raise ValueError("`n_samples` to read must be an integer.")
+        if n < 1:
+            raise ValueError("Must read at least 1 sample.")
+        # timestamp task returns period between trigger up edges
+        periods = np.array(self._timestamp_task.read(n))
+
+        # convert periods to cumulative timestamps and add previous last timestampe
+        timestamps = np.cumsum(periods) + self._last_timestamp
+        self._last_timestamp = timestamps[-1]
+        
+        return timestamps
     
     def start_triggering(self, distance_per_trigger: units.Position):
         """
@@ -89,10 +110,10 @@ class LinearEncoderViaNI(LinearEncoder):
             distance_per_trigger / self._distance_per_pulse
         )
 
-        self._task = nidaqmx.Task()
+        self._encoder_task = nidaqmx.Task()
 
-        # co-opt 'angular' encoder to trig out on every complete 'revolution'
-        self._task.ci_channels.add_ci_ang_encoder_chan(
+        # use angular encoder to trig out on every complete 'revolution'
+        self._encoder_task.ci_channels.add_ci_ang_encoder_chan(
             counter=self._counter_name,
             name_to_assign_to_channel=f"{self.axis} encoder-derived trigger",
             decoding_type=EncoderType.X_1, # TODO make this adjustable
@@ -100,28 +121,57 @@ class LinearEncoderViaNI(LinearEncoder):
             zidx_val=-pulses_per_trigger,
             zidx_phase=EncoderZIndexPhase.AHIGH_BHIGH,
             units=AngleUnits.TICKS,
-            pulses_per_rev=1_000_000, # this is an abritrary high value
+            pulses_per_rev=1_000_000, # set this to an abritrary high value
             initial_angle=-pulses_per_trigger
         )
 
-        self._task.export_signals.ctr_out_event_output_behavior = ExportAction.PULSE
+        self._encoder_task.export_signals.ctr_out_event_output_behavior = ExportAction.PULSE
         
-        self._task.export_signals.ctr_out_event_output_term = self._trigger_channel
+        self._encoder_task.export_signals.ctr_out_event_output_term = self._trigger_channel
         
-        self._task.ci_channels[0].ci_encoder_a_input_term = self._signal_a_channel
-        self._task.ci_channels[0].ci_encoder_b_input_term = self._signal_b_channel
+        self._encoder_task.ci_channels[0].ci_encoder_a_input_term = self._signal_a_channel
+        self._encoder_task.ci_channels[0].ci_encoder_b_input_term = self._signal_b_channel
 
-        self._task.ci_channels[0].ci_encoder_z_index_enable = True 
+        self._encoder_task.ci_channels[0].ci_encoder_z_index_enable = True 
         parts = self._counter_name.split('/')
         ci_encoder_z_input_term = f"/{parts[0]}/Ctr{parts[1][-1]}InternalOutput" # e.g. /Dev1/Ctr1InternalOutput
         validate_ni_channel(ci_encoder_z_input_term)
-        self._task.ci_channels[0].ci_encoder_z_input_term = ci_encoder_z_input_term
+        self._encoder_task.ci_channels[0].ci_encoder_z_input_term = ci_encoder_z_input_term
 
-        self._task.start()
+        # Creates a separate task (ctr1) that measures the time between edges of
+        # the signal coming from 'Dev1/Ctr0InternalOutput'.
+        if self._timestamp_counter_name:
+            self._timestamp_task = nidaqmx.Task()
+
+            # Configure a period measurement channel on the second counter (ctr1).
+            self._timestamp_task.ci_channels.add_ci_period_chan(
+                counter=self._timestamp_counter_name,           
+                min_val=10e-6, # 100 kHz, TODO set this flexibly
+                max_val=1.0,
+                units=TimeUnits.SECONDS
+            )
+
+            # Set to the internal signal exported by ctr0/1.
+            parts = self._counter_name.split('/')
+            self._timestamp_task.ci_channels[0].ci_period_term = f"/{parts[0]}/Ctr{parts[1][-1]}InternalOutput" # e.g. /Dev1/Ctr1InternalOutput
+
+            self._timestamp_task.timing.cfg_implicit_timing(
+                sample_mode=AcquisitionType.CONTINUOUS,
+                samps_per_chan=self._samples_per_channel
+            )
+
+            self._last_timestamp = 0.0
+            self._timestamp_task.start()
+
+        self._encoder_task.start()
 
     def stop(self):
-        self._task.stop()
-        self._task.close()
+        self._encoder_task.stop()
+        self._encoder_task.close()
+
+        if self._timestamp_counter_name:
+            self._timestamp_task.stop()
+            self._timestamp_task.close()
 
 
 class MultiAxisLinearEncodersViaNI(MultiAxisLinearEncoder):
@@ -157,7 +207,7 @@ class MultiAxisLinearEncodersViaNI(MultiAxisLinearEncoder):
         if self.z:
             self.z.start_logging(hw.stage.z.position, hw.fast_raster_scanner.frequency)
     
-    def read(self, n) -> np.ndarray:
+    def read_positions(self, n) -> np.ndarray:
         """Reads n samples from each of the available encoders.
         
         Return in dimensions: Samples, Axes. 
@@ -165,11 +215,11 @@ class MultiAxisLinearEncodersViaNI(MultiAxisLinearEncoder):
         """
         samples = []
         if self.x:
-            samples.append(self.x.read(n))
+            samples.append(self.x.read_positions(n))
         if self.y:
-            samples.append(self.y.read(n))
+            samples.append(self.y.read_positions(n))
         if self.z:
-            samples.append(self.z.read(n))
+            samples.append(self.z.read_positions(n))
 
         return np.copy(np.array(samples).T) # Return in dimensions: Samples, Axes
     

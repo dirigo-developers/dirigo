@@ -32,14 +32,20 @@ class LinearEncoder(ABC):
 
     @abstractmethod
     def start_logging(self):
+        """Start encoder position logging."""
         pass
 
     @abstractmethod
-    def read(self, nsamples: int) -> np.ndarray:
+    def read_positions(self, nsamples: int) -> np.ndarray:
+        pass
+
+    @abstractmethod
+    def read_timestamps(self, nsamples: int) -> np.ndarray:
         pass
 
     @abstractmethod
     def start_triggering(self, distance_per_trigger: units.Position):
+        """Start encoder-derived trigger output."""
         pass
 
     @abstractmethod
@@ -77,8 +83,8 @@ class MultiAxisLinearEncoder(ABC):
         pass
 
     @abstractmethod
-    def read(self, n: int) -> np.ndarray:
-        """Reads n samples from all the available encoders.
+    def read_positions(self, n: int) -> np.ndarray:
+        """Reads n samples from all the available position encoders.
         
         Implementations should return an array of shape (n, [axes available]).
         """
