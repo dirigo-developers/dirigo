@@ -1,5 +1,4 @@
 import importlib.metadata
-from dataclasses import dataclass
 from typing import Optional
 
 from dirigo.components.io import SystemConfig
@@ -11,15 +10,6 @@ from dirigo.hw_interfaces.scanner import FastRasterScanner, SlowRasterScanner, O
 from dirigo.hw_interfaces.camera import FrameGrabber, LineScanCamera
 from dirigo.hw_interfaces.illuminator import Illuminator
 
-
-@dataclass
-class ValueRange:
-    min: int
-    max: int
-
-    @property
-    def range(self) -> int:
-        return self.max - self.min
 
 
 class Hardware:
@@ -81,7 +71,6 @@ class Hardware:
             config=default_config.illuminator
         )
 
-        a = None
 
 
     def _try_instantiate(self, group: str, config: Optional[dict], extra_args=None):
@@ -113,16 +102,3 @@ class Hardware:
         else:
             return 0 # or raise error?
         
-    @property
-    def data_range(self) -> ValueRange:
-        """Returns the range: min (inclusive) - max (exclusive)"""
-        if hasattr(self, 'digitizer'):
-            bytes_per_sample = (self.digitizer.bit_depth-1) // 8 + 1
-            return ValueRange( 
-                min=0,
-                max=2**(8*bytes_per_sample) # This is assuming that all digitizers use the most significant bits
-            )
-        elif hasattr(self, 'camera'):
-            return 1 # monochrome only for now, but RGB cameras should be 3-channel
-        else:
-            return 0 # or raise error?

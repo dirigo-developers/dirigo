@@ -1,6 +1,13 @@
+from dataclasses import dataclass
+from typing import TYPE_CHECKING
+
+import numpy as np
+
 from dirigo.sw_interfaces.worker import Worker
-from dirigo.components.hardware import Hardware
 from dirigo.components.io import load_toml
+
+if TYPE_CHECKING:
+    from dirigo.components.hardware import Hardware 
 
 
 
@@ -14,15 +21,22 @@ class AcquisitionSpec:
         self.nchannels = nchannels
 
 
+@dataclass
+class AcquisitionBuffer:
+    data: np.ndarray # Dimensions: Record, Sample, Channel
+    timestamps: float | np.ndarray | None = None # should be one or more time points (in seconds since the start)
+    positions: tuple[float] | np.ndarray | None = None # should be one or more sets of coordinates (x,y)
+
+
 class Acquisition(Worker):
     """
     Dirigo interface for data acquisition worker thread.
     """
-    REQUIRED_RESOURCES: list[str] = None
+    REQUIRED_RESOURCES: list[str] = None # The first object in the list should be the data capture device (digitizer, camera, etc)
     SPEC_LOCATION: str = None
     SPEC_OBJECT: AcquisitionSpec
     
-    def __init__(self, hw: Hardware, spec: AcquisitionSpec):
+    def __init__(self, hw: 'Hardware', spec: AcquisitionSpec):
         super().__init__()
         self.hw = hw
         self.check_resources()
@@ -58,3 +72,13 @@ class Acquisition(Worker):
     # Note that there is an abstractmethod, run() in the parent class. 
     # Acquisition subclasses must implement it.
 
+    @property
+    def data_acquisition_device(self):
+        """Returns handle to the hardware resource actually acquiring data."""
+        acq_device = self.REQUIRED_RESOURCES[0].__name__
+        if acq_device == "Digitizer":
+            return self.hw.digitizer
+        elif acq_device == "LineScanCamera":
+            return self.hw.line_scan_camera
+        else:
+            raise RuntimeError(f"Invalid data capture device: {acq_device}")

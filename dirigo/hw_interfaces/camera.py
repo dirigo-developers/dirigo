@@ -30,7 +30,7 @@ class FrameGrabber(ABC):
     @abstractmethod
     def roi_width(self):
         pass
-
+    
     @property
     @abstractmethod
     def bytes_per_pixel(self):
@@ -92,12 +92,12 @@ class Camera(ABC):
 
     @property
     @abstractmethod
-    def bits_per_pixel(self):
+    def bit_depth(self):
         pass
     
-    @bits_per_pixel.setter
+    @bit_depth.setter
     @abstractmethod
-    def bits_per_pixel(self, new_value):
+    def bit_depth(self, new_value):
         pass
 
     # IO

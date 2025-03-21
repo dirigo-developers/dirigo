@@ -1,12 +1,11 @@
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
 from pathlib import Path
 
 from platformdirs import user_config_dir
-import numpy as np
 
 from dirigo import units
 from dirigo.components.io import load_toml
+from dirigo.sw_interfaces.acquisition import AcquisitionBuffer
 
 """
 Dirigo digitizer interface.
@@ -292,13 +291,6 @@ class Trigger(ABC):
         pass
 
 
-@dataclass
-class DigitizerBuffer:
-    data: np.ndarray # Dimensions: Record, Sample, Channel
-    timestamps: float | np.ndarray | None = None # should be one or more time points (in seconds since the start)
-    positions: tuple[float] | np.ndarray | None = None # should be one or more sets of coordinates (x,y)
-
-
 class Acquire(ABC):
     """Abstract base class for managing digitizer acquisitions and buffering."""
 
@@ -470,14 +462,14 @@ class Acquire(ABC):
         pass
 
     @abstractmethod
-    def get_next_completed_buffer(self, blocking: bool = True) -> DigitizerBuffer:
+    def get_next_completed_buffer(self, blocking: bool = True) -> AcquisitionBuffer:
         """Retrieve the next completed data buffer.
 
         Args:
             blocking (bool): Whether to block until a buffer is available.
 
         Returns:
-            DigitizerBuffer: The acquired data buffer.
+            AcquisitionBuffer: The acquired data buffer.
         """
         pass
 
