@@ -156,6 +156,7 @@ class Display(Worker):
     """
     Dirigo interface for display processing.
     """
+    GAMMA = 2.2 # sRGB
     def __init__(self, acquisition: Acquisition = None, processor: Processor = None):
         """Instantiate with either an Acquisition or Processor"""
         super().__init__()

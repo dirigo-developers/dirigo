@@ -168,7 +168,7 @@ class FrameDisplay(Display):
                 self._average_buffer[self._i % self.n_frame_average] = buf.data
 
                 rolling_average_kernel(self._average_buffer, self._i, averaged_frame)
-                processed = additive_display_kernel(averaged_frame, self.luts)
+                processed = self._apply_display_kernel(averaged_frame, self.luts)
 
                 self.publish(processed)
                 self._prev_data = averaged_frame # store reference for use after thread finishes  
@@ -176,6 +176,9 @@ class FrameDisplay(Display):
             t1 = time.perf_counter()
             self._i += 1
             print(f"Channel display processing: {1000*(t1-t0):.1f}ms. Position data shape: {buf.positions}")
+
+    def _apply_display_kernel(self, average_frame, luts):
+        return additive_display_kernel(average_frame, luts)
                      
     @property
     def n_frame_average(self) -> int:
