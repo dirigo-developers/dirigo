@@ -555,3 +555,14 @@ class Digitizer(ABC):
     def bit_depth(self) -> int:
         """Returns the bit depth (sample resolution) of the digitizer."""
         pass
+
+    @property
+    @abstractmethod
+    def data_range(self) -> units.ValueRange:
+        """
+        Returns the range of values returned by the digitizer 
+        
+        The returned data range may exceed the bit depth, which can be useful
+        for in-place averaging.
+        """
+        pass

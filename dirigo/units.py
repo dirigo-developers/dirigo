@@ -1,6 +1,7 @@
 import math
 import re
 from typing import Dict
+from dataclasses import dataclass
 
 
 class UnitQuantity(float):
@@ -418,12 +419,11 @@ class FrequencyRange(RangeWithUnits):
     UNIT_QUANTITY_CLASS = Frequency
 
 
+@dataclass
+class ValueRange:
+    min: int
+    max: int
 
-# For quick tests
-if __name__ == "__main__":
-
-    travel_per_rev = "0.1 mm"
-    step_angle = "2 deg"
-    print(
-        Position(travel_per_rev) * (Angle(step_angle) / Angle("360 deg"))
-    )
+    @property
+    def range(self) -> int:
+        return self.max - self.min

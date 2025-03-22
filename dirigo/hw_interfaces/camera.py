@@ -2,6 +2,8 @@ from enum import Enum
 from abc import ABC, abstractmethod
 from typing import Optional
 
+from dirigo import units
+
 
 class CameraConnectionType(Enum):
     CAMERA_LINK = 0
@@ -100,6 +102,17 @@ class Camera(ABC):
     def bit_depth(self, new_value):
         pass
 
+    @property
+    @abstractmethod
+    def data_range(self) -> units.ValueRange:
+        """
+        Returns the range of values returned by the camera. 
+        
+        The returned data range may exceed the bit depth, which can be useful
+        for in-place averaging.
+        """
+        pass
+
     # IO
     @property
     @abstractmethod
@@ -110,8 +123,6 @@ class Camera(ABC):
     @abstractmethod
     def trigger_mode(self, new_value):
         pass
-
-    
 
     @abstractmethod
     def start(self):

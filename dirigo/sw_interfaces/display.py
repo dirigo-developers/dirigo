@@ -1,24 +1,13 @@
 from abc import abstractmethod
 from enum import Enum
 from typing import Callable
-from dataclasses import dataclass
 
 import numpy as np
 from numba import njit, types
 
+from dirigo.units import ValueRange
 from dirigo.sw_interfaces.worker import Worker
 from dirigo.sw_interfaces import Acquisition, Processor
-
-
-
-@dataclass
-class ValueRange:
-    min: int
-    max: int
-
-    @property
-    def range(self) -> int:
-        return self.max - self.min
 
 
 @njit(
@@ -212,6 +201,5 @@ class Display(Worker):
         
     @property
     def data_range(self) -> ValueRange:
-        bpp = self._acquisition.data_acquisition_device.bit_depth
-        return ValueRange(min=0, max=2**bpp)
+        return self._acquisition.data_acquisition_device.data_range
 
