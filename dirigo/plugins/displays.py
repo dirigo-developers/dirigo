@@ -32,9 +32,8 @@ def rolling_average_kernel(ring_buffer: np.ndarray, frame_index: int, averaged: 
 
 
 # Generate gamma correction LUT
-gamma = 2.2
 x = np.arange(2**16) / (2**16-1)
-gamma_lut = np.round((2**8 - 1) * x**(1/gamma)).astype(np.uint8)
+gamma_lut = np.round((2**8 - 1) * x**(1/Display.GAMMA)).astype(np.uint8)
 
 
 @njit(
