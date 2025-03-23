@@ -25,12 +25,33 @@ class FrameGrabber(ABC):
 
     @property
     @abstractmethod
+    def pixels_width(self) -> int:
+        """Total number of sensor pixels wide."""
+        pass
+
+    @property
+    @abstractmethod
     def roi_height(self):
         pass
 
     @property
     @abstractmethod
     def roi_width(self):
+        pass
+
+    @roi_width.setter
+    @abstractmethod
+    def roi_width(self, width: int):
+        pass
+
+    @property
+    @abstractmethod
+    def roi_left(self):
+        pass
+
+    @roi_left.setter
+    @abstractmethod
+    def roi_left(self, left: int):
         pass
     
     @property
@@ -61,16 +82,19 @@ class FrameGrabber(ABC):
 
 
 class Camera(ABC):
-    def __init__(self, frame_grabber: Optional[FrameGrabber], **kwargs):
+    def __init__(self, frame_grabber: Optional[FrameGrabber], 
+                 pixel_size: str, **kwargs):
         self._frame_grabber = frame_grabber 
+        self._pixel_size = units.Position(pixel_size)
 
     # essential parameters
     # sensor shape (max resolution)
     # roi shape
     # frame rate / interval
-    
-    @property
 
+    @property
+    def pixel_size(self):
+        return self._pixel_size
 
     @property
     @abstractmethod

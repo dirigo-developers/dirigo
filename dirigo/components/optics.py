@@ -34,4 +34,19 @@ class LaserScanningOptics:
         objective_angle = position / self.objective_focal_length
         angle = objective_angle * self.relay_magnification
         return units.Angle(angle)
+    
+
+class CameraOptics:
+    """
+    Optics to use with a parallel array of detectors, usually an image sensor.
+    """
+    def __init__(self, magnification: float | int, **kwargs):
+        if not (isinstance(magnification, float) or isinstance(magnification, int) ):
+            raise ValueError("Magnification must be a float or an integer")
+        self._magnification = float(magnification)
+
+    @property
+    def magnification(self) -> float:
+        return self._magnification
+
 

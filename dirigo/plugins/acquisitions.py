@@ -102,7 +102,7 @@ class LineAcquisition(Acquisition):
         
         # Setup scanner
         self.hw.fast_raster_scanner.amplitude = \
-            self.hw.optics.object_position_to_scan_angle(self.spec.scan_width)
+            self.hw.laser_scanning_optics.object_position_to_scan_angle(self.spec.scan_width)
         # for res scanner: frequency is set (fixed), waveform is set (fixed), duty cycle is set (fixed)
         # for other scanners--TBD
 
@@ -268,7 +268,7 @@ class FrameAcquisition(LineAcquisition):
 
         # Set up slow scanner, fast scanner is already set up in super().__init__()
         self.hw.slow_raster_scanner.amplitude = \
-            self.hw.optics.object_position_to_scan_angle(spec.frame_height)
+            self.hw.laser_scanning_optics.object_position_to_scan_angle(spec.frame_height)
         self.hw.slow_raster_scanner.frequency = (
             self.hw.fast_raster_scanner.frequency / spec.records_per_buffer
         )

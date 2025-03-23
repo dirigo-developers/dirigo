@@ -2,7 +2,7 @@ import importlib.metadata
 from typing import Optional
 
 from dirigo.components.io import SystemConfig
-from dirigo.components.optics import LaserScanningOptics
+from dirigo.components.optics import LaserScanningOptics, CameraOptics
 from dirigo.hw_interfaces.digitizer import Digitizer
 from dirigo.hw_interfaces.stage import MultiAxisStage
 from dirigo.hw_interfaces.encoder import MultiAxisLinearEncoder
@@ -20,7 +20,17 @@ class Hardware:
     # Note: the point of this class is to hold several 
     # hardware references, not to implement functionality
     def __init__(self, default_config: SystemConfig):
-        self.optics = LaserScanningOptics(**default_config.optics)
+        if default_config.laser_scanning_optics is not None:
+            self.laser_scanning_optics = LaserScanningOptics(
+                **default_config.laser_scanning_optics
+            )
+        else:
+            self.laser_scanning_optics = None
+        
+        if default_config.camera_optics is not None:
+            self.camera_optics = CameraOptics(**default_config.camera_optics)
+        else:
+            self.camera_optics = None
 
         self.digitizer: Digitizer = self._try_instantiate(
             group="dirigo_digitizers",

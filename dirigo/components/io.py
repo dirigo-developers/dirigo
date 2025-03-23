@@ -23,7 +23,8 @@ class SystemConfig:
     
     All fields are technically optional.
     """
-    optics: Optional[dict] = None
+    laser_scanning_optics: Optional[dict] = None
+    camera_optics: Optional[dict] = None
     digitizer: Optional[dict] = None
     stage: Optional[dict] = None
     objective_scanner: Optional[dict] = None
@@ -38,7 +39,8 @@ class SystemConfig:
     def from_toml(cls, toml_path: Path) -> 'SystemConfig':
         toml_data = load_toml(toml_path)
         return cls(
-            optics=toml_data.get("optics"),
+            laser_scanning_optics=toml_data.get("laser_scanning_optics"),
+            camera_optics=toml_data.get("camera_optics"),
             digitizer=toml_data.get("digitizer"),
             stage=toml_data.get("stage"),
             objective_scanner=toml_data.get("objective_scanner"),
