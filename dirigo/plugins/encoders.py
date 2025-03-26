@@ -112,7 +112,7 @@ class LinearEncoderViaNI(LinearEncoder):
 
         self._encoder_task = nidaqmx.Task()
 
-        # use angular encoder to trig out on every complete 'revolution'
+        # use angular encoder to trig out on every N pulses
         self._encoder_task.ci_channels.add_ci_ang_encoder_chan(
             counter=self._counter_name,
             name_to_assign_to_channel=f"{self.axis} encoder-derived trigger",
