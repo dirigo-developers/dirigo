@@ -93,7 +93,9 @@ class LinearEncoderViaNI(LinearEncoder):
         if n < 1:
             raise ValueError("Must read at least 1 sample.")
         # timestamp task returns period between trigger up edges
+        print(f'Attempting to read {n} timestamps')
         periods = np.array(self._timestamp_task.read(n))
+        print("Min period:", periods.min())
 
         # convert periods to cumulative timestamps and add previous last timestampe
         timestamps = np.cumsum(periods) + self._last_timestamp
@@ -132,11 +134,10 @@ class LinearEncoderViaNI(LinearEncoder):
         self._encoder_task.ci_channels[0].ci_encoder_a_input_term = self._signal_a_channel
         self._encoder_task.ci_channels[0].ci_encoder_b_input_term = self._signal_b_channel
 
-        self._encoder_task.ci_channels[0].ci_encoder_z_index_enable = True 
         parts = self._counter_name.split('/')
-        ci_encoder_z_input_term = f"/{parts[0]}/Ctr{parts[1][-1]}InternalOutput" # e.g. /Dev1/Ctr1InternalOutput
-        validate_ni_channel(ci_encoder_z_input_term)
-        self._encoder_task.ci_channels[0].ci_encoder_z_input_term = ci_encoder_z_input_term
+        cizterm = f"/{parts[0]}/Ctr{parts[1][-1]}InternalOutput" # e.g. /Dev1/Ctr1InternalOutput
+        validate_ni_channel(cizterm)
+        self._encoder_task.ci_channels[0].ci_encoder_z_input_term = cizterm
 
         # Creates a separate task (ctr1) that measures the time between edges of
         # the signal coming from 'Dev1/Ctr0InternalOutput'.

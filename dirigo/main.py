@@ -6,6 +6,7 @@ from platformdirs import user_config_dir
 from dirigo.components.io import SystemConfig
 from dirigo.components.hardware import Hardware
 from dirigo.sw_interfaces import Acquisition, Processor, Display, Logger
+from dirigo.sw_interfaces.acquisition import AcquisitionSpec
 from dirigo.sw_interfaces.display import DisplayPixelFormat
 from dirigo.plugins.processors import RasterFrameProcessor
 from dirigo.plugins.displays import FrameDisplay
@@ -37,7 +38,7 @@ class Dirigo:
         entry_pts = importlib.metadata.entry_points(group="dirigo_acquisitions")
         return {entry_pt.name for entry_pt in entry_pts}
     
-    def acquisition_factory(self, type: str, spec_name: str = "default") -> Acquisition:
+    def acquisition_factory(self, type: str, spec: AcquisitionSpec = None, spec_name: str = "default") -> Acquisition:
         """Returns an initialized acquisition worker object."""
 
         # Dynamically load plugin class
@@ -50,8 +51,11 @@ class Dirigo:
                 try:
                     plugin_class: Acquisition = entry_pt.load()
                     
-                    # Get the acquisition specification
-                    spec = plugin_class.get_specification(spec_name)
+                    # Get the acquisition specification if necessary 
+                    if spec:
+                        pass
+                    else:
+                        spec = plugin_class.get_specification(spec_name)
 
                     # Instantiate and return the acquisition worker
                     return plugin_class(self.hw, spec)  

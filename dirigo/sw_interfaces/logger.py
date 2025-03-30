@@ -1,4 +1,5 @@
 from abc import abstractmethod
+from pathlib import Path
 
 import numpy as np
 
@@ -27,7 +28,7 @@ class Logger(Worker):
             self._acquisition = acquisition
 
         self.basename: str = None
-        self.save_path: str = None # potentially this could be a kwarg
+        self.save_path: Path = None # potentially this could be a kwarg
         self.frames_per_file: int = None
         # Track frames/buffers saved
 
