@@ -6,7 +6,7 @@ import numpy as np
 import nidaqmx
 import nidaqmx.errors
 from nidaqmx.system import System as NISystem
-from nidaqmx.constants import AcquisitionType, LineGrouping, Edge, AOIdleOutputBehavior
+from nidaqmx.constants import AcquisitionType, LineGrouping, Edge, FrequencyUnits, Level
 
 from dirigo import units
 from dirigo.hw_interfaces.scanner import (
@@ -74,6 +74,25 @@ def validate_ni_channel(channel_name: str):
         )
     # If no exception is raised, the channel is valid
 
+def get_free_counter(device_name: str = 'Dev1'):
+    system = NISystem.local()
+    device = system.devices[device_name]
+    
+    for chan_name in [chan.name for chan in device.ci_physical_chans]:
+        try:
+            # Try to create a dummy task on this counter
+            with nidaqmx.Task() as task:
+                task.co_channels.add_co_pulse_chan_freq(chan_name, 
+                                                        idle_state=nidaqmx.constants.Level.LOW, 
+                                                        freq=1000.0)
+                # If we get here, it means we successfully reserved the channel
+                return chan_name
+        except nidaqmx.errors.DaqError:
+            # If it fails, that channel is likely in use or invalid
+            pass
+    
+    # If we exhaust the loop, no counters were available
+    raise RuntimeError("No free counters found on {}.".format(device_name))
 
 
 class ResonantScannerViaNI(ResonantScanner, FastRasterScanner):
@@ -247,18 +266,30 @@ class FrameClock:
         self._task.close()
 
 
-class GalvoRasterScannerViaNI(GalvoScanner):
+class _GalvoRasterScannerViaNI(GalvoScanner):
     REARM_TIME = units.Time("0.5 ms") # time to allow NI card to rearm after outputing waveform
     AO_TIMEBASE = units.Frequency("100 MHz") # NIDAQ cards use 100 MHz timebase divided down to generate frequency
 
-    def __init__(self, control_channel: str, analog_control_range: dict, 
-                 trigger_channel: str, line_clock_channel: str, 
-                 frame_clock_channel: str, **kwargs):
+    # A galvo scanner can be set up either as: 
+    # 'Fast' (typically X axis)
+    #    - either provide an external pixel clock and expected rate, 
+    #      OR designate a channel and frequency to output a clock on
+    #    - also provide a channel to output a line clock
+    # 'Slow' (typically the Y axis)
+    #    - provide the line clock channel
+    #    - provide a channel to output
+    def __init__(
+            self, analog_control_channel: str, analog_control_range: dict,
+            ext_pclock_channel: str, int_pclock_channel: str, 
+            pclock_frequency: units.Frequency, lclock_channel: str,
+            trigger_channel: str, line_clock_channel: str, 
+            frame_clock_channel: str, **kwargs
+        ):
         super().__init__(**kwargs)
         
         # validated and set amplitude control analog channel
-        validate_ni_channel(control_channel)
-        self._control_channel = control_channel
+        validate_ni_channel(analog_control_channel)
+        self._control_channel = analog_control_channel
 
         # validate amplitude control limits and set in private attr
         if not isinstance(analog_control_range, dict):
@@ -420,13 +451,214 @@ class GalvoRasterScannerViaNI(GalvoScanner):
     def _volts_per_radian(self) -> float:
         """Scaling factor between analog control voltge and optical scan angle."""
         return self._analog_control_range.range / self.angle_limits.range
- 
 
-class GalvoFastRasterScannerViaNI(GalvoRasterScannerViaNI, FastRasterScanner):
-    """The faster of a galvo-galvo pair. """
+
+class PixelClock:
+    """
+    Represents an internally generated or external pixel clock
+    """
+    def __init__(self, 
+                 external_pixel_clock_channel: str = None, 
+                 internal_pixel_clock_channel: str = None):
+        # Check that exactly 1 of ext/int pixel clocks specified (can't use both)
+        if external_pixel_clock_channel and internal_pixel_clock_channel:
+            raise ValueError("Specify only one pixel clock terminal. Tried to assign both")
+        if external_pixel_clock_channel is None and internal_pixel_clock_channel is None:
+            raise ValueError("Must specify 1 pixel clock terminal (internal or external). None specified")
+
+        # Validate channel/terminal name and store in private attributes
+        if external_pixel_clock_channel:
+            validate_ni_channel(external_pixel_clock_channel)
+            self._external_pixel_clock_channel = external_pixel_clock_channel
+            self._internal_pixel_clock_channel = None
+        else:
+            validate_ni_channel(internal_pixel_clock_channel)
+            self._external_pixel_clock_channel = None
+            self._internal_pixel_clock_channel = internal_pixel_clock_channel
+
+        self._frequency: units.Frequency = None
+
+    def start(self, frequency: units.Frequency):
+        if self._internal_pixel_clock_channel:
+            if not isinstance(frequency, units.Frequency):
+                raise ValueError("Pixel clock must be set with a units.Frequency object.")
+            self._frequency = frequency
+            
+            self._task = nidaqmx.Task("Pixel clock")
+
+            self._task.co_channels.add_co_pulse_chan_freq(
+                counter=get_free_counter(), # could also use "FreqOut", but there are limitations: https://knowledge.ni.com/KnowledgeArticleDetails?id=kA00Z000000PA6USAW&l=en-US
+                units=FrequencyUnits.HZ,
+                idle_state=Level.LOW,
+                initial_delay=0.0,
+                freq=float(frequency),
+                duty_cycle=0.5
+            )
+            
+            self._task.timing.cfg_implicit_timing(
+                sample_mode=AcquisitionType.CONTINUOUS
+            )
+            
+            self._task.channels[0].co_pulse_term = self._internal_pixel_clock_channel
+
+            # Start the pixel clock
+            self._task.start()
+        else:
+            pass # TODO, should we raise an error here or let it go?
+    
+    def stop(self):
+        self._task.stop()
+        self._task.close()
+        self._frequency = None
+
+    @property
+    def frequency(self) -> units.Frequency:
+        return self._frequency
+
+
+class LineClock:
+    LINE_CLOCK_MAX_ERROR = 0.1  # Add 10% safety margin for maximum frequency
+
+    def __init__(self, line_clock_channel: str, pixel_clock_channel: str):
+        # Validate line clock channel (output)
+        validate_ni_channel(line_clock_channel)
+        self._line_clock_channel = line_clock_channel
+
+        # Validate pixel clock channel (input/source)
+        validate_ni_channel(pixel_clock_channel)
+        self._pixel_clock_channel = pixel_clock_channel
+
+    def start(self, line_clock_frequency: units.Frequency, pixels_per_line: int):
+        if not isinstance(line_clock_frequency, units.Frequency):
+            raise ValueError("`line_clock_frequency` must be a frequency object")
+        self._line_clock_frequency = line_clock_frequency
+
+        if not isinstance(pixels_per_line, int):
+            raise ValueError("`pixels_per_line` must be an int")
+        if pixels_per_line <= 0:
+            raise ValueError("`pixels_per_line` must be a positive integer")
+        self._pixels_per_line = pixels_per_line
+
+        self._task = nidaqmx.Task("Line clock")
+        
+        channel = self._task.co_channels.add_co_pulse_chan_ticks(
+            counter=get_free_counter(),
+            source_terminal=self._pixel_clock_channel, 
+            high_ticks=pixels_per_line//2,
+            low_ticks=pixels_per_line//2
+        )
+        channel.co_pulse_term = self._line_clock_channel
+
+        self._task.timing.cfg_implicit_timing(
+            sample_mode=AcquisitionType.CONTINUOUS,
+            samps_per_chan=pixels_per_line
+        )
+
+        self._task.start()
+    
+    def stop(self):
+        self._task.stop()
+        self._task.close()
+        self._frequency = None
+
+
+
+class FrameClock2:
+
+    def __init__(self, ):
+        pass
+
+    def start(self):
+        pass
+    
+    def stop(self):
+        self._task.stop()
+        self._task.close()
+        self._frequency = None
+
+
+# TODO, make NI superclass to set analog control range, analog out channel, big super init
+class GalvoFastRasterScannerViaNI(GalvoScanner, FastRasterScanner):
+    REARM_TIME = units.Time("0.5 ms") # time to allow NI card to rearm after outputing waveform
+    AO_TIMEBASE = units.Frequency("100 MHz") # NIDAQ cards use 100 MHz timebase divided down to generate frequency
+
+    """
+    The faster of a galvo-galvo pair. 
+
+    Either provide an external pixel clock channel, or if one is not available,
+    designate a channel to output a clock. 
+    
+    Also provide a channel to output a line clock.
+    """
+    def __init__(
+            self, analog_control_channel: str, analog_control_range: dict,
+            trigger_channel: str, line_clock_channel: str, 
+            external_pixel_clock_channel: str = None, internal_pixel_clock_channel: str = None, 
+            **kwargs
+        ):
+
+        super().__init__(**kwargs) # Set axis
+
+        # validated and set amplitude control analog channel, TODO factor up
+        validate_ni_channel(analog_control_channel)
+        self._control_channel = analog_control_channel
+
+        # validate amplitude control limits and set in private attr, TODO factor up
+        if not isinstance(analog_control_range, dict):
+            raise ValueError("`analog_control_range` must be a dictionary.")
+        missing_keys = {'min', 'max'} - analog_control_range.keys()
+        if missing_keys:
+            raise ValueError(
+                f"`analog_control_range` must be a dictionary with 'min' and 'max' keys."
+            )
+        self._analog_control_range = units.VoltageRange(**analog_control_range)
+
+        # Channel that actually triggers the start of the analog output waveform
+        validate_ni_channel(trigger_channel)
+        self._trigger_channel = trigger_channel
+        
+        validate_ni_channel(line_clock_channel) # will be validated again when FrameClock object is made, but that's OK
+        self._line_clock_channel = line_clock_channel
+
+        self.pixel_clock = PixelClock(external_pixel_clock_channel, internal_pixel_clock_channel)
+        
+        self.line_clock: LineClock = None # set with prepare_line_clock() method
+
+    def start_pixel_clock(self, pixel_clock_frequency: units.Frequency):
+        """
+        Generate an internal pixel clock. Starts immediately.
+        """
+        self.pixel_clock.start(frequency=pixel_clock_frequency)
+        
+
+    def prepare_line_clock(self, acquisition_spec):
+        pass
+        # self._line_clock = LineClock(
+        #   pixel_clock_channel=,
+        #   pixel_clock_frequency=,
+        #   line_clock_channel=,
+        #   pixels_per_line=,
+        #)
+
+
+class GalvoSlowRasterScannerViaNI(_GalvoRasterScannerViaNI, SlowRasterScanner):
+    """Galvo paired with a fast scanner (resonant, polygon, another galvo, etc)"""
     pass
 
 
-class GalvoSlowRasterScannerViaNI(GalvoRasterScannerViaNI, SlowRasterScanner):
-    """Galvo paired with a fast scanner (resonant, polygon, etc)"""
-    pass
+
+
+if __name__ == "__main__":
+
+    pclk = PixelClock(
+        internal_pixel_clock_channel="/Dev1/PFI2"
+    )
+
+    #pclk.start(units.Frequency('22 kHz'))
+
+    lclk = LineClock(
+        line_clock_channel="/Dev1/PFI3",
+        pixel_clock_channel="/Dev1/PFI2"
+    )
+
+    a=1

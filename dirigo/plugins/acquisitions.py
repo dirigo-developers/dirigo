@@ -290,3 +290,43 @@ class FrameAcquisition(LineAcquisition):
         super().cleanup()
 
 
+class GalvoGalvoFrameAcquisition(Acquisition):
+    REQUIRED_RESOURCES = [Digitizer, FastGalvoRasterScanner, SlowRasterScanner] # TODO or FastGalvoRasterScanner
+    SPEC_LOCATION = Path(user_config_dir("Dirigo")) / "acquisition/frame" # TODO, should spec change?
+    SPEC_OBJECT = FrameAcquisitionSpec
+
+    def __init__(self, hw, spec: FrameAcquisitionSpec):
+        super().__init__(hw, spec)
+        self.spec: FrameAcquisitionSpec
+
+        """
+        Game plan:
+        2 AOs outputting analog waveform for XY galvo-galvo raster scan
+
+        Issue: all AOs on board share the same sample clock, so the slow axis
+        require a very large number of samples per period (per frame), larger
+        than the buffer. Therefore we can't simply use regeneration
+        # 
+        """
+
+        # Set up a pixel clock
+
+        # Set up slow scanner
+        self.hw.slow_raster_scanner.amplitude = \
+            self.hw.laser_scanning_optics.object_position_to_scan_angle(spec.frame_height)
+        self.hw.slow_raster_scanner.frequency = (
+            self.hw.fast_raster_scanner.frequency / spec.records_per_buffer
+        )
+        self.hw.slow_raster_scanner.waveform = 'asymmetric triangle'
+        self.hw.slow_raster_scanner.duty_cycle = (
+            1 - spec.flyback_periods / spec.records_per_buffer
+        )
+
+        self.hw.slow_raster_scanner.prepare_frame_clock(self.hw.fast_raster_scanner, spec)
+
+
+    def run(self):
+        pass
+
+    def cleanup(self):
+        pass
