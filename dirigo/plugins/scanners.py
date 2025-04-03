@@ -368,11 +368,11 @@ class GalvoWaveformWriter(threading.Thread):
                 slow_waveform = slow_scanner.generate_waveform(self._sample_rate)
                 return np.vstack((fast_waveform, slow_waveform))
             else:
-                return np.vstack((fast_waveform))
+                return np.vstack((fast_waveform,))
         
         else:
             slow_waveform = slow_scanner.generate_waveform(self._sample_rate)
-            return np.vstack((slow_waveform))
+            return np.vstack((slow_waveform,))
 
         
     @property
@@ -508,7 +508,7 @@ class FastGalvoScannerViaNI(GalvoScannerViaNI, FastRasterScanner):
                 frame_clock = self._slow_scanner.generate_clock(self._pixel_frequency)
                 clocks = np.vstack((line_clock, frame_clock))
             else:
-                clocks = np.vstack((line_clock))
+                clocks = np.vstack((line_clock,))
             self._do_task.write(clocks)
 
             # Export the AO timebase as 'pixel clock'
@@ -574,7 +574,6 @@ class SlowGalvoScannerViaNI(GalvoScannerViaNI, SlowRasterScanner):
         else:
             raise ValueError("Unsupported fast scanner type for SlowGalvoScannerViaNI")
         
-
         self._frame_clock_channel = validate_ni_channel(frame_clock_channel)
         
     def start(self,
@@ -585,6 +584,8 @@ class SlowGalvoScannerViaNI(GalvoScannerViaNI, SlowRasterScanner):
 
         try:
             if self._external_line_clock_channel:
+                if not isinstance(periods_per_frame, int) or periods_per_frame < 1:
+                    raise ValueError("Periods per frame must be a positive integer")
 
                 self._fclock_task = nidaqmx.Task("Frame clock")
 
@@ -638,15 +639,17 @@ class SlowGalvoScannerViaNI(GalvoScannerViaNI, SlowRasterScanner):
                 
         except:
             self._active = False
+            raise
 
     def stop(self):
         self._active = False
 
-        self._fclock_task.stop()
-        self._fclock_task.close()
+        if self._external_line_clock_channel:
+            self._fclock_task.stop()
+            self._fclock_task.close()
 
-        self._ao_task.stop()
-        self._ao_task.close()
+            self._ao_task.stop()
+            self._ao_task.close()
 
 
 
