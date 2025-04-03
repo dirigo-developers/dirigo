@@ -61,7 +61,8 @@ class Hardware:
 
         self.slow_raster_scanner: SlowRasterScanner = self._try_instantiate(
             group="dirigo_scanners",
-            config=default_config.slow_raster_scanner
+            config=default_config.slow_raster_scanner,
+            extra_args={"fast_scanner": self.fast_raster_scanner}
         )
 
         self.frame_grabber: FrameGrabber = self._try_instantiate(

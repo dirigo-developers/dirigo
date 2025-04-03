@@ -551,7 +551,6 @@ class SlowGalvoScannerViaNI(GalvoScannerViaNI, SlowRasterScanner):
         
         super().__init__(**kwargs) # analog control channel and voltage limits
         
-
         if isinstance(fast_scanner, FastGalvoScannerViaNI):
             self._external_line_clock_channel = None
             self._ao_sample_rate = None # for Galvo-Galvo scanning, AO rate = pixel rate
@@ -565,7 +564,7 @@ class SlowGalvoScannerViaNI(GalvoScannerViaNI, SlowRasterScanner):
             ao_sample_rate = units.SampleRate(ao_sample_rate)
             low_sr = units.SampleRate('1 kS/s')
             high_sr = units.SampleRate(get_max_ao_rate())
-            if low_sr < ao_sample_rate < high_sr:
+            if not low_sr < ao_sample_rate < high_sr:
                 raise ValueError(f"AO sample rate outside required bounds: "
                                  f"low: {low_sr}, high {high_sr}, got {ao_sample_rate}")
             self._ao_sample_rate = ao_sample_rate

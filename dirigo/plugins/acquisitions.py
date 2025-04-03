@@ -291,7 +291,7 @@ class FrameAcquisition(LineAcquisition):
 
 
 class GalvoGalvoFrameAcquisition(Acquisition):
-    REQUIRED_RESOURCES = [Digitizer, FastGalvoRasterScanner, SlowRasterScanner] # TODO or FastGalvoRasterScanner
+    REQUIRED_RESOURCES = [Digitizer, FastRasterScanner, SlowRasterScanner] # TODO or FastGalvoRasterScanner
     SPEC_LOCATION = Path(user_config_dir("Dirigo")) / "acquisition/frame" # TODO, should spec change?
     SPEC_OBJECT = FrameAcquisitionSpec
 
