@@ -113,7 +113,7 @@ if __name__ == "__main__":
 
     diri = Dirigo()
     
-    acquisition = diri.acquisition_factory('line_scan_camera_strip')
+    acquisition = diri.acquisition_factory('frame')
     processor = diri.processor_factory(acquisition)
     display = diri.display_factory(processor)
     logging = diri.logger_factory(processor)

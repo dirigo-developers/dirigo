@@ -121,7 +121,7 @@ class RasterFrameProcessor(Processor):
         self.dewarped_shape = (
                 self._spec.lines_per_frame,
                 self._spec.pixels_per_line,
-                self._spec.nchannels
+                acquisition.hw.nchannels_enabled
             )
         
         # Initialize with the nominal rate, will measure with data timestamps

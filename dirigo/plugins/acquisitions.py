@@ -13,6 +13,7 @@ from dirigo.sw_interfaces.acquisition import AcquisitionSpec, Acquisition
 TWO_PI = 2 * math.pi 
 
 class LineAcquisitionSpec(AcquisitionSpec): 
+    """Specification for a point-scanned line acquisition"""
     def __init__(
             self,
             line_width: str,
@@ -277,10 +278,10 @@ class FrameAcquisition(LineAcquisition):
             1 - spec.flyback_periods / spec.records_per_buffer
         )
 
-        self.hw.slow_raster_scanner.prepare_frame_clock(self.hw.fast_raster_scanner, spec)
-
     def run(self):
-        self.hw.slow_raster_scanner.start()
+        self.hw.slow_raster_scanner.start(
+            periods_per_frame=self.spec.records_per_buffer
+        )
 
         super().run() # The hard work is done by super's run method
 
