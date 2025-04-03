@@ -657,7 +657,7 @@ class SlowGalvoScannerViaNI(GalvoScannerViaNI, SlowRasterScanner):
 if __name__ == "__main__":
     import time
     
-    pclk_frequency = units.Frequency('2000 kHz')
+    pclk_frequency = units.Frequency('200 kHz')
     pix_per_line = 500
     lines_per_frame = 500
     ampl = units.Angle("10 deg")
@@ -684,12 +684,12 @@ if __name__ == "__main__":
     fast_scanner.frequency = pclk_frequency / pix_per_line
     fast_scanner.amplitude = ampl
     fast_scanner.waveform = "asymmetric triangle"
-    fast_scanner.duty_cycle = 0.9
+    fast_scanner.duty_cycle = 0.8
 
     slow_scanner.frequency = pclk_frequency / pix_per_line / lines_per_frame
     slow_scanner.amplitude = ampl
     slow_scanner.waveform = "asymmetric triangle"
-    slow_scanner.duty_cycle = 0.95
+    slow_scanner.duty_cycle = 0.9
 
     slow_scanner.start() # This doesn't actually do anything
     fast_scanner.start(

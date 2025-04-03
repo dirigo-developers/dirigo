@@ -74,14 +74,14 @@ class UnitQuantity(float):
         Raises:
             ValueError: If the input string is not in the expected format.
         """
-        #pattern = r"^\s*([-+]?\d+(\.\d+)?)\s*(\w+)\s*$"
-        pattern = r"^\s*([-+]?\d+(\.\d+)?)\s*([\w/]+)\s*$"
+        #pattern = r"^\s*([-+]?\d+(\.\d+)?)\s*([\w/]+)\s*$"
+        pattern = r"^\s*([-+]?(?:\d+(?:\.\d*)?|\.\d+))\s*([\w/]+)\s*$" # 100% from ChatGPT
         match = re.match(pattern, quantity)
 
         if not match:
             raise ValueError(f"Invalid format for value with unit: '{quantity}'. Expected format: '<value> <unit>'.")
 
-        value_str, _, unit = match.groups()
+        value_str, unit = match.groups()
         return float(value_str), unit
     
     def _get_optimal_unit(self):
@@ -180,6 +180,7 @@ class Voltage(UnitQuantity):
         "V": 1,        # base unit: volts
         "mV": 1e-3,    # millivolts to volts
         "μV": 1e-6,    # microvolts to volts
+        "uV": 1e-6,    # alias
         "nV": 1e-9,    # nanovolts to volts
         "kV": 1e3,     # kilovolts to volts
     }
@@ -236,6 +237,7 @@ class Time(UnitQuantity):
         "s": 1,         # base unit: seconds
         "ms": 1e-3,     # milliseconds to seconds
         "μs": 1e-6,     # microseconds to seconds
+        "us": 1e-6,     # alias
         "ns": 1e-9,     # nanoseconds to seconds
         "min": 60.0,    # minutes to seconds
         "hr": 3600.0,   # hours to seconds
@@ -253,6 +255,7 @@ class Position(UnitQuantity):
         "cm": 1e-2,     # centimeters to meters
         "mm": 1e-3,     # millimeters to meters
         "μm": 1e-6,     # micrometers to meters
+        "um": 1e-6,     # alias
         "nm": 1e-9,     # nanometers to meters
         "km": 1e3       # kilometers to meters
     }
@@ -268,6 +271,7 @@ class Velocity(UnitQuantity):
         "cm/s": 1e-2,   # centimeters per second to meters per second
         "mm/s": 1e-3,   # millimeters per second to meters per second
         "μm/s": 1e-6,   # micrometers per second to meters per second
+        "um/s": 1e-6    # alias
     }
 
 
@@ -291,6 +295,7 @@ class Acceleration(UnitQuantity):
         "m/s^2": 1,     # base unit: meters per second squared
         "mm/s^2": 1e-3, # millimeters per second squared to meters per second squared
         "μm/s^2": 1e-6, # micrometers per second squared to meters per second squared
+        "um/s^2": 1e-6  # alias
     }
 
 
