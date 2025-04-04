@@ -9,17 +9,24 @@ from nidaqmx.constants import (
 )
 
 from dirigo import units
+from dirigo.components.io import load_toml
 from dirigo.hw_interfaces import digitizer
 from dirigo.sw_interfaces.acquisition import AcquisitionBuffer
 from dirigo.plugins.scanners import get_device, validate_ni_channel, get_max_ao_rate
 
 
 
-def get_max_ai_rate(device: nidaqmx.system.Device, multichannel = True) -> units.SampleRate:
-    if multichannel:
-        return units.SampleRate(device.ai_max_multi_chan_rate)
-    else:
+def get_max_ai_rate(device: nidaqmx.system.Device, channels_enabled: int = 1) -> units.SampleRate:
+    if not isinstance(channels_enabled, int):
+        raise ValueError("channels_enabled must be integer")
+    if channels_enabled > 1:
+        aggregate_rate = units.SampleRate(device.ai_max_multi_chan_rate)
+        return aggregate_rate / channels_enabled
+    elif channels_enabled == 1:
         return units.SampleRate(device.ai_max_single_chan_rate)
+    else:
+        raise ValueError("channels_enabled must be > 1")
+        
     
 def get_min_ai_rate(device: nidaqmx.system.Device) -> units.SampleRate:
     return units.SampleRate(device.ai_min_rate)
@@ -144,8 +151,9 @@ class NISampleClock(digitizer.SampleClock):
        - edge = "rising" or "falling"
     """
 
-    def __init__(self, device: nidaqmx.system.Device):
+    def __init__(self, device: nidaqmx.system.Device, channels: list[NIChannel]):
         self._device = device
+        self._channels = channels
 
         self._source = "/Dev1/ao/SampleClock" #TODO fix this
         self._rate = None #TODO fix this
@@ -187,9 +195,10 @@ class NISampleClock(digitizer.SampleClock):
         For demonstration, we show 'continuous range' by returning None 
         or a wide range object.
         """
+        nchannels_enabled = sum([channel.enabled for channel in self._channels])
         return units.SampleRateRange(
             min=get_min_ai_rate(self._device), 
-            max=get_max_ai_rate(self._device)
+            max=get_max_ai_rate(self._device, nchannels_enabled)
         )
 
     @property
@@ -531,15 +540,18 @@ class NIDigitizer(digitizer.Digitizer):
 
     def __init__(self, 
                  device_name: str = "Dev1", 
-                 n_analog_channels: int = 2, # TODO, get this from digitizer profile
                  **kwargs): 
         self._device = get_device(device_name)
+
+        # Get number of channels from profile name (NI cards have lots of AI channels, so avoid instantiating all of them)
+        profile = load_toml(self.PROFILE_LOCATION / "default.toml")
+        n_analog_channels = len(profile["channels"]["enabled"])
 
         # Create channel objects
         self.channels = [NIChannel(self._device, idx) for idx in range(n_analog_channels)]
 
         # Create sample clock
-        self.sample_clock = NISampleClock(self._device)
+        self.sample_clock = NISampleClock(self._device, self.channels)
 
         # Create trigger
         self.trigger = NITrigger(self._device)
