@@ -6,7 +6,9 @@ from platformdirs import user_config_dir
 
 from dirigo import units
 from dirigo.hw_interfaces.digitizer import Digitizer
-from dirigo.hw_interfaces.scanner import FastRasterScanner, SlowRasterScanner
+from dirigo.hw_interfaces.scanner import (
+    FastRasterScanner, SlowRasterScanner, GalvoScanner, ResonantScanner
+)
 from dirigo.sw_interfaces.acquisition import AcquisitionSpec, Acquisition
 
 
@@ -20,6 +22,7 @@ class LineAcquisitionSpec(AcquisitionSpec):
             pixel_size: str,
             buffers_per_acquisition: int | float, # float('inf')
             bidirectional_scanning: bool = False,
+            pixel_rate: str = None, # e.g. "100 kHz"
             fill_fraction: float = 1.0,
             digitizer_profile: Optional[str] = None,
             buffers_allocated: Optional[int] = None,
@@ -28,6 +31,8 @@ class LineAcquisitionSpec(AcquisitionSpec):
     ):
         super().__init__(**kwargs)
         self.bidirectional_scanning = bidirectional_scanning 
+        if pixel_rate:
+            self.pixel_rate = units.Frequency(pixel_rate)
         self.line_width = units.Position(line_width)
         self.pixel_size = units.Position(pixel_size)
         if not (0 < fill_fraction <= 1):
@@ -99,6 +104,15 @@ class LineAcquisition(Acquisition):
         super().__init__(hw, spec) # sets up thread, inbox, stores hw, checks resources
         self.spec: LineAcquisitionSpec # to refine type hints
 
+        # If using galvo scanner, then set it up based on acquisition spec parameters
+        if isinstance(self.hw.fast_raster_scanner, GalvoScanner):
+            self.hw.slow_raster_scanner.amplitude = \
+                self.hw.laser_scanning_optics.object_position_to_scan_angle(spec.line_width)
+            self.hw.fast_raster_scanner.frequency = \
+                self.spec.pixel_rate / self.spec.pixels_per_line
+            self.hw.fast_raster_scanner.waveform = "asymmetric triangle"
+            self.hw.fast_raster_scanner.duty_cycle = self.spec.fill_fraction
+
         self.configure_digitizer(profile_name=self.spec.digitizer_profile)
         
         # Setup scanner
@@ -121,7 +135,10 @@ class LineAcquisition(Acquisition):
         digi = self.hw.digitizer # for brevity
 
         digi.load_profile(profile_name)
+        if self.spec.pixel_rate:
+            digi.sample_clock.rate = self.spec.pixel_rate
 
+        # Configure acquisition timing and sizes
         digi.acquire.pre_trigger_samples = 0 # TODO, maybe allow this to be adjustable?
         digi.acquire.timestamps_enabled = True #testing
         digi.acquire.trigger_delay_samples = self._calculate_trigger_delay()
@@ -134,13 +151,21 @@ class LineAcquisition(Acquisition):
         digi = self.hw.digitizer # for brevity
 
         # Start scanner & digitizer
-        self.hw.fast_raster_scanner.start()        
-        digi.acquire.start() # This includes the buffer allocation
+        if isinstance(self.hw.fast_raster_scanner, ResonantScanner):
+            self.hw.fast_raster_scanner.start()        
+            digi.acquire.start() # This includes the buffer allocation
+        elif isinstance(self.hw.fast_raster_scanner, GalvoScanner):
+            digi.acquire.start()
+            self.hw.fast_raster_scanner.start(
+                pixel_frequency=self.spec.pixel_rate,
+                pixels_per_period=self.spec.pixels_per_line,
+                periods_per_write=self.spec.records_per_buffer
+            )
 
         try:
             while not self._stop_event.is_set() and \
                 digi.acquire.buffers_acquired < self.spec.buffers_per_acquisition:
-
+                print(f"Acquired {digi.acquire.buffers_acquired} of {self.spec.buffers_per_acquisition}")
                 buffer = digi.acquire.get_next_completed_buffer()
                 if hasattr(self.hw, 'stage'):
                     buffer.positions = self.read_positions()
@@ -160,17 +185,15 @@ class LineAcquisition(Acquisition):
     def read_positions(self):
         """Subclasses can override this method to provide position readout from
         stages or linear position encoders."""
+        positions = []
+        if self.hw.stage:
+            positions.append(self.hw.stage.x.position)
+            positions.append(self.hw.stage.y.position)
+
         if self.hw.objective_scanner:
-            return (
-                self.hw.stage.x.position, 
-                self.hw.stage.y.position,
-                self.hw.objective_scanner.position
-            )
-        else:
-            return (
-                self.hw.stage.x.position, 
-                self.hw.stage.y.position,
-            )
+            positions.append(self.hw.objective_scanner.position)
+        
+        return tuple(positions)
 
     def _calculate_trigger_delay(self, round_down: bool = True) -> int | float:
         """Compute the number of samples to delay
@@ -178,9 +201,13 @@ class LineAcquisition(Acquisition):
         Set round_down to True (default value), to automatically round to
         digitizer-compatible increment.
         """
-        scan_period = 1.0 / self.hw.fast_raster_scanner.frequency
+        scan_period = units.Time(1.0 / self.hw.fast_raster_scanner.frequency)
 
-        start_time = scan_period * math.acos(self.spec.fill_fraction) / (2 * math.pi)
+        if isinstance(self.hw.fast_raster_scanner, ResonantScanner):
+            start_time = scan_period * math.acos(self.spec.fill_fraction) / (2 * math.pi)
+        else:
+            start_time = 0
+
         # For tolerance to sync signal phase error and/or initial scanner 
         # frequency error, make sure to start earlier than absolutely required
         start_time *= 0.995
@@ -195,27 +222,33 @@ class LineAcquisition(Acquisition):
 
     def _calculate_record_length(self, round_up: bool = True) -> int | float:
         ff = self.spec.fill_fraction
-        start = math.acos(ff) / TWO_PI
 
-        if self.spec.bidirectional_scanning:
-            end = 1.0 - start
-        else:
-            end = math.acos(-ff) / TWO_PI
+        if isinstance(self.hw.fast_raster_scanner, ResonantScanner): #TODO consider scanner types and logic here
+            start = math.acos(ff) / TWO_PI
 
-        record_len = (end - start) * self.hw.digitizer.sample_clock.rate \
-            / self.hw.fast_raster_scanner.frequency
-        
-        # For tolerance to error in initial frequency, extend record length
-        record_len *= 1.01
+            if self.spec.bidirectional_scanning:
+                end = 1.0 - start
+            else:
+                end = math.acos(-ff) / TWO_PI
+
+            record_len = (end - start) * self.hw.digitizer.sample_clock.rate \
+                / self.hw.fast_raster_scanner.frequency
+            
+            # For tolerance to error in initial frequency, extend record length
+            record_len *= 1.01
+
+        else: #TODO make elif and refine logic with above
+            record_len = self.spec.pixels_per_line
         
         if round_up:
             # Round record length up to the next allowable size (or the min)
             rlr = self.hw.digitizer.acquire.record_length_resolution
-            record_len = rlr * int(record_len / rlr + 1) 
+            record_len = rlr * math.ceil(record_len / rlr) 
 
             # Also set enforce the min record length requirement
             if record_len < self.hw.digitizer.acquire.record_length_minimum:
                 record_len = self.hw.digitizer.acquire.record_length_minimum
+        
         print("record length", record_len)
         return record_len
 

@@ -17,7 +17,7 @@ from dirigo.hw_interfaces.scanner import (
 
 
 
-def get_device(device_name: str = "Dev1"):
+def get_device(device_name: str = "Dev1") -> nidaqmx.system.Device:
     """Returns handle to the NIDAQ system device object."""
     return nidaqmx.system.System.local().devices[device_name]
 
@@ -40,11 +40,11 @@ def validate_ni_channel(channel_name: str) -> str:
     - None: If the channel exists (raises no exception).
     """
     # Ensure channel_name includes both device and channel/terminal parts
-    if '/' not in channel_name or channel_name.count('/') > 2:
+    if '/' not in channel_name or channel_name.count('/') > 3:
         raise ValueError(
             f"Invalid channel name format, {channel_name}. "
             f"Valid formats: [device name]/[channel name] or /[device name]/[terminal name]. "
-            f"Examples: 'Dev1/ao0', '/Dev1/PFI4'"
+            f"Examples: 'Dev1/ao0', '/Dev1/PFI4', '/Dev1/ao/SampleClock'"
         )
 
     # Split device name from the rest of the channel name

@@ -11,6 +11,7 @@ authors = [
 ]
 license = {text = "MIT"}
 dependencies = [
+    "numba", # TODO, download from pip OK?
     "scipy",
     "toml",
     "platformdirs",
@@ -33,3 +34,6 @@ slow_galvo_scanner_via_ni = "dirigo.plugins.scanners:SlowGalvoScannerViaNI"
 
 [project.entry-points."dirigo_illuminators"]
 led_via_ni = "dirigo.plugins.illuminators:LEDViaNI"
+
+[project.entry-points."dirigo_digitizers"]
+ni = "dirigo.plugins.digitizers:NIDigitizer"
