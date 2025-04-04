@@ -312,9 +312,9 @@ class NIAcquire(digitizer.Acquire):
         # The Dirigo interface wants these; for slow or mid-rate NI tasks, we 
         # often do single continuous acquisitions. We'll do a rough approach:
         self._trigger_delay_samples = 0  # Not widely used in NI
-        self._record_length = 1000       # e.g. 1000 samples
-        self._records_per_buffer = 1     
-        self._buffers_per_acquisition = 1
+        self._record_length: int = None       # e.g. 1000 samples
+        self._records_per_buffer = None     
+        self._buffers_per_acquisition = None
         self._buffers_allocated = 1
 
         self._timestamps_enabled = False
@@ -494,15 +494,18 @@ class NIAcquire(digitizer.Acquire):
             raise RuntimeError("Acquisition not started.")
         
         # Decide how many samples to read each time. 
-        nsamples = self._record_length * self._records_per_buffer
+        nsamples = self.records_per_buffer * self.record_length 
 
-        #data = self._task.read(samps_to_read)
-        data = np.zeros((self.n_channels_enabled, nsamples), dtype=np.uint16) # TODO use buffers?
+        data = np.zeros((self.n_channels_enabled, nsamples), dtype=np.uint16) # TODO use preallocated array?
         self._reader.read_uint16(
             data=data,
             number_of_samples_per_channel=nsamples
         )
         self._buffers_acquired += 1
+
+        # The buffer dimensions need to be reordered for further processing
+        data.shape = (self.n_channels_enabled, self.records_per_buffer, self.record_length)
+        data = np.transpose(data, axes=(1,2,0)) # Move channels dimension from major to minor (ie interleaved)
 
         # Construct an AcquisitionBuffer. NI doesn’t provide built-in timestamps
         return AcquisitionBuffer(data=data)
@@ -537,13 +540,20 @@ class NIDigitizer(digitizer.Digitizer):
     High-level aggregator for NI-based digitizer integration. 
     Wires together the Channel, SampleClock, Trigger, Acquire, and AuxillaryIO.
     """
+    VALID_MODES = {"analog", "edge counting"}
 
     def __init__(self, 
                  device_name: str = "Dev1", 
+                 mode: str = "analog",
                  **kwargs): 
         self._device = get_device(device_name)
 
-        # Get number of channels from profile name (NI cards have lots of AI channels, so avoid instantiating all of them)
+        if mode not in self.VALID_MODES:
+            raise ValueError(f"Mode must be one of {self.VALID_MODES}, got {mode}")
+        self._mode = mode
+
+        # Get number of channels from default profile 
+        # (NI cards have lots of AI channels, so avoid instantiating all of them)
         profile = load_toml(self.PROFILE_LOCATION / "default.toml")
         n_analog_channels = len(profile["channels"]["enabled"])
 
@@ -567,24 +577,28 @@ class NIDigitizer(digitizer.Digitizer):
         # Create auxiliary IO
         self.aux_io = NIAuxillaryIO(device=self._device)
 
-    # def load_profile(self, profile_name: str):
-    #     """
-    #     Optional: load from a TOML file if you wish. 
-    #     Implementation would be similar to your existing examples.
-    #     """
-    #     raise NotImplementedError("Implement if desired.")
-
     @property
     def bit_depth(self) -> int:
         """
-        The actual ADC resolution depends on the particular NI board (e.g. 16-bit).
-        Here, we just guess 16 bits for demonstration.
+        AI bit depth. For all X series cards, this is 16.
         """
-        return 16
+        if self._device.product_category == ProductCategory.X_SERIES_DAQ:
+            return 16
+        else:
+            raise RuntimeError(
+                "Unsupported NI DAQ device. Only supports X-series, got "
+                + str(self._device.product_category)
+            )
 
     @property
     def data_range(self) -> units.ValueRange:
-        return units.ValueRange(min=0, max=2**16-1)
+        """Range of the returned data."""
+        if self._mode == "analog":
+            # For analog mode, we use AnalogUnscaledReader.read_uint16()
+            return units.ValueRange(min=0, max=2**16 - 1)
+        else:
+            # For edge counting
+            return units.ValueRange(min=0, max=2**32 - 1)
     
 
 # for testing

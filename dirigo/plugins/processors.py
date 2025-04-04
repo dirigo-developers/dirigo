@@ -21,9 +21,9 @@ TWO_PI = 2 * np.pi
 def dewarp_kernel(buffer_data: np.ndarray, dewarped: np.ndarray, 
                   start_indices: np.ndarray, nsamples_to_sum: np.ndarray) -> np.ndarray:
     Nrecords, Nsamples, Nchannels = buffer_data.shape
-    # Nf = Number Fast axis pixels (pixels per line)
-    # Ns = Number Slow axis pixels (lines per frame)
-    # Nc = Number of channels (colors)
+    # Nf = Number of Fast axis pixels (pixels per line)
+    # Ns = Number of Slow axis pixels (lines per frame)
+    # Nc = Number of Channels (colors)
     Ns, Nf, Nc = dewarped.shape # Acquisition must be in channel-minor order (interleaved)
     
     # For non-bidi, start_indices is a single row; for bidi, it is two rows
@@ -55,6 +55,7 @@ def dewarp_kernel(buffer_data: np.ndarray, dewarped: np.ndarray,
             dewarped[si, fi, 1] = tmp1 // Nsum
 
     return dewarped
+
 
 
 @njit(
@@ -117,8 +118,9 @@ def compute_cross_power_spectrum(F: np.ndarray):
 class RasterFrameProcessor(Processor):
     def __init__(self, acquisition):
         super().__init__(acquisition)
+        
         self._spec: FrameAcquisitionSpec # to refine type hinting
-        self.dewarped_shape = (
+        self.processed_shape = ( # Final shape after processing
                 self._spec.lines_per_frame,
                 self._spec.pixels_per_line,
                 acquisition.hw.nchannels_enabled
@@ -127,13 +129,16 @@ class RasterFrameProcessor(Processor):
         # Initialize with the nominal rate, will measure with data timestamps
         self._fast_scanner_frequency = self._acq.hw.fast_raster_scanner.frequency
 
-        # Pre-allocate array for dewarped image
-        self.dewarped = np.zeros(self.dewarped_shape, dtype=np.uint16)
+        # Pre-allocate array for processed image
+        self.processed = np.zeros(self.processed_shape, dtype=np.uint16)
+
+        # Trigger timing
+        self._fixed_trigger_delay = self._acq.hw.digitizer.acquire.trigger_delay_samples
+        self._trigger_phase = 0 # This value is adjustable
         
     def run(self):
-        trigger_delay = self._acq.hw.digitizer.acquire.trigger_delay_samples # not adjustable during acquisition
-        trigger_phase = 0
-        start_indices = self.calculate_start_indices(trigger_phase) - trigger_delay
+        # Calculate preliminary start indices
+        start_indices = self.calculate_start_indices(self._trigger_phase) - self._fixed_trigger_delay
         nsamples_to_sum = np.abs(np.diff(start_indices, axis=1))
         
         while True: # Loops until receives sentinel None
@@ -145,10 +150,10 @@ class RasterFrameProcessor(Processor):
                 return # concludes run() - this thread ends
 
             t0 = time.perf_counter()
-            dewarp_kernel(buf.data, self.dewarped, start_indices, nsamples_to_sum)
+            dewarp_kernel(buf.data, self.processed, start_indices, nsamples_to_sum)
             
             self.publish(ProcessedFrame(
-                data=self.dewarped, 
+                data=self.processed, 
                 timestamps=buf.timestamps,
                 positions=buf.positions
             )) # sends off to Logger and/or Display workers
@@ -163,29 +168,39 @@ class RasterFrameProcessor(Processor):
 
             # Measure phase from bidi data (in uni-directional, phase is not critical)
             if self._spec.bidirectional_scanning:
-                trigger_phase = self.measure_phase(buf.data)
+                self._trigger_phase = self.measure_phase(buf.data)
 
-            # Update dewarping start indices
-            start_indices = self.calculate_start_indices(trigger_phase) - trigger_delay
+            # Update dewarping start indices--these can change a bit if the scanner frequency drifts
+            start_indices = self.calculate_start_indices(self._trigger_phase) - self._fixed_trigger_delay
             nsamples_to_sum = np.abs(np.diff(start_indices, axis=1))
 
 
     def calculate_start_indices(self, trigger_phase: int = 0):
         # Set up an array with the SPATIAL edges of pixels--we will bin samples into the pixel edges
         ff = self._spec.fill_fraction
-        pixel_edges = np.linspace(ff, -ff, self._spec.pixels_per_line + 1)
+        
 
         # Create a dewarping function based on fast axis waveform type
         waveform = self._acq.hw.fast_raster_scanner.waveform
         if waveform == "sinusoid":
+            # image line should be taken from center of sinusoid sweep
+            pixel_edges = np.linspace(ff, -ff, self._spec.pixels_per_line + 1)
+
             # arccos inverts the cosinusoidal path, normalize scan period to 0.0 to 1.0
             temporal_edges = np.arccos(pixel_edges) / TWO_PI
+
         elif waveform == "sawtooth":
             pass # like a polygon scanner
         elif waveform == "triangle":
             pass # galvo running birectional
         elif waveform == "asymmetric triangle":
-            pass # galvo normal raster
+            # Fill fraction needs to be slightly adjusted to reflect pixel period rounding 
+            ff_corrected = self._spec.pixels_per_line / round(self._spec.pixels_per_line / self._spec.fill_fraction)
+
+            # assume we start at 0 and go to corrected fill fraction
+            pixel_edges = np.linspace(0, ff_corrected, self._spec.pixels_per_line + 1)
+
+            temporal_edges = pixel_edges # The scan should already be linearized
 
         if self._spec.bidirectional_scanning:
             temporal_edges_fwd = temporal_edges
@@ -198,13 +213,13 @@ class RasterFrameProcessor(Processor):
         
         starts_exact = temporal_edges * self.samples_per_period + trigger_phase
 
-        start_indices = np.ceil(starts_exact).astype(np.int32) # Forward scan should be ceil, Reverse scan should be floor
+        start_indices = np.ceil(starts_exact).astype(np.int32) 
 
         return start_indices
     
     def measure_phase(self, data: np.ndarray) -> units.Angle:
         """Measure the apparent fast raster scanner trigger phase for bidirectional acquisitions."""
-        UPSAMPLE = 8
+        UPSAMPLE = 8 # TODO move this somewhere else
         
         data_window = window_bidi_data(data, self._spec.lines_per_frame, self._acq.hw.digitizer.acquire.trigger_delay_samples, self.samples_per_period) # todo preallocate data_window
 

@@ -26,6 +26,7 @@ class Processor(Worker):
     Dirigo interface for data processing worker thread.
     """
     def __init__(self, acquisition: Acquisition):
+        """Stores the acquisition and spec in private attributes"""
         super().__init__()
         self._acq = acquisition
         self._spec = acquisition.spec

@@ -26,6 +26,7 @@ class TiffLogger(Logger):
         self.frames_per_file = max_frames_per_file # TODO add validation
         self.basename = basename
         self.save_path = user_documents_path() / "Dirigo"
+        self.save_path.mkdir(parents=True, exist_ok=True)
 
         self._fn = None
         self._writer = None # generated upon attempt to save first frame
@@ -87,7 +88,7 @@ class TiffLogger(Logger):
         self._writer.write(
                 frame.data, 
                 photometric='minisblack',
-                #planarconfig='contig',
+                planarconfig='contig',
                 resolution=(self._x_dpi, self._y_dpi),
                 metadata=self.metadata,
                 contiguous=True # The dataset size must not change

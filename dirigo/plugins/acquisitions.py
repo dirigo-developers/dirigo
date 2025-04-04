@@ -109,7 +109,7 @@ class LineAcquisition(Acquisition):
             self.hw.slow_raster_scanner.amplitude = \
                 self.hw.laser_scanning_optics.object_position_to_scan_angle(spec.line_width)
             self.hw.fast_raster_scanner.frequency = \
-                self.spec.pixel_rate / self.spec.pixels_per_line
+                self.spec.pixel_rate / round(self.spec.pixels_per_line / self.spec.fill_fraction) # TODO, pixel periods per line OK?
             self.hw.fast_raster_scanner.waveform = "asymmetric triangle"
             self.hw.fast_raster_scanner.duty_cycle = self.spec.fill_fraction
 
@@ -193,7 +193,7 @@ class LineAcquisition(Acquisition):
         if self.hw.objective_scanner:
             positions.append(self.hw.objective_scanner.position)
         
-        return tuple(positions)
+        return tuple(positions) if len(positions) else None
 
     def _calculate_trigger_delay(self, round_down: bool = True) -> int | float:
         """Compute the number of samples to delay
@@ -238,7 +238,7 @@ class LineAcquisition(Acquisition):
             record_len *= 1.01
 
         else: #TODO make elif and refine logic with above
-            record_len = self.spec.pixels_per_line
+            record_len = round(self.spec.pixels_per_line / ff)
         
         if round_up:
             # Round record length up to the next allowable size (or the min)
