@@ -542,11 +542,13 @@ class Digitizer(ABC):
 
         for i, channel in enumerate(self.channels):
             channel.enabled = profile["channels"]["enabled"][i]
-            channel.coupling = profile["channels"]["coupling"][i]
+            # coupling, impedance, range may not be settable (for instance if using digital edge counting)
+            if "coupling" in profile["channels"]:
+                channel.coupling = profile["channels"]["coupling"][i]
             if "impedance" in profile["channels"]:
-                # Impedance may not be settable
                 channel.impedance = profile["channels"]["impedance"][i]
-            channel.range = units.VoltageRange(profile["channels"]["range"][i])
+            if "range" in profile["channels"]:
+                channel.range = units.VoltageRange(profile["channels"]["range"][i])
 
         if "external_range" in profile["trigger"]:
             self.trigger.external_range = profile["trigger"]["external_range"]

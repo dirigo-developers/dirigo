@@ -80,28 +80,50 @@ def validate_ni_channel(channel_name: str) -> str:
     return channel_name
 
 
-def get_free_counter(device_name: str = 'Dev1'):
-    """
-    Tries setting up a dummy counter input task. If successful returns the counter name.
-    """
-    device = get_device(device_name)
-    
-    for chan_name in [chan.name for chan in device.ci_physical_chans]:
-        try:
-            # Try to create a dummy task on this counter
-            with nidaqmx.Task() as task:
-                task.ci_channels.add_ci_count_edges_chan(chan_name)
-                task.start()
-                task.stop()
-                
-                return chan_name # If we get here, it means we successfully reserved the channel
-            
-        except nidaqmx.errors.DaqError:
-            # If it fails, that channel is likely in use or invalid
-            pass
-    
-    # If we exhaust the loop, no counters were available
-    raise RuntimeError(f"No free counters found on {device_name}.")
+class CounterRegistry:
+    _available_counters: list[str] = []
+    _in_use: set[str] = set()
+    _initialized: bool = False
+    _device_name: str = None
+
+    @classmethod
+    def initialize(cls, device_name="Dev1"):
+        device = nidaqmx.system.Device(device_name)
+        cls._available_counters = [chan.name for chan in device.ci_physical_chans]
+        cls._in_use.clear()
+        cls._initialized = True
+        cls._device_name = device_name
+
+    @classmethod
+    def allocate_counter(cls, device_name="Dev1") -> str:
+        """
+        Returns a free counter from the registry, marking it in use.
+        Lazily initializes the registry if not already done.
+        """
+        # Lazy initialization
+        if not cls._initialized:
+            cls.initialize(device_name)
+
+        # If someone tries to allocate from a different device
+        # than we previously initialized, decide how you want to handle that:
+        if device_name != cls._device_name:
+            # Possibly re‐initialize for the new device?
+            # Or raise an error? This depends on your usage.
+            cls.initialize(device_name)
+
+        for ctr in cls._available_counters:
+            if ctr not in cls._in_use:
+                cls._in_use.add(ctr)
+                return ctr
+
+        raise RuntimeError("No free counters available!")
+
+    @classmethod
+    def free_counter(cls, counter_name: str):
+        """
+        Marks a previously-allocated counter as free again.
+        """
+        cls._in_use.discard(counter_name)
 
 
 def get_max_ao_rate(device_name: str = 'Dev1') -> units.SampleRate:
@@ -591,7 +613,7 @@ class SlowGalvoScannerViaNI(GalvoScannerViaNI, SlowRasterScanner):
 
                 high_ticks = round(self.duty_cycle * periods_per_frame)
                 fclk_ch = self._fclock_task.co_channels.add_co_pulse_chan_ticks(
-                    counter=get_free_counter(),
+                    counter=CounterRegistry.allocate_counter(),
                     source_terminal=self._external_line_clock_channel,
                     low_ticks=periods_per_frame - high_ticks, 
                     high_ticks=high_ticks
@@ -646,6 +668,7 @@ class SlowGalvoScannerViaNI(GalvoScannerViaNI, SlowRasterScanner):
 
         if self._external_line_clock_channel:
             self._fclock_task.stop()
+            CounterRegistry.free_counter(self._fclock_task.channel_names[0])
             self._fclock_task.close()
 
             self._ao_task.stop()

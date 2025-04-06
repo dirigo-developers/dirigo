@@ -3,7 +3,7 @@ from functools import cached_property
 
 import nidaqmx
 import nidaqmx.system
-from nidaqmx.stream_readers import AnalogUnscaledReader
+from nidaqmx.stream_readers import AnalogUnscaledReader, CounterReader
 from nidaqmx.constants import (
     ProductCategory, Coupling, Edge, AcquisitionType
 )
@@ -12,7 +12,7 @@ from dirigo import units
 from dirigo.components.io import load_toml
 from dirigo.hw_interfaces import digitizer
 from dirigo.sw_interfaces.acquisition import AcquisitionBuffer
-from dirigo.plugins.scanners import get_device, validate_ni_channel, get_max_ao_rate
+from dirigo.plugins.scanners import get_device, validate_ni_channel, CounterRegistry
 
 
 
@@ -33,30 +33,29 @@ def get_min_ai_rate(device: nidaqmx.system.Device) -> units.SampleRate:
 
 
 
-class NIChannel(digitizer.Channel):
+class NIAnalogChannel(digitizer.Channel):
     """
     Represents a single analog input channel on an NI board.
     Implements the Channel interface with minimal NI-specific constraints.
     """
 
-    def __init__(self, device: nidaqmx.system.Device, channel_index: int):
+    def __init__(self, device: nidaqmx.system.Device, channel_name: str):
         """
         device_name: e.g. "Dev1"
-        index: channel index, used to build the full physical channel string, e.g. "Dev1/ai0".
+        channel_name: physical channel name, e.g. "Dev1/ai0".
         """
         self._device = device
-        # TODO check valid index
-        self._index = channel_index
+        self._channel_name = validate_ni_channel(channel_name)
 
-        # For demonstration, we’ll assume NI boards are DC-coupled only. 
         self._coupling: Coupling = None 
         self._impedance: float = None  # Not adjustable on most boards
-        self._range: tuple[float,float] = None
+        self._range: tuple[float, float] = None # (min, max)
         self._enabled = False
 
     @property
     def index(self) -> int:
-        return self._index
+        # gets the numbers after ai in "Dev1/ai0"
+        return int(self._channel_name.split('/')[-1][2:])
 
     @property
     def coupling(self) -> str:
@@ -134,12 +133,82 @@ class NIChannel(digitizer.Channel):
 
     @enabled.setter
     def enabled(self, state: bool):
+        if not isinstance(state, bool):
+            raise ValueError(f"enabled must be set with a boolean value, got {type(state)}")
+        
         self._enabled = state
 
     @property
-    def physical_channel_name(self) -> str:
+    def channel_name(self) -> str:
         """Returns the NI physical channel name, e.g. Dev1/ai0"""
-        return f"{self._device.name}/ai{self._index}"
+        return self._channel_name
+
+
+class NICounterChannel(digitizer.Channel):
+    """For edge counting (e.g. photon counting)."""
+    def __init__(self, device: nidaqmx.system.Device, channel_name: str):
+        self._device = device
+        self._channel_name = validate_ni_channel(channel_name)
+
+        self._enabled = False
+
+    @property
+    def index(self) -> int:
+        # gets the numbers after PFI in "/Dev1/PFI0
+        return int(self._channel_name.split('/')[-1][3:])
+
+    @property
+    def coupling(self) -> str:
+        # Digital input 
+        return NotImplemented
+    
+    @coupling.setter
+    def coupling(self, coupling: str):
+        pass
+
+    @cached_property
+    def coupling_options(self) -> set[str]:
+        return None
+    
+    @property
+    def impedance(self) -> units.Resistance:
+        return NotImplemented
+    
+    @impedance.setter
+    def impedance(self, impedance: str):
+        pass 
+
+    @cached_property
+    def impedance_options(self) -> set[str]:
+        return None
+    
+    @property
+    def range(self) -> units.VoltageRange:
+        return NotImplemented
+
+    @range.setter
+    def range(self, new_rng: units.VoltageRange):
+        pass 
+
+    @cached_property
+    def range_options(self) -> set[units.VoltageRange]:
+        return None
+
+    @property
+    def enabled(self) -> bool:
+        return self._enabled
+
+    @enabled.setter
+    def enabled(self, state: bool):
+        if not isinstance(state, bool):
+            raise ValueError(f"enabled must be set with a boolean value, got {type(state)}")
+        
+        self._enabled = state
+
+    @property
+    def channel_name(self) -> str:
+        """Returns the NI physical channel name, e.g. Dev1/ai0"""
+        return self._channel_name
 
 
 class NISampleClock(digitizer.SampleClock):
@@ -151,7 +220,7 @@ class NISampleClock(digitizer.SampleClock):
        - edge = "rising" or "falling"
     """
 
-    def __init__(self, device: nidaqmx.system.Device, channels: list[NIChannel]):
+    def __init__(self, device: nidaqmx.system.Device, channels: list[NIAnalogChannel]):
         self._device = device
         self._channels = channels
 
@@ -178,6 +247,7 @@ class NISampleClock(digitizer.SampleClock):
 
     @rate.setter
     def rate(self, value: units.SampleRate):
+        # TODO switch for AI/CI tasks
         if not isinstance(value, units.SampleRate):
             value = units.SampleRate(value)
         if not self.rate_options.within_range(value):
@@ -303,9 +373,9 @@ class NIAcquire(digitizer.Acquire):
     """
 
     def __init__(self, device: nidaqmx.system.Device, sample_clock: NISampleClock, 
-                 channels: list[NIChannel], trigger: NITrigger):
+                 channels: list[NIAnalogChannel | NICounterChannel], trigger: NITrigger):
         self._device = device
-        self._channels: list[NIChannel] = channels
+        self._channels: list[NIAnalogChannel | NICounterChannel] = channels
         self._sample_clock: NISampleClock = sample_clock
         self._trigger: NITrigger = trigger
 
@@ -412,32 +482,10 @@ class NIAcquire(digitizer.Acquire):
         self._timestamps_enabled = enable
 
     def start(self):
-        """
-        Creates and configures the NI task, then starts sampling.
-        For a typical “finite” acquisition (n samples) scenario, we do a 
-        one-shot read. For a “continuous” scenario, you might configure 
-        sample mode differently and read in a loop or with callbacks.
-        """
+
         if self._started:
             return  # Already started
-
-        self._task = nidaqmx.Task("Analog input")
-
-        for channel in self._channels:
-            if not channel.enabled:
-                continue
-
-            self._task.ai_channels.add_ai_voltage_chan(
-                physical_channel=channel.physical_channel_name,
-                min_val=channel.range.min,
-                max_val=channel.range.max,
-            )
-
-        # If no channels are enabled, raise an error
-        if self.n_channels_enabled < 1:
-            raise RuntimeError("No NI channels enabled for acquisition.")
-
-        # Configure the sample clock
+        
         if self._sample_clock.edge == "rising":
             edge = Edge.RISING 
         else:
@@ -450,31 +498,83 @@ class NIAcquire(digitizer.Acquire):
             sample_mode = AcquisitionType.CONTINUOUS
             samples_per_chan = 2 * self._record_length
 
-        self._task.timing.cfg_samp_clk_timing(
-            rate=self._sample_clock.rate, 
-            source=self._sample_clock.source,
-            active_edge=edge,
-            sample_mode=sample_mode,
-            samps_per_chan=samples_per_chan
-        )
+        if self._mode == "analog":
 
-        # Configure trigger
-        if self._trigger.slope == "rising":
-            edge = Edge.RISING 
+            self._task = nidaqmx.Task(
+                "Analog input" if self._mode == "analog" else "Counter input"
+            )
+
+            for channel in self._channels:
+                if not channel.enabled:
+                    continue
+                
+                self._task.ai_channels.add_ai_voltage_chan(
+                    physical_channel=channel.channel_name,
+                    min_val=channel.range.min,
+                    max_val=channel.range.max,
+                ) 
+
+            # Configure trigger
+            edge = Edge.RISING if self._trigger.slope == "rising" else Edge.FALLING
+            self._task.triggers.start_trigger.cfg_dig_edge_start_trig(
+                trigger_source=self._trigger.source,
+                trigger_edge=edge
+            )
+            # For analog triggers, use cfg_anlg_edge_start_trig
+
+            # Configure the sample clock
+            self._task.timing.cfg_samp_clk_timing(
+                rate=self._sample_clock.rate, 
+                source=self._sample_clock.source,
+                active_edge=edge,
+                sample_mode=sample_mode,
+                samps_per_chan=samples_per_chan*2 #TODO, not sure about 2x
+            )
+
+            # Set up stream reader
+            self._reader = AnalogUnscaledReader(self._task.in_stream)
+        
         else:
-            edge = Edge.FALLING
+            self._tasks: list[nidaqmx.Task] = []
+            self._readers: list[CounterReader] = []
+            for channel in self._channels:
+                if not channel.enabled:
+                    continue
 
-        self._task.triggers.start_trigger.cfg_dig_edge_start_trig(
-            trigger_source=self._trigger.source,
-            trigger_edge=edge
-        )
-        # For analog triggers or reference triggers, use cfg_anlg_edge_start_trig
+                # For counter inputs, we need to make multiple tasks and readers
+                x = channel.channel_name.split('/')[-1]
+                task = nidaqmx.Task(f"Edge counter input {x}")
 
-        # Set up stream reader
-        self._reader = AnalogUnscaledReader(self._task.in_stream)
+                ci_chan = task.ci_channels.add_ci_count_edges_chan(
+                    counter=CounterRegistry.allocate_counter(),
+                )
+                ci_chan.ci_count_edges_term = channel.channel_name
 
-        # Start the task
-        self._task.start()
+                # Configure the sample clock
+                task.timing.cfg_samp_clk_timing(
+                    rate=self._sample_clock.rate, 
+                    source=self._sample_clock.source,
+                    active_edge=edge,
+                    sample_mode=sample_mode,
+                    #samps_per_chan=samples_per_chan*10 # TODO not sure about 2x?
+                )
+
+                reader = CounterReader(task.in_stream)
+
+                self._tasks.append(task)
+                self._readers.append(reader)
+
+            self._last_samples = np.zeros(
+                shape=(1, self.n_channels_enabled),
+                dtype=np.uint32
+            )
+
+        # Start the task(s)
+        if self._mode == "analog":
+            self._task.start()
+        else:
+            for task in self._tasks:
+                task.start()
 
         self._started = True
         self._buffers_acquired = 0
@@ -489,36 +589,76 @@ class NIAcquire(digitizer.Acquire):
         Reads the next chunk of data from the device buffer. For NI, this typically 
         means calling read once we have enough samples. 
         """
-        print("getting buffer data")
         if not self._started:
             raise RuntimeError("Acquisition not started.")
         
         # Decide how many samples to read each time. 
         nsamples = self.records_per_buffer * self.record_length 
 
-        data = np.zeros((self.n_channels_enabled, nsamples), dtype=np.uint16) # TODO use preallocated array?
-        self._reader.read_uint16(
-            data=data,
-            number_of_samples_per_channel=nsamples
-        )
-        self._buffers_acquired += 1
+        if self._mode == "analog":
+            data = np.zeros( # TODO use preallocated array?
+                shape=(self.n_channels_enabled, nsamples), 
+                dtype=np.uint16
+            ) 
+            self._reader.read_uint16(
+                data=data,
+                number_of_samples_per_channel=nsamples
+            )
 
-        # The buffer dimensions need to be reordered for further processing
-        data.shape = (self.n_channels_enabled, self.records_per_buffer, self.record_length)
-        data = np.transpose(data, axes=(1,2,0)) # Move channels dimension from major to minor (ie interleaved)
+            # The buffer dimensions need to be reordered for further processing
+            data.shape = (self.n_channels_enabled, self.records_per_buffer, self.record_length)
+            data = np.transpose(data, axes=(1,2,0)) # Move channels dimension from major to minor (ie interleaved)
+
+        else:
+            data_single_channel = np.zeros((nsamples,), dtype=np.uint32) # reader only supports reading into contiguous array
+            data_multiple_channels = np.zeros(
+                shape=(nsamples+1, self.n_channels_enabled), #+1 b/c we will do np.diff
+                dtype=np.uint32
+            )
+            
+            for i, reader in enumerate(self._readers):
+
+                reader.read_many_sample_uint32(
+                    data=data_single_channel,
+                    number_of_samples_per_channel=nsamples
+                )
+                data_multiple_channels[1:,i] = data_single_channel
+                print(f'read {nsamples} samples')
+
+            # Difference along the samples dim and reorder dims for further processing
+            data_multiple_channels[0,:] = self._last_samples
+            data = np.diff(data_multiple_channels, axis=0).astype(np.uint16)
+            self._last_samples = data_multiple_channels[-1,:]
+            data.shape = (self.records_per_buffer, self.record_length, self.n_channels_enabled)
+
+        self._buffers_acquired += 1
 
         # Construct an AcquisitionBuffer. NI doesn’t provide built-in timestamps
         return AcquisitionBuffer(data=data)
 
     def stop(self):
-        if self._task and self._started:
+        if not self._started:
+            return
+
+        # Stop the task(s)
+        if self._mode == "analog":
             self._task.stop()
             self._task.close()
-        
-        self._task = None
+        else:
+            for task in self._tasks:
+                task.stop()
+                CounterRegistry.free_counter(task.channel_names[0])
+                task.close()
+                
         self._started = False
         self._samples_acquired = 0
 
+    @cached_property
+    def _mode(self):
+        if isinstance(self._channels[0], NIAnalogChannel):
+            return "analog"
+        else:
+            return "edge counting"
 
 class NIAuxillaryIO(digitizer.AuxillaryIO):
     def __init__(self, device: nidaqmx.system.Device):
@@ -544,21 +684,27 @@ class NIDigitizer(digitizer.Digitizer):
 
     def __init__(self, 
                  device_name: str = "Dev1", 
-                 mode: str = "analog",
                  **kwargs): 
         self._device = get_device(device_name)
 
+        # Get channel names from default profile 
+        # (NI cards have lots of AI channels, so avoid instantiating all of them)
+        profile = load_toml(self.PROFILE_LOCATION / "default.toml")
+        channel_names = profile["channels"]["channels"]
+
+        # Get mode from profile
+        mode = profile["mode"]
         if mode not in self.VALID_MODES:
             raise ValueError(f"Mode must be one of {self.VALID_MODES}, got {mode}")
         self._mode = mode
 
-        # Get number of channels from default profile 
-        # (NI cards have lots of AI channels, so avoid instantiating all of them)
-        profile = load_toml(self.PROFILE_LOCATION / "default.toml")
-        n_analog_channels = len(profile["channels"]["enabled"])
-
         # Create channel objects
-        self.channels = [NIChannel(self._device, idx) for idx in range(n_analog_channels)]
+        if self._mode == "analog":
+            self.channels = \
+                [NIAnalogChannel(self._device, chan) for chan in channel_names]
+        else:
+            self.channels = \
+                [NICounterChannel(self._device, chan) for chan in channel_names]
 
         # Create sample clock
         self.sample_clock = NISampleClock(self._device, self.channels)
@@ -598,7 +744,9 @@ class NIDigitizer(digitizer.Digitizer):
             return units.ValueRange(min=0, max=2**16 - 1)
         else:
             # For edge counting
-            return units.ValueRange(min=0, max=2**32 - 1)
+            # technically the counters support up to 32 bits, but it's unlikely
+            # anyone will need this range
+            return units.ValueRange(min=0, max=2**16 - 1)
     
 
 # for testing
