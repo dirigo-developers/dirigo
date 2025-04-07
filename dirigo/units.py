@@ -217,7 +217,7 @@ class Angle(UnitQuantity):
 
 class Frequency(UnitQuantity):
     """
-    Represents a frequency value with units (e.g. Hz, kHz, MHz, GHz, or rpm).
+    Represents a frequency value with units (e.g. Hz, kHz, MHz, or GHz).
     """
     DIMENSIONAL_QUANTITY = ('1', 'T')
     ALLOWED_UNITS_AND_MULTIPLIERS = {
@@ -225,7 +225,7 @@ class Frequency(UnitQuantity):
         "kHz": 1e3,     # kilohertz to hertz
         "MHz": 1e6,     # megahertz to hertz
         "GHz": 1e9,     # gigahertz to hertz
-        "rpm": 1/60     # rotations per minute to hertz
+        #"rpm": 1/60     # rotations per minute to hertz
     }
 
 

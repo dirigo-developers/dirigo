@@ -58,11 +58,6 @@ class NIAnalogChannel(digitizer.Channel):
         self._range: tuple[float, float] = None # (min, max)
         self._enabled = False
 
-    # @property
-    # def index(self) -> int:
-    #     # gets the numbers after ai in "Dev1/ai0"
-    #     return int(self._channel_name.split('/')[-1][2:])
-
     @property
     def index(self) -> int:
         # gets the numbers after ai in "Dev1/ai0"
@@ -167,11 +162,6 @@ class NICounterChannel(digitizer.Channel):
 
         self._enabled = False
 
-    # @property
-    # def index(self) -> int:
-    #     # gets the numbers after PFI in "/Dev1/PFI0
-    #     return int(self._channel_name.split('/')[-1][3:])
-    
     @property
     def index(self) -> int:
         return self._index
@@ -715,8 +705,6 @@ class NIDigitizer(digitizer.Digitizer):
     High-level aggregator for NI-based digitizer integration. 
     Wires together the Channel, SampleClock, Trigger, Acquire, and AuxillaryIO.
     """
-    VALID_MODES = {"analog", "edge counting"}
-
     def __init__(self, 
                  device_name: str = "Dev1", 
                  **kwargs): 
@@ -725,13 +713,14 @@ class NIDigitizer(digitizer.Digitizer):
         # Get channel names from default profile 
         # (NI cards have lots of AI channels, so avoid instantiating all of them)
         profile = load_toml(self.PROFILE_LOCATION / "default.toml")
-        channel_names = profile["channels"]["channels"]
+        channel_names: list[str] = profile["channels"]["channels"]
 
-        # Get mode from profile
-        mode = profile["mode"]
-        if mode not in self.VALID_MODES:
-            raise ValueError(f"Mode must be one of {self.VALID_MODES}, got {mode}")
-        self._mode = mode
+        # Infer mode from profile->channels->channels
+        if channel_names[0].split('/')[-1][:2] == "ai":
+            # if the last two characters of channel names = "ai" then we are using analog mode
+            self._mode = "analog"
+        else:
+            self._mode = "edge counting"
 
         # Create channel objects
         if self._mode == "analog":

@@ -191,7 +191,6 @@ class RasterFrameProcessor(Processor):
     def calculate_start_indices(self, trigger_phase: int = 0):
         # Set up an array with the SPATIAL edges of pixels--we will bin samples into the pixel edges
         ff = self._spec.fill_fraction
-        
 
         # Create a resampling function based on fast axis waveform type
         waveform = self._acq.hw.fast_raster_scanner.waveform
@@ -226,7 +225,7 @@ class RasterFrameProcessor(Processor):
         
         starts_exact = temporal_edges * self.samples_per_period + trigger_phase
 
-        start_indices = np.ceil(starts_exact).astype(np.int32) 
+        start_indices = np.ceil(starts_exact - 1e-6).astype(np.int32) 
 
         return start_indices
     
