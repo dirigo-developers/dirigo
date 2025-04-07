@@ -15,46 +15,59 @@ TWO_PI = 2 * np.pi
 
 # issues:
 # need to support uint16 and uint8 (rarer)
-
-@njit((types.uint16[:,:,:], types.uint16[:,:,:], types.int32[:,:], types.int32[:,:]),
-      nogil=True, parallel=True, fastmath=True, cache=True)
-def dewarp_kernel(buffer_data: np.ndarray, dewarped: np.ndarray, 
-                  start_indices: np.ndarray, nsamples_to_sum: np.ndarray) -> np.ndarray:
+sig = (types.uint16[:,:,:], types.uint16[:,:,:], types.int32[:,:], types.int32[:,:])
+@njit(sig, parallel=True, fastmath=True, nogil=True, cache=True)
+def resample_kernel(buffer_data: np.ndarray, 
+                    resampled: np.ndarray, 
+                    start_indices: np.ndarray, 
+                    nsamples_to_sum: np.ndarray) -> np.ndarray:
+    """
+    buffer_data shape: (Nrecords, Nsamples, Nchannels)
+    dewarped shape:    (Ns, Nf, Nc)
+    start_indices shape: (Ndirections, Nf)
+    nsamples_to_sum shape: (Ndirections, Nf)
+    
+    Ndirections is 1 (unidirectional) or 2 (bidirectional).
+    """
     Nrecords, Nsamples, Nchannels = buffer_data.shape
-    # Nf = Number of Fast axis pixels (pixels per line)
-    # Ns = Number of Slow axis pixels (lines per frame)
-    # Nc = Number of Channels (colors)
-    Ns, Nf, Nc = dewarped.shape # Acquisition must be in channel-minor order (interleaved)
-    
-    # For non-bidi, start_indices is a single row; for bidi, it is two rows
-    # For non-bidi, records per buffer is same as number of lines in final image
-    # For bidid, there will be half as many records per buffer as lines
+    Ns, Nf, Nc = resampled.shape # Acquisition must be in channel-minor order (interleaved)
     Ndirections = start_indices.shape[0]
-    
+
+    # Clamp start_indices so they don't go out of [0, Nsamples]    
     for d in prange(Ndirections):
         for fi in prange(Nf):
-            # Clip to valid indices of sample
             start_indices[d, fi] = min(max(start_indices[d, fi], 0), Nsamples)
     
-    for si in prange(Ns): # si = Slow pixel Index
-        fwd_rvs = si % Ndirections # denotes 'forward' (0) or 'reverse' (1) scan (unidirectional scanning is only 'forward')
-        ri = si // Ndirections # record index (for unidirectional scanning ri=si)
-        stride = 1 - 2 * fwd_rvs # for stride in range later, 0 -> 1 and 1 -> -1 
+    # Main loop over slow-axis pixels
+    for si in prange(Ns): 
+        fwd_rvs = si % Ndirections # 0 => forward, 1 => reverse (if Ndirections=2)
+        ri = si // Ndirections # record index 
+        stride = 1 - 2 * fwd_rvs # +1 if forward, -1 if reverse
 
-        for fi in range(Nf): # fi = Fast pixel index
+        # Loop over fast-axis pixels
+        for fi in range(Nf): 
             Nsum = nsamples_to_sum[fwd_rvs, fi]
             start = start_indices[fwd_rvs, fi]
 
-            tmp0 = types.int32(0)
-            tmp1 = types.int32(0)
-            for sample in range(start, start + Nsum * stride, stride):
-                tmp0 += buffer_data[ri, sample, 0] # unrolled channels
-                tmp1 += buffer_data[ri, sample, 1]
+            # tmp0 = types.int32(0)
+            # tmp1 = types.int32(0)
+            tmp_values = np.zeros(Nchannels, dtype=np.int32)
 
-            dewarped[si, fi, 0] = tmp0 // Nsum
-            dewarped[si, fi, 1] = tmp1 // Nsum
+            # Step through the raw samples
+            end = start + (Nsum * stride)
+            for sample in range(start, end, stride):
+                for c in range(Nchannels):
+                    tmp_values[c] += buffer_data[ri, sample, c]
+                # tmp0 += buffer_data[ri, sample, 0] # unrolled channels
+                # tmp1 += buffer_data[ri, sample, 1]
 
-    return dewarped
+            # resampled[si, fi, 0] = tmp0 // Nsum
+            # resampled[si, fi, 1] = tmp1 // Nsum
+            # Store the average back into resampled
+            for c in range(Nchannels):
+                resampled[si, fi, c] = tmp_values[c] // Nsum
+
+    return resampled
 
 
 
@@ -150,7 +163,7 @@ class RasterFrameProcessor(Processor):
                 return # concludes run() - this thread ends
 
             t0 = time.perf_counter()
-            dewarp_kernel(buf.data, self.processed, start_indices, nsamples_to_sum)
+            resample_kernel(buf.data, self.processed, start_indices, nsamples_to_sum)
             
             self.publish(ProcessedFrame(
                 data=self.processed, 
@@ -170,7 +183,7 @@ class RasterFrameProcessor(Processor):
             if self._spec.bidirectional_scanning:
                 self._trigger_phase = self.measure_phase(buf.data)
 
-            # Update dewarping start indices--these can change a bit if the scanner frequency drifts
+            # Update resampling start indices--these can change a bit if the scanner frequency drifts
             start_indices = self.calculate_start_indices(self._trigger_phase) - self._fixed_trigger_delay
             nsamples_to_sum = np.abs(np.diff(start_indices, axis=1))
 
@@ -180,7 +193,7 @@ class RasterFrameProcessor(Processor):
         ff = self._spec.fill_fraction
         
 
-        # Create a dewarping function based on fast axis waveform type
+        # Create a resampling function based on fast axis waveform type
         waveform = self._acq.hw.fast_raster_scanner.waveform
         if waveform == "sinusoid":
             # image line should be taken from center of sinusoid sweep

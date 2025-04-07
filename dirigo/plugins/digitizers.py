@@ -12,7 +12,10 @@ from dirigo import units
 from dirigo.components.io import load_toml
 from dirigo.hw_interfaces import digitizer
 from dirigo.sw_interfaces.acquisition import AcquisitionBuffer
-from dirigo.plugins.scanners import get_device, validate_ni_channel, CounterRegistry
+from dirigo.plugins.scanners import (
+    CounterRegistry, get_device, validate_ni_channel, 
+    get_min_ao_rate, get_max_ao_rate
+)
 
 
 
@@ -38,7 +41,7 @@ class NIAnalogChannel(digitizer.Channel):
     Represents a single analog input channel on an NI board.
     Implements the Channel interface with minimal NI-specific constraints.
     """
-
+    _INDEX = 0 # Tracks number of times instantiated
     def __init__(self, device: nidaqmx.system.Device, channel_name: str):
         """
         device_name: e.g. "Dev1"
@@ -47,15 +50,23 @@ class NIAnalogChannel(digitizer.Channel):
         self._device = device
         self._channel_name = validate_ni_channel(channel_name)
 
+        self._index = self.__class__._INDEX
+        self.__class__._INDEX += 1
+
         self._coupling: Coupling = None 
         self._impedance: float = None  # Not adjustable on most boards
         self._range: tuple[float, float] = None # (min, max)
         self._enabled = False
 
+    # @property
+    # def index(self) -> int:
+    #     # gets the numbers after ai in "Dev1/ai0"
+    #     return int(self._channel_name.split('/')[-1][2:])
+
     @property
     def index(self) -> int:
         # gets the numbers after ai in "Dev1/ai0"
-        return int(self._channel_name.split('/')[-1][2:])
+        return self._index
 
     @property
     def coupling(self) -> str:
@@ -146,16 +157,24 @@ class NIAnalogChannel(digitizer.Channel):
 
 class NICounterChannel(digitizer.Channel):
     """For edge counting (e.g. photon counting)."""
+    _INDEX = 0 
     def __init__(self, device: nidaqmx.system.Device, channel_name: str):
         self._device = device
         self._channel_name = validate_ni_channel(channel_name)
 
+        self._index = self.__class__._INDEX
+        self.__class__._INDEX += 1
+
         self._enabled = False
 
+    # @property
+    # def index(self) -> int:
+    #     # gets the numbers after PFI in "/Dev1/PFI0
+    #     return int(self._channel_name.split('/')[-1][3:])
+    
     @property
     def index(self) -> int:
-        # gets the numbers after PFI in "/Dev1/PFI0
-        return int(self._channel_name.split('/')[-1][3:])
+        return self._index
 
     @property
     def coupling(self) -> str:
@@ -224,8 +243,14 @@ class NISampleClock(digitizer.SampleClock):
         self._device = device
         self._channels = channels
 
-        self._source = "/Dev1/ao/SampleClock" #TODO fix this
-        self._rate = None #TODO fix this
+        # Check the type of Channels to infer mode
+        if isinstance(self._channels[0], NIAnalogChannel):
+            self._mode = "analog"
+        else:
+            self._mode = "edge counting"
+
+        self._source = "/Dev1/ao/SampleClock" # TODO not hard code?
+        self._rate = None 
         self._edge = "rising"
 
     @property
@@ -250,11 +275,13 @@ class NISampleClock(digitizer.SampleClock):
         # TODO switch for AI/CI tasks
         if not isinstance(value, units.SampleRate):
             value = units.SampleRate(value)
+
         if not self.rate_options.within_range(value):
             raise ValueError(
-                f"Requested AI sample rate ({value}) is outside "
+                f"Requested pixel sample rate ({value}) is outside "
                 f"supported range {self.rate_options}"
             )
+        
         self._rate = float(value)
 
     @property
@@ -265,11 +292,19 @@ class NISampleClock(digitizer.SampleClock):
         For demonstration, we show 'continuous range' by returning None 
         or a wide range object.
         """
-        nchannels_enabled = sum([channel.enabled for channel in self._channels])
-        return units.SampleRateRange(
-            min=get_min_ai_rate(self._device), 
-            max=get_max_ai_rate(self._device, nchannels_enabled)
-        )
+        if self._mode == "analog":
+            # For analog sampling, sample rate needs to be within the aggregrate sample rate
+            nchannels_enabled = sum([channel.enabled for channel in self._channels])
+            return units.SampleRateRange(
+                min=get_min_ai_rate(self._device), 
+                max=get_max_ai_rate(self._device, nchannels_enabled)
+            )
+        else:
+            # For edge counting, sample rate needs to just be within valid AO range
+            return units.SampleRateRange(
+                min=get_min_ao_rate(self._device), 
+                max=get_max_ao_rate(self._device)
+            )
 
     @property
     def edge(self) -> str:
@@ -283,7 +318,7 @@ class NISampleClock(digitizer.SampleClock):
 
     @property
     def edge_options(self) -> set[str]:
-        return {"rising", "falling"}
+        return {"rising", "falling"}        
 
 
 class NITrigger(digitizer.Trigger):
@@ -496,7 +531,7 @@ class NIAcquire(digitizer.Acquire):
             samples_per_chan = self._record_length
         else:
             sample_mode = AcquisitionType.CONTINUOUS
-            samples_per_chan = 2 * self._record_length
+            samples_per_chan = 2 * self.records_per_buffer * self.record_length 
 
         if self._mode == "analog":
 
@@ -556,7 +591,7 @@ class NIAcquire(digitizer.Acquire):
                     source=self._sample_clock.source,
                     active_edge=edge,
                     sample_mode=sample_mode,
-                    #samps_per_chan=samples_per_chan*10 # TODO not sure about 2x?
+                    samps_per_chan=samples_per_chan*10 # TODO not sure about 2x?
                 )
 
                 reader = CounterReader(task.in_stream)

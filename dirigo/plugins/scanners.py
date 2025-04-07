@@ -126,8 +126,12 @@ class CounterRegistry:
         cls._in_use.discard(counter_name)
 
 
-def get_max_ao_rate(device_name: str = 'Dev1') -> units.SampleRate:
-    return units.SampleRate(get_device(device_name).ao_max_rate)
+def get_min_ao_rate(device: nidaqmx.system.Device) -> units.SampleRate:
+    return units.SampleRate(device.ao_min_rate)
+
+
+def get_max_ao_rate(device: nidaqmx.system.Device) -> units.SampleRate:
+    return units.SampleRate(device.ao_max_rate)
 
 
 
@@ -454,8 +458,8 @@ class FastGalvoScannerViaNI(GalvoScannerViaNI, FastRasterScanner):
             if not isinstance(pixel_frequency, units.Frequency):
                 raise ValueError("Pixel frequency must be set with Frequency object")
             
-            dev_name = self._analog_control_channel.split('/')[0]
-            if pixel_frequency > get_max_ao_rate(dev_name):
+            device = get_device(self._analog_control_channel.split('/')[0])
+            if pixel_frequency > get_max_ao_rate(device):
                 raise ValueError("Pixel frequency higher than DAQ card supports")
             self._pixel_frequency = pixel_frequency
             
@@ -584,8 +588,9 @@ class SlowGalvoScannerViaNI(GalvoScannerViaNI, SlowRasterScanner):
             self._external_line_clock_channel = validate_ni_channel(external_line_clock_channel)
 
             ao_sample_rate = units.SampleRate(ao_sample_rate)
-            low_sr = units.SampleRate('1 kS/s')
-            high_sr = units.SampleRate(get_max_ao_rate())
+            device = get_device(self._analog_control_channel.split('/')[0])
+            low_sr = get_min_ao_rate(device)
+            high_sr = get_max_ao_rate(device)
             if not low_sr < ao_sample_rate < high_sr:
                 raise ValueError(f"AO sample rate outside required bounds: "
                                  f"low: {low_sr}, high {high_sr}, got {ao_sample_rate}")
