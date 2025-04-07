@@ -144,13 +144,7 @@ class SlowRasterScanner(RasterScanner):
     """Marker class indicating that this scanner is operated as the slow axis in
     a raster scanning system.
     """
-    @abstractmethod
-    def prepare_frame_clock(self, fast_scanner: FastRasterScanner):
-        """Prepare frame clock, which synchronizes the fast and slow raster axes
-        
-        Args:
-            fast_scanner: the fast axis raster scanner object"""
-        pass
+    pass
 
 
 class ResonantScanner(RasterScanner):
@@ -203,7 +197,7 @@ class ResonantScanner(RasterScanner):
     
     @property
     def duty_cycle(self) -> float:
-        return 0.5
+        return 0.5 # DC = 0.5 here just means the waveform is symmetric
     
     @duty_cycle.setter
     def duty_cycle(self, _):

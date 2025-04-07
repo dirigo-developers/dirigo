@@ -5,7 +5,7 @@ from typing import Optional
 
 
 
-def load_toml(file_name:Path|str) -> dict:
+def load_toml(file_name: Path | str) -> dict:
     file_name = Path(file_name)
     if not file_name.exists():
         raise FileNotFoundError(f"Can not find TOML file: {file_name}")

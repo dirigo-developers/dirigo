@@ -525,7 +525,7 @@ class Digitizer(ABC):
         self.acquire: Acquire
         self.aux_io: AuxillaryIO
 
-    def load_profile(self, profile_name:str):
+    def load_profile(self, profile_name: str):
         """Load and apply a settings profile from a TOML file.
 
         Args:
@@ -535,20 +535,29 @@ class Digitizer(ABC):
         profile = load_toml(self.PROFILE_LOCATION / profile_fn)
         
         self.sample_clock.source = profile["sample_clock"]["clock_source"]
-        self.sample_clock.rate = profile["sample_clock"]["rate"] # rate setter method should handle converting string representation into units.SampleRate
+        if "rate" in profile["sample_clock"]:
+            # rate setter method should handle converting string representation into units.SampleRate
+            self.sample_clock.rate = profile["sample_clock"]["rate"] 
         self.sample_clock.edge = profile["sample_clock"]["edge"]
 
         for i, channel in enumerate(self.channels):
             channel.enabled = profile["channels"]["enabled"][i]
-            channel.coupling = profile["channels"]["coupling"][i]
-            channel.impedance = profile["channels"]["impedance"][i]
-            channel.range = profile["channels"]["range"][i]
+            # coupling, impedance, range may not be settable (for instance if using digital edge counting)
+            if "coupling" in profile["channels"]:
+                channel.coupling = profile["channels"]["coupling"][i]
+            if "impedance" in profile["channels"]:
+                channel.impedance = profile["channels"]["impedance"][i]
+            if "range" in profile["channels"]:
+                channel.range = units.VoltageRange(profile["channels"]["range"][i])
 
-        self.trigger.external_range = profile["trigger"]["external_range"]
-        self.trigger.external_coupling = profile["trigger"]["external_coupling"]
+        if "external_range" in profile["trigger"]:
+            self.trigger.external_range = profile["trigger"]["external_range"]
+        if "external_coupling" in profile["trigger"]:
+            self.trigger.external_coupling = profile["trigger"]["external_coupling"]
         self.trigger.source = profile["trigger"]["source"]
         self.trigger.slope = profile["trigger"]["slope"]
-        self.trigger.level = 0
+        if "level" in profile["trigger"]:
+            self.trigger.level = 0
 
     @property
     @abstractmethod

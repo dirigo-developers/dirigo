@@ -13,12 +13,7 @@ if TYPE_CHECKING:
 
 class AcquisitionSpec:
     """Marker class for an acquisition specification."""
-    def __init__(self, nchannels: int = 1, **kwargs):
-        if not isinstance(nchannels, int):
-            raise ValueError("Acquisition spec parameter: `nchannels` must be an integer")
-        if nchannels < 1:
-            raise ValueError("`nchannels` must be 1 or greater")
-        self.nchannels = nchannels
+    pass
 
 
 @dataclass

@@ -179,7 +179,7 @@ class Display(Worker):
     @property
     def nchannels(self):
         """Returns the number of channels expected from Acquisition or Processor."""
-        return self._acquisition.spec.nchannels
+        return self._acquisition.hw.nchannels_enabled
 
     @property
     @abstractmethod

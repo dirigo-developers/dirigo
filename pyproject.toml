@@ -11,6 +11,7 @@ authors = [
 ]
 license = {text = "MIT"}
 dependencies = [
+    "numba", # TODO, download from pip OK?
     "scipy",
     "toml",
     "platformdirs",
@@ -27,7 +28,12 @@ linear_encoders_via_ni = "dirigo.plugins.encoders:MultiAxisLinearEncodersViaNI"
 
 [project.entry-points."dirigo_scanners"]
 resonant_scanner_via_ni = "dirigo.plugins.scanners:ResonantScannerViaNI"
-galvo_slow_raster_scanner_via_ni = "dirigo.plugins.scanners:GalvoSlowRasterScannerViaNI"
+polygon_scanner_via_ni = "dirigo.plugins.scanners:PolygonScannerViaNI"
+fast_galvo_scanner_via_ni = "dirigo.plugins.scanners:FastGalvoScannerViaNI"
+slow_galvo_scanner_via_ni = "dirigo.plugins.scanners:SlowGalvoScannerViaNI"
 
 [project.entry-points."dirigo_illuminators"]
 led_via_ni = "dirigo.plugins.illuminators:LEDViaNI"
+
+[project.entry-points."dirigo_digitizers"]
+ni = "dirigo.plugins.digitizers:NIDigitizer"

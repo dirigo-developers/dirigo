@@ -1,23 +1,28 @@
-import math
 from functools import cached_property
+import threading
 
-import nidaqmx.task
 import numpy as np
+
 import nidaqmx
+import nidaqmx.system
 import nidaqmx.errors
-from nidaqmx.system import System as NISystem
-from nidaqmx.constants import AcquisitionType, LineGrouping, Edge, AOIdleOutputBehavior
+from nidaqmx.stream_writers import AnalogMultiChannelWriter
+from nidaqmx.constants import AcquisitionType, RegenerationMode, LineGrouping
 
 from dirigo import units
 from dirigo.hw_interfaces.scanner import (
-    RasterScanner,
+    GalvoScanner, ResonantScanner, PolygonScanner,
     FastRasterScanner, SlowRasterScanner,
-    ResonantScanner, GalvoScanner
 )
 
 
 
-def validate_ni_channel(channel_name: str):
+def get_device(device_name: str = "Dev1") -> nidaqmx.system.Device:
+    """Returns handle to the NIDAQ system device object."""
+    return nidaqmx.system.System.local().devices[device_name]
+
+
+def validate_ni_channel(channel_name: str) -> str:
     """
     Confirm if a given channel or terminal exists on a device.
     
@@ -35,11 +40,11 @@ def validate_ni_channel(channel_name: str):
     - None: If the channel exists (raises no exception).
     """
     # Ensure channel_name includes both device and channel/terminal parts
-    if '/' not in channel_name or channel_name.count('/') > 2:
+    if '/' not in channel_name or channel_name.count('/') > 3:
         raise ValueError(
             f"Invalid channel name format, {channel_name}. "
             f"Valid formats: [device name]/[channel name] or /[device name]/[terminal name]. "
-            f"Examples: 'Dev1/ao0', '/Dev1/PFI4'"
+            f"Examples: 'Dev1/ao0', '/Dev1/PFI4', '/Dev1/ao/SampleClock'"
         )
 
     # Split device name from the rest of the channel name
@@ -51,11 +56,10 @@ def validate_ni_channel(channel_name: str):
         # Handle channel format: 'Dev1/ai0'
         device_name = parts[0]
 
-    system = NISystem.local()
-
     try:
         # Get the device
-        device = system.devices[device_name]
+        device = get_device(device_name)
+
     except KeyError:
         raise ValueError(f"Device {device_name} not found in the system.")
 
@@ -73,6 +77,61 @@ def validate_ni_channel(channel_name: str):
             f"Channel/terminal, {channel_name} not found on device, {device_name}"
         )
     # If no exception is raised, the channel is valid
+    return channel_name
+
+
+class CounterRegistry:
+    _available_counters: list[str] = []
+    _in_use: set[str] = set()
+    _initialized: bool = False
+    _device_name: str = None
+
+    @classmethod
+    def initialize(cls, device_name="Dev1"):
+        device = nidaqmx.system.Device(device_name)
+        cls._available_counters = [chan.name for chan in device.ci_physical_chans]
+        cls._in_use.clear()
+        cls._initialized = True
+        cls._device_name = device_name
+
+    @classmethod
+    def allocate_counter(cls, device_name="Dev1") -> str:
+        """
+        Returns a free counter from the registry, marking it in use.
+        Lazily initializes the registry if not already done.
+        """
+        # Lazy initialization
+        if not cls._initialized:
+            cls.initialize(device_name)
+
+        # If someone tries to allocate from a different device
+        # than we previously initialized, decide how you want to handle that:
+        if device_name != cls._device_name:
+            # Possibly re‐initialize for the new device?
+            # Or raise an error? This depends on your usage.
+            cls.initialize(device_name)
+
+        for ctr in cls._available_counters:
+            if ctr not in cls._in_use:
+                cls._in_use.add(ctr)
+                return ctr
+
+        raise RuntimeError("No free counters available!")
+
+    @classmethod
+    def free_counter(cls, counter_name: str):
+        """
+        Marks a previously-allocated counter as free again.
+        """
+        cls._in_use.discard(counter_name)
+
+
+def get_min_ao_rate(device: nidaqmx.system.Device) -> units.SampleRate:
+    return units.SampleRate(device.ao_min_rate)
+
+
+def get_max_ao_rate(device: nidaqmx.system.Device) -> units.SampleRate:
+    return units.SampleRate(device.ao_max_rate)
 
 
 
@@ -147,120 +206,29 @@ class ResonantScannerViaNI(ResonantScanner, FastRasterScanner):
     def analog_control_range(self) -> units.VoltageRange:
         """Returns an object describing the analog control range."""
         return self._analog_control_range
-
-
-class FrameClock:
-    """
-    Counts fast scanner clock pulses and emits a frame clock signal.
     
-    This class is used to synchronize a slow scanner with a fast scanner.
-    It generates a digital output signal based on a specified number of 
-    fast scanner periods per slow scanner frame.
-
-    Note:
-        Currently supports only a 50% duty cycle.
-
-    Attributes:
-        LINE_CLOCK_MAX_ERROR (float): Safety margin added to the maximum 
-            expected line clock frequency as required by NIDAQmx.
-    """
-
-    LINE_CLOCK_MAX_ERROR = 0.1  # Add 10% safety margin for maximum frequency
-
-    def __init__(self, 
-                 line_clock_channel: str, 
-                 frame_clock_channel: str,
-                 line_clock_frequency: units.Frequency,
-                 periods_per_frame: int):
-        """
-        Initializes the FrameClock object.
-
-        Args:
-            line_clock_channel (str): NI DAQmx channel for the line clock input.
-            frame_clock_channel (str): NI DAQmx channel for the frame clock output.
-            line_clock_frequency (dirigo.Frequency): Frequency of the line clock.
-            periods_per_frame (int): Number of line clock periods per frame clock.
-
-        Raises:
-            ValueError: If `periods_per_frame` is not a positive integer.
-            ValueError: If the `line_clock_frequency` is not a dirigo.Frequency object.
-            ValueError: If the channel name format is invalid or the channel/terminal
-                        does not exist.
-        """
-        # Validate frame clock channel
-        validate_ni_channel(frame_clock_channel)
-        self._frame_clock_channel = frame_clock_channel
-
-        # Validate line sync channel
-        validate_ni_channel(line_clock_channel)
-        self._line_clock_channel = line_clock_channel
-
-        if not isinstance(line_clock_frequency, units.Frequency):
-            raise ValueError("`line_clock_frequency` must be a frequency object")
-        self._line_clock_frequency = line_clock_frequency
-
-        if periods_per_frame <= 0:
-            raise ValueError("`periods_per_frame must` be a positive integer.")
-        self._periods_per_frame = periods_per_frame
-
     def start(self):
-        """
-        Starts the frame clock signal generation.
-
-        Configures and starts a NIDAQmx task to output a frame clock signal
-        based on the specified number of line clock periods per frame.
-
-        Raises:
-            nidaqmx.DaqError: If the DAQmx task configuration fails.
-        """
-        # Set up task
-        self._task = nidaqmx.Task("Frame clock")
-        self._task.do_channels.add_do_chan(
-            lines=self._frame_clock_channel,
-            line_grouping=LineGrouping.CHAN_PER_LINE
-        )
-
-        # Set timing
-        max_freq = (1 + self.LINE_CLOCK_MAX_ERROR) * self._line_clock_frequency
-        self._task.timing.cfg_samp_clk_timing(
-            rate=max_freq, 
-            source=self._line_clock_channel,
-            active_edge=Edge.RISING,
-            sample_mode=AcquisitionType.CONTINUOUS
-        )
-
-        # Make the clock signal and write to device
-        clock_signal = np.zeros(self._periods_per_frame, dtype=np.bool_)
-        clock_signal[:self._periods_per_frame // 2] = True
-        self._task.write(clock_signal, auto_start=True)
+        pass # TODO, add some sort of enable/disbale channel
 
     def stop(self):
-        """
-        Stops the frame clock signal generation.
-
-        Stops and closes the associated NIDAQmx task.
-
-        Raises:
-            nidaqmx.DaqError: If stopping or closing the task fails.
-        """
-        self._task.stop()
-        self._task.close()
+        pass # TODO, add some sort of enable/disbale channel
 
 
-class GalvoRasterScannerViaNI(GalvoScanner):
-    REARM_TIME = units.Time("0.5 ms") # time to allow NI card to rearm after outputing waveform
-    AO_TIMEBASE = units.Frequency("100 MHz") # NIDAQ cards use 100 MHz timebase divided down to generate frequency
+class PolygonScannerViaNI(PolygonScanner, FastRasterScanner):
+    pass # TODO, write this
 
-    def __init__(self, control_channel: str, analog_control_range: dict, 
-                 trigger_channel: str, line_clock_channel: str, 
-                 frame_clock_channel: str, **kwargs):
-        super().__init__(**kwargs)
+
+class GalvoScannerViaNI(GalvoScanner):
+
+    def __init__(self, 
+                 analog_control_channel: str, # e.g. 'Dev1/ao1'
+                 analog_control_range: dict, # e.g. {'min': '-10 V', 'max': '10 V'}
+                 **kwargs):
         
-        # validated and set amplitude control analog channel
-        validate_ni_channel(control_channel)
-        self._control_channel = control_channel
+        super().__init__(**kwargs) # Sets axis & scan angle range
 
-        # validate amplitude control limits and set in private attr
+        self._analog_control_channel = validate_ni_channel(analog_control_channel)
+
         if not isinstance(analog_control_range, dict):
             raise ValueError("`analog_control_range` must be a dictionary.")
         missing_keys = {'min', 'max'} - analog_control_range.keys()
@@ -270,163 +238,501 @@ class GalvoRasterScannerViaNI(GalvoScanner):
             )
         self._analog_control_range = units.VoltageRange(**analog_control_range)
 
-        # validate trigger channel
-        validate_ni_channel(trigger_channel)
-        self._trigger_channel = trigger_channel
-
-        self._frame_clock: FrameClock = None # Set later with information from fast scanner
-        validate_ni_channel(line_clock_channel) # will be validated again when FrameClock object is made, but that's OK
-        self._line_clock_channel = line_clock_channel
-        validate_ni_channel(frame_clock_channel)
-        self._frame_clock_channel = frame_clock_channel
-
-        self.park() # Park itself at min angle
-
-    @cached_property
-    def _output_buffer_size(self) -> int:
-        """Returns the hardware output buffer size in samples."""
-        # We will make a throwaway task to detect the output buffer size value
-        task = nidaqmx.Task()
-        task.ao_channels.add_ao_voltage_chan(
-            physical_channel=self._control_channel
-        )
-        buffer_size = task.out_stream.output_onbrd_buf_size
-        task.close()
-        return buffer_size
-
-    @property
-    def _sample_rate(self) -> int:
-        if not self.frequency:
-            raise RuntimeError(
-                "Slow scanner `frequency` must be set before preparing frame clock."
-            )
-        exact_sample_rate = self.frequency * self._output_buffer_size
-        x = math.ceil(self.AO_TIMEBASE / exact_sample_rate) 
-        return units.SampleRate(self.AO_TIMEBASE / x)
-     
-    @property
-    def _samples_per_period(self) -> float:
-        """
-        Exact number of output sample clock periods per slow axis scanner period.
-        """
-        return self._sample_rate / self.frequency
-    
-    @property
-    def _waveform_length(self) -> int:
-        """
-        Number of samples in output waveform. This is reduce by the rearm time
-        and rounded to an integer.
-        """
-        return round(self._samples_per_period - self.REARM_TIME * self._sample_rate)
-    
-    def prepare_frame_clock(self, fast_scanner: RasterScanner, acquisition_spec):
-        """Prepares the fast scanner"""
-        if not self.frequency:
-            raise RuntimeError(
-                "Slow scanner `frequency` must be set before preparing frame clock."
-            )
-        self._frame_clock = FrameClock(
-            line_clock_channel=self._line_clock_channel,
-            frame_clock_channel=self._frame_clock_channel,
-            line_clock_frequency=fast_scanner.frequency,
-            periods_per_frame=acquisition_spec.records_per_buffer
-        )
-
-    def start(self):
-        # Check whether all required properties have been set
-        if not self.frequency: 
-            raise RuntimeError("Required scanner parameter, `frequency` not set.")
-        if not self.waveform:
-            raise RuntimeError("Required scanner parameter, `waveform` not set.")
-        if not self.duty_cycle:
-            raise RuntimeError("Required scanner parameter, `duty_cycle` not set.")
-        if not self._frame_clock:
-            raise RuntimeError("Frame clock must be initialized before starting. "
-                               "Use the `prepare_frame_clock` method.")
-
-        # Instantiate tasks and set channels
-        self._task = nidaqmx.Task("Galvo slow raster scanner")
-        self._task.ao_channels.add_ao_voltage_chan(
-            physical_channel=self._control_channel
-        )
-        
-        # Set task timings
-        self._task.timing.cfg_samp_clk_timing(
-            rate=self._sample_rate,
-            sample_mode=AcquisitionType.FINITE,
-            samps_per_chan=self._waveform_length
-        )
-
-        self._task.triggers.start_trigger.cfg_dig_edge_start_trig(
-            trigger_source=self._trigger_channel
-        )
-        self._task.triggers.start_trigger.retriggerable = True
-        #self._task.out_stream.regen_mode = RegenerationMode.DONT_ALLOW_REGENERATION
-
-        # Write the waveform to the buffer
-        waveform_radians = self._generate_waveform()
-        waveform_volts = waveform_radians * self._volts_per_radian
-        self._task.write(waveform_volts, auto_start=True) # still requires triggering for output
-
-        # Start frame clock
-        self._frame_clock.start()
-
-    def stop(self):
-        #self._task.stop()
-        self._task.close()
-        self.park() # Parks itself at min angle
-
-        self._frame_clock.stop()
-        self._frame_clock = None
+        self._ao_task: nidaqmx.Task = None
+        self._active = False
 
     def park(self):
         """Positions the scanner the angle limit minimum."""
         analog_value = self.angle_limits.min * self._volts_per_radian
         try:
             with nidaqmx.Task() as task: 
-                task.ao_channels.add_ao_voltage_chan(self._control_channel)
+                task.ao_channels.add_ao_voltage_chan(self._analog_control_channel)
                 task.write(analog_value, auto_start=True)
         except nidaqmx.DaqError as e:
             raise RuntimeError(f"Failed to park scanner: {e}") from e
-
-    def _generate_waveform(self):
-        """Returns are waveform vector in units of radian."""
-        amp_rad = self.amplitude / 2 # divide pk-pk amplitude by 2 to get amplitude (converts to radians)
-
-        # TODO, adjustable phase?
-        if self.waveform == 'sinusoid':
-            t = np.linspace(start=0, stop=2*np.pi, num=self._waveform_length)
-            return amp_rad * np.cos(t)
-        
-        elif self.waveform in {'triangle', 'asymmetric triangle', 'sawtooth'}:
-            num_up = math.ceil(self._samples_per_period * self.duty_cycle)
-            num_down = self._waveform_length - num_up
-            parts = (
-                np.linspace(start=-amp_rad, stop=amp_rad, num=num_up),
-                np.linspace(start=amp_rad, stop=-amp_rad, num=num_down)
-            )
-            waveform = np.concatenate(parts, axis=0)
-            # if True:
-            #     window_width = 100
-
-            #     # Create the kernel (rolling average filter)
-            #     kernel = np.ones(window_width) / window_width
-
-            #     # Apply convolution. The mode 'valid' returns output only where the kernel fully overlaps the signal.
-            #     waveform = np.convolve(waveform, kernel, mode='same')
-            return waveform
     
     @cached_property
     def _volts_per_radian(self) -> float:
         """Scaling factor between analog control voltge and optical scan angle."""
         return self._analog_control_range.range / self.angle_limits.range
- 
+    
+    def generate_waveform(self, sample_rate: units.SampleRate): # TODO, njit this? parameters: waveform, amplitude, duty_cycle, waveform_length, samples_per_period
+        """Returns are waveform vector in units of radian."""
+        amp_rad = self.amplitude / 2 # divide pk-pk amplitude by 2 to get amplitude (converts to radians)
+        offset = self.offset
+        # TODO, adjustable phase?
 
-class GalvoFastRasterScannerViaNI(GalvoRasterScannerViaNI, FastRasterScanner):
-    """The faster of a galvo-galvo pair. """
-    pass
+        exact_samples_per_period = sample_rate / self.frequency
+        rearm_time = 0
+        waveform_length = round(exact_samples_per_period - rearm_time * sample_rate)
+
+        if self.waveform == 'sinusoid':
+            t = np.linspace(start=0, stop=2*np.pi, num=waveform_length)
+
+            waveform = (offset + amp_rad * np.cos(t)) * self._volts_per_radian
+        
+        elif self.waveform in {'triangle', 'asymmetric triangle', 'sawtooth'}:
+            num_up = int(exact_samples_per_period * self.duty_cycle) + 1
+            num_down = waveform_length - num_up
+            parts = (
+                np.linspace(start=-amp_rad + offset, stop=amp_rad + offset, num=num_up),
+                np.linspace(start=amp_rad + offset, stop=-amp_rad + offset, num=num_down)
+            )
+            waveform = np.concatenate(parts, axis=0) * self._volts_per_radian
+
+        return waveform
+    
+    def generate_clock(self, sample_rate: units.SampleRate): # TODO, njit this? parameters: waveform, amplitude, duty_cycle, waveform_length, samples_per_period
+        """Returns a digital signal representing the line or frame clock."""
+
+        # TODO, adjustable phase?
+
+        exact_samples_per_period = sample_rate / self.frequency
+        rearm_time = 0
+        waveform_length = round(exact_samples_per_period - rearm_time * sample_rate)
+
+        num_up = int(exact_samples_per_period * self.duty_cycle) + 1
+
+        clock = np.zeros((waveform_length,), dtype=np.bool)
+        clock[:num_up] = True
+
+        return clock
+        
+    # Intercept some setters so they do not change value of parameters during scan
+    @GalvoScanner.frequency.setter
+    def frequency(self, new_frequency: units.Frequency):
+        if self._active:
+            raise RuntimeError("Frequency is not adjustable while scanner is active.")
+        else:
+            GalvoScanner.frequency.__set__(self, new_frequency)
+
+    @GalvoScanner.waveform.setter
+    def waveform(self, new_waveform: str):
+        if self._active:
+            raise RuntimeError("Waveform type is not adjustable while scanner is active.")
+        else:
+            GalvoScanner.waveform.__set__(self, new_waveform)
+
+    @GalvoScanner.duty_cycle.setter
+    def duty_cycle(self, new_duty_cycle: float):
+        if self._active:
+            raise RuntimeError("Duty cycle is not adjustable while scanner is active.")
+        else:
+            GalvoScanner.duty_cycle.__set__(self, new_duty_cycle)
+
+    # Are adjustable: offset, amplitude
+        
+
+class GalvoWaveformWriter(threading.Thread):
+    """
+    Manages writing analog waveform for single fast galvo, or both waveforms in 
+    galvo-galvo configurations.
+    """
+
+    def __init__(self, 
+                 fast_scanner: 'FastGalvoScannerViaNI' = None, 
+                 slow_scanner: 'SlowGalvoScannerViaNI' = None,
+                 rearm_time: units.Time = units.Time(0)
+                 ):
+        super().__init__()
+        self._stop_event = threading.Event()
+
+        self._fast_scanner = fast_scanner
+        self._slow_scanner = slow_scanner
+
+        if not isinstance(rearm_time, units.Time):
+            raise ValueError("Rearm time must be set with a units.Time object")
+        if rearm_time < 0:
+            raise ValueError("Rearm time must be greater than or equal to 0 seconds")
+        self._rearm_time = rearm_time
+
+        if self._fast_scanner:
+            if not isinstance(self._fast_scanner, FastGalvoScannerViaNI):
+                raise ValueError("Wrong type of fast scanner passed to "
+                                 "GalvoWaveformWriter")
+            
+            # If a fast scanner exists, use its AO task and its sample rate (=pixel frequency)
+            self._sample_rate = units.SampleRate(self._fast_scanner._pixel_frequency)
+            self._ao_writer = AnalogMultiChannelWriter(self._fast_scanner._ao_task.out_stream)
+
+        else:
+            # If no fast scanner exist, then use the slow scanner and its sample rate
+            self._sample_rate = units.SampleRate(self._slow_scanner._ao_task.timing.samp_clk_rate)
+            self._ao_writer = AnalogMultiChannelWriter(self._slow_scanner._ao_task.out_stream)
+
+        # Write once before starting the run loop
+        waveforms = self.generate_waveforms()
+        self._ao_writer.write_many_sample(waveforms)
+
+    def run(self):
+        while not self._stop_event.is_set():
+            try:
+                waveforms = self.generate_waveforms()
+                self._ao_writer.write_many_sample(waveforms)
+
+                print("Wrote waveform with shape", waveforms.shape)
+                # TODO shorter timeout and time out exception
+
+            except nidaqmx.errors.DaqWriteError as e:
+                # the task has not started yet, wait a while
+                print("Skipped writing waveform")
+                #print(e)
+                time.sleep(units.Time('2 ms'))
+
+    def stop(self):
+        self._stop_event.set()
+
+    def generate_waveforms(self): 
+        fast_scanner = self._fast_scanner
+        slow_scanner = self._slow_scanner
+
+        if fast_scanner:
+            fast_waveform = fast_scanner.generate_waveform(self._sample_rate)
+            fast_waveform = np.tile(fast_waveform, reps=fast_scanner._periods_per_write)
+            
+            if slow_scanner:
+                slow_waveform = slow_scanner.generate_waveform(self._sample_rate)
+                return np.vstack((fast_waveform, slow_waveform))
+            else:
+                return np.vstack((fast_waveform,))
+        
+        else:
+            slow_waveform = slow_scanner.generate_waveform(self._sample_rate)
+            return np.vstack((slow_waveform,))
+
+        
+    @property
+    def _samples_per_period(self) -> float:
+        """
+        Exact number (e.g. fractional) of output sample clock periods per fast 
+        scanner period (if available), or slow scanner (if not).
+        """
+        if fast_scanner:
+            return self._sample_rate / self._fast_scanner.frequency
+        else:
+            return self._sample_rate / self._slow_scanner.frequency
+    
+    @property
+    def _waveform_length(self) -> int:
+        """
+        Number of samples in output waveform. This is reduced by the rearm time
+        and rounded to an integer. `_waveform_length` & `samples_per_period` will
+        deviate when there is a non-zero rearm. For continuous AO generation,
+        the rearm time should be 0, but for retriggered finite AO generation,
+        it must be considered.
+        """
+        return round(self._samples_per_period - self._rearm_time * self._sample_rate)
 
 
-class GalvoSlowRasterScannerViaNI(GalvoRasterScannerViaNI, SlowRasterScanner):
-    """Galvo paired with a fast scanner (resonant, polygon, etc)"""
-    pass
+
+class FastGalvoScannerViaNI(GalvoScannerViaNI, FastRasterScanner):
+    def __init__(self, 
+                 pixel_clock_channel: str, 
+                 external_pixel_clock_channel: str = None, # leave None to use AO sample clock
+                 line_clock_channel: str = None, # TODO, generate the line clock with DI channels
+                 **kwargs):
+        
+        super().__init__(**kwargs) # analog control channel and voltage limits
+
+        self._pixel_clock_channel = validate_ni_channel(pixel_clock_channel)
+
+        if external_pixel_clock_channel:
+            self._external_pixel_clock_channel = validate_ni_channel(external_pixel_clock_channel)
+        else:
+            self._external_pixel_clock_channel = None # the analog out sample clock will be used instead
+
+        self._line_clock_channel = validate_ni_channel(line_clock_channel)
+
+        self._slow_scanner: SlowGalvoScannerViaNI = None
+
+    def start(self, 
+              pixel_frequency: units.Frequency, 
+              pixels_per_period: int, # e.g. pixels per line
+              periods_per_write: int, # e.g. lines per frame
+              adjustable = False # allows changing amplitude & offset mid-acquisition, but may be taxing for very high frame rates
+              ):
+        self._active = True
+
+        try:
+            # Validate pixel frequency
+            if not isinstance(pixel_frequency, units.Frequency):
+                raise ValueError("Pixel frequency must be set with Frequency object")
+            
+            device = get_device(self._analog_control_channel.split('/')[0])
+            if pixel_frequency > get_max_ao_rate(device):
+                raise ValueError("Pixel frequency higher than DAQ card supports")
+            self._pixel_frequency = pixel_frequency
+            
+            # Validate pixels per period
+            if (not isinstance(pixels_per_period, int)) or (pixels_per_period < 1):
+                raise ValueError("Pixels per period must be a positive integer")
+            self._pixels_per_period = pixels_per_period
+
+            # Validate periods per write
+            if (not isinstance(periods_per_write, int)) or (periods_per_write < 1):
+                raise ValueError("Periods per write must be a positive integer")
+            self._periods_per_write = periods_per_write
+
+            # Set up the tasks
+            self._ao_task = nidaqmx.Task("Fast (and possibly slow) galvo waveform(s)") # for analog galvo command waveforms
+            self._ao_task.ao_channels.add_ao_voltage_chan(
+                physical_channel=self._analog_control_channel
+            )
+
+            self._do_task = nidaqmx.Task("Line (and possibly frame) clocks(s)") # for digital clocks
+            self._do_task.do_channels.add_do_chan(
+                lines=self._line_clock_channel,
+                line_grouping=LineGrouping.CHAN_PER_LINE
+            )
+
+            # If there is a slow scanner, then add its analog channel and frame clock line
+            if self._slow_scanner:
+                self._ao_task.ao_channels.add_ao_voltage_chan(
+                    physical_channel=self._slow_scanner._analog_control_channel
+                )
+                self._do_task.do_channels.add_do_chan(
+                    lines=self._slow_scanner._frame_clock_channel,
+                    line_grouping=LineGrouping.CHAN_PER_LINE
+                )
+            
+            # Set timing
+            self._ao_task.timing.cfg_samp_clk_timing(
+                rate=pixel_frequency,
+                source=self._external_pixel_clock_channel, # if None, will use internal AO clock engine
+                sample_mode=AcquisitionType.CONTINUOUS,
+                samps_per_chan=self._periods_per_write * self._pixels_per_period 
+            )
+            if adjustable:
+                # Requires constantly supplying new waveform data, no regeneration
+                self._ao_task.out_stream.regen_mode = \
+                    RegenerationMode.DONT_ALLOW_REGENERATION
+
+            self._do_task.timing.cfg_samp_clk_timing(
+                rate=pixel_frequency,
+                source=self._external_pixel_clock_channel, # if None, will use internal AO clock engine
+                sample_mode=AcquisitionType.CONTINUOUS,
+                samps_per_chan=self._periods_per_write * self._pixels_per_period 
+            )
+            self._do_task.triggers.start_trigger.cfg_dig_edge_start_trig(
+                trigger_source="/Dev1/ao/StartTrigger"
+            )
+            
+            # Set up the waveform writer worker
+            self._writer = GalvoWaveformWriter(
+                fast_scanner=self, 
+                slow_scanner=self._slow_scanner
+            ) 
+            if adjustable:
+                self._writer.start()
+
+            # Write clocks
+            line_clock = np.tile(
+                self.generate_clock(self._pixel_frequency),
+                reps=self._periods_per_write
+            )
+            if self._slow_scanner:
+                frame_clock = self._slow_scanner.generate_clock(self._pixel_frequency)
+                clocks = np.vstack((line_clock, frame_clock))
+            else:
+                clocks = np.vstack((line_clock,))
+            self._do_task.write(clocks)
+
+            # Export the AO timebase as 'pixel clock'
+            self._ao_task.export_signals.samp_clk_output_term = self._pixel_clock_channel
+
+            self._do_task.start() # DO uses AO's start trigger
+            self._ao_task.start()
+
+        except Exception:
+            self._active = False # actually not active
+            raise # re-raise the ValueError so it propagates
+        
+    def pair_slow_galvo(self, slow_scanner: 'SlowGalvoScannerViaNI'):
+        if isinstance(slow_scanner, SlowGalvoScannerViaNI):
+            self._slow_scanner = slow_scanner
+        else:
+            raise ValueError("Must pass instance of SlowGalvoScannerViaNI")
+
+    def stop(self):
+        if self._writer.is_alive():
+            self._writer.stop()
+            self._writer.join() # Wait until done
+
+        self._do_task.stop()
+        self._ao_task.stop()
+        
+        self._do_task.close()
+        self._ao_task.close()
+
+        self._active = False
+        
+
+class SlowGalvoScannerViaNI(GalvoScannerViaNI, SlowRasterScanner):
+    def __init__(self,
+                 fast_scanner: FastRasterScanner, 
+                 external_line_clock_channel: str = None, # to sync to external line clock (e.g. a resonant scanner)
+                 frame_clock_channel: str = None, 
+                 ao_sample_rate: str = "200 kS/s", # ignored if using galvo-galvo config
+                 **kwargs):
+        
+        super().__init__(**kwargs) # analog control channel and voltage limits
+        
+        if isinstance(fast_scanner, FastGalvoScannerViaNI):
+            self._external_line_clock_channel = None
+            self._ao_sample_rate = None # for Galvo-Galvo scanning, AO rate = pixel rate
+            self._fast_scanner = fast_scanner
+            # pass itself as reference to the fast scanner--fast scanner will know to manage AO/DO tasks
+            self._fast_scanner.pair_slow_galvo(self)
+        
+        elif isinstance(fast_scanner, (ResonantScannerViaNI, PolygonScannerViaNI)):
+            self._external_line_clock_channel = validate_ni_channel(external_line_clock_channel)
+
+            ao_sample_rate = units.SampleRate(ao_sample_rate)
+            device = get_device(self._analog_control_channel.split('/')[0])
+            low_sr = get_min_ao_rate(device)
+            high_sr = get_max_ao_rate(device)
+            if not low_sr < ao_sample_rate < high_sr:
+                raise ValueError(f"AO sample rate outside required bounds: "
+                                 f"low: {low_sr}, high {high_sr}, got {ao_sample_rate}")
+            self._ao_sample_rate = ao_sample_rate
+
+            self._fast_scanner = fast_scanner
+
+        else:
+            raise ValueError("Unsupported fast scanner type for SlowGalvoScannerViaNI")
+        
+        self._frame_clock_channel = validate_ni_channel(frame_clock_channel)
+        
+    def start(self,
+              periods_per_frame: int = None,
+              adjustable = False): # allows changing amplitude & offset mid-acquisition, but may be taxing for very high frame rates
+        
+        self._active = True
+
+        try:
+            if self._external_line_clock_channel:
+                if not isinstance(periods_per_frame, int) or periods_per_frame < 1:
+                    raise ValueError("Periods per frame must be a positive integer")
+
+                self._fclock_task = nidaqmx.Task("Frame clock")
+
+                high_ticks = round(self.duty_cycle * periods_per_frame)
+                fclk_ch = self._fclock_task.co_channels.add_co_pulse_chan_ticks(
+                    counter=CounterRegistry.allocate_counter(),
+                    source_terminal=self._external_line_clock_channel,
+                    low_ticks=periods_per_frame - high_ticks, 
+                    high_ticks=high_ticks
+                )
+
+                fclk_ch.co_pulse_term = self._frame_clock_channel
+
+                self._fclock_task.timing.cfg_implicit_timing(
+                    sample_mode=AcquisitionType.CONTINUOUS,
+                    samps_per_chan=periods_per_frame
+                )
+
+                self._ao_task = nidaqmx.Task("Slow galvo waveform")
+
+                self._ao_task.ao_channels.add_ao_voltage_chan(
+                    physical_channel=self._analog_control_channel
+                )
+                
+                self._ao_task.timing.cfg_samp_clk_timing(
+                    rate=self._ao_sample_rate,
+                    sample_mode=AcquisitionType.FINITE,
+                    samps_per_chan=self.generate_waveform(self._ao_sample_rate).shape[0]
+                )
+
+                self._ao_task.triggers.start_trigger.cfg_dig_edge_start_trig(
+                    trigger_source=self._frame_clock_channel
+                )
+                self._ao_task.triggers.start_trigger.retriggerable = True
+
+                if adjustable:
+                    # To adjust amplitude and offset mid-acquisition
+                    self._ao_task.out_stream.regen_mode = \
+                        RegenerationMode.DONT_ALLOW_REGENERATION
+                    
+                # Set up the waveform writer worker
+                self._writer = GalvoWaveformWriter(
+                    slow_scanner=self,
+                    rearm_time=units.Time(2 / self.frequency) # Use equivalent of 2 periods of time as buffer
+                ) 
+                if adjustable:
+                    self._writer.start()
+
+                self._ao_task.start()
+                self._fclock_task.start()
+                
+        except:
+            self._active = False
+            raise
+
+    def stop(self):
+        self._active = False
+
+        if self._external_line_clock_channel:
+            self._fclock_task.stop()
+            CounterRegistry.free_counter(self._fclock_task.channel_names[0])
+            self._fclock_task.close()
+
+            self._ao_task.stop()
+            self._ao_task.close()
+
+
+
+
+if __name__ == "__main__":
+    import time
+    
+    pclk_frequency = units.Frequency('200 kHz')
+    pix_per_line = 500
+    lines_per_frame = 500
+    ampl = units.Angle("10 deg")
+
+    fast_scanner = FastGalvoScannerViaNI(
+        axis="x",
+        analog_control_channel="Dev1/ao0",
+        angle_limits={"min": "-20.0 deg", "max": "20.0 deg"},
+        analog_control_range={"min": "-10 V", "max": "10 V"},
+        pixel_clock_channel="/Dev1/PFI13",
+        line_clock_channel="Dev1/port0/line0",
+        #external_pixel_clock_channel="/Dev1/PFI11"
+    )
+
+    slow_scanner = SlowGalvoScannerViaNI(
+        axis="y",
+        analog_control_channel="Dev1/ao1",
+        angle_limits={"min": "-20.0 deg", "max": "20.0 deg"},
+        analog_control_range={"min": "-10 V", "max": "10 V"},
+        fast_scanner=fast_scanner,
+        frame_clock_channel="Dev1/port0/line1",
+    )
+
+    fast_scanner.frequency = pclk_frequency / pix_per_line
+    fast_scanner.amplitude = ampl
+    fast_scanner.waveform = "asymmetric triangle"
+    fast_scanner.duty_cycle = 0.8
+
+    slow_scanner.frequency = pclk_frequency / pix_per_line / lines_per_frame
+    slow_scanner.amplitude = ampl
+    slow_scanner.waveform = "asymmetric triangle"
+    slow_scanner.duty_cycle = 0.9
+
+    slow_scanner.start() # This doesn't actually do anything
+    fast_scanner.start(
+        pixel_frequency=pclk_frequency,
+        pixels_per_period=pix_per_line,
+        periods_per_write=lines_per_frame,
+        adjustable=True
+    )
+
+    time.sleep(5)
+    fast_scanner.amplitude = 1*ampl
+    fast_scanner.offset = -0.5*ampl
+    slow_scanner.amplitude = 2*ampl
+    time.sleep(5)
+
+
+    fast_scanner.stop()
+

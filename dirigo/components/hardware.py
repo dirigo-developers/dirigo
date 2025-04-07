@@ -61,7 +61,8 @@ class Hardware:
 
         self.slow_raster_scanner: SlowRasterScanner = self._try_instantiate(
             group="dirigo_scanners",
-            config=default_config.slow_raster_scanner
+            config=default_config.slow_raster_scanner,
+            extra_args={"fast_scanner": self.fast_raster_scanner}
         )
 
         self.frame_grabber: FrameGrabber = self._try_instantiate(
@@ -100,8 +101,23 @@ class Hardware:
         raise ValueError(f"No {group} plugin found for: {config['type']}")
     
     @property
-    def nchannels(self) -> int:
-        """Returns the number channels present on the primary data acquisitoin 
+    def nchannels_enabled(self) -> int:
+        """
+        Returns the number channels currently enabled on the primary data 
+        acquisition device.
+        """
+        # TODO is this a good strategy? Are other devices multichannel?
+        if hasattr(self, 'digitizer'):
+            return sum([channel.enabled for channel in self.digitizer.channels])
+        elif hasattr(self, 'camera'):
+            return 1 # monochrome only for now, but RGB cameras should be 3-channel
+        else:
+            return 0 # or raise error?
+        
+    @property
+    def nchannels_present(self) -> int:
+        """
+        Returns the number channels present on the primary data acquisition 
         device.
         """
         # TODO is this a good strategy? Are other devices multichannel?

@@ -74,14 +74,14 @@ class UnitQuantity(float):
         Raises:
             ValueError: If the input string is not in the expected format.
         """
-        #pattern = r"^\s*([-+]?\d+(\.\d+)?)\s*(\w+)\s*$"
-        pattern = r"^\s*([-+]?\d+(\.\d+)?)\s*([\w/]+)\s*$"
+        #pattern = r"^\s*([-+]?\d+(\.\d+)?)\s*([\w/]+)\s*$"
+        pattern = r"^\s*([-+]?(?:\d+(?:\.\d*)?|\.\d+))\s*([\w/]+)\s*$" # 100% from ChatGPT
         match = re.match(pattern, quantity)
 
         if not match:
             raise ValueError(f"Invalid format for value with unit: '{quantity}'. Expected format: '<value> <unit>'.")
 
-        value_str, _, unit = match.groups()
+        value_str, unit = match.groups()
         return float(value_str), unit
     
     def _get_optimal_unit(self):
@@ -175,13 +175,31 @@ class Voltage(UnitQuantity):
     """
     Represents a voltage value with units (e.g., V, mV, kV, etc.).
     """
-    DIMENSIONAL_QUANTITY = ('LLM', 'TTTI') # T^-3 L^2 M I^-1
+    DIMENSIONAL_QUANTITY = ('MLL', 'TTTI') # M L^2  T^-3 I^-1
     ALLOWED_UNITS_AND_MULTIPLIERS = {
         "V": 1,        # base unit: volts
         "mV": 1e-3,    # millivolts to volts
         "μV": 1e-6,    # microvolts to volts
+        "uV": 1e-6,    # alias
         "nV": 1e-9,    # nanovolts to volts
         "kV": 1e3,     # kilovolts to volts
+    }
+
+
+class Resistance(UnitQuantity):
+    """
+    Represents a resistance value with units (e.g., Ω, kΩ, MΩ, etc.).
+    """
+    DIMENSIONAL_QUANTITY = ('MLL', 'TTTII') # M L^2  T^-3 I^-2
+    ALLOWED_UNITS_AND_MULTIPLIERS = {
+        "Ω": 1,        # base unit: ohms
+        "ohm": 1,      # alias
+        "kΩ": 1e3,     # kiloohms to ohms
+        "kohm": 1e3,   # alias
+        "MΩ": 1e6,     # megaohms to ohms
+        "Mohm": 1e6,   # alias
+        "GΩ": 1e9,     # gigaohms to ohms
+        "Gohm": 1e9    # alias
     }
 
 
@@ -199,7 +217,7 @@ class Angle(UnitQuantity):
 
 class Frequency(UnitQuantity):
     """
-    Represents a frequency value with units (e.g. Hz, kHz, MHz, GHz, or rpm).
+    Represents a frequency value with units (e.g. Hz, kHz, MHz, or GHz).
     """
     DIMENSIONAL_QUANTITY = ('1', 'T')
     ALLOWED_UNITS_AND_MULTIPLIERS = {
@@ -207,7 +225,7 @@ class Frequency(UnitQuantity):
         "kHz": 1e3,     # kilohertz to hertz
         "MHz": 1e6,     # megahertz to hertz
         "GHz": 1e9,     # gigahertz to hertz
-        "rpm": 1/60     # rotations per minute to hertz
+        #"rpm": 1/60     # rotations per minute to hertz
     }
 
 
@@ -236,6 +254,7 @@ class Time(UnitQuantity):
         "s": 1,         # base unit: seconds
         "ms": 1e-3,     # milliseconds to seconds
         "μs": 1e-6,     # microseconds to seconds
+        "us": 1e-6,     # alias
         "ns": 1e-9,     # nanoseconds to seconds
         "min": 60.0,    # minutes to seconds
         "hr": 3600.0,   # hours to seconds
@@ -253,6 +272,7 @@ class Position(UnitQuantity):
         "cm": 1e-2,     # centimeters to meters
         "mm": 1e-3,     # millimeters to meters
         "μm": 1e-6,     # micrometers to meters
+        "um": 1e-6,     # alias
         "nm": 1e-9,     # nanometers to meters
         "km": 1e3       # kilometers to meters
     }
@@ -268,6 +288,7 @@ class Velocity(UnitQuantity):
         "cm/s": 1e-2,   # centimeters per second to meters per second
         "mm/s": 1e-3,   # millimeters per second to meters per second
         "μm/s": 1e-6,   # micrometers per second to meters per second
+        "um/s": 1e-6    # alias
     }
 
 
@@ -291,6 +312,7 @@ class Acceleration(UnitQuantity):
         "m/s^2": 1,     # base unit: meters per second squared
         "mm/s^2": 1e-3, # millimeters per second squared to meters per second squared
         "μm/s^2": 1e-6, # micrometers per second squared to meters per second squared
+        "um/s^2": 1e-6  # alias
     }
 
 
@@ -316,20 +338,31 @@ class RangeWithUnits:
     """
     UNIT_QUANTITY_CLASS = UnitQuantity  # Define the UnitQuantity class to use in subclasses
 
-    def __init__(self, min: str | float, max: str | float):
+    def __init__(self, min: str | float, max: str | float | None = None):
         """
-        Initialize the range with strings specifying values and units.
+        Initialize the range.
 
         Args:
-            min (str or float): Minimum value with unit (e.g., "100 mV") or float value in base units (e.g. 0.1)
-            max (str or float): Maximum value with unit or float (same as min).
+            min_val (str | float): Could be one of:
+                - A float or a string "X unit"
+                - A single string in "±Xunit" form, e.g. "±5V"
+            max_val (str | float | None): A float or string in "X unit" form, or None.
 
         Raises:
-            ValueError: If the input format is invalid or the range is invalid (min >= max).
+            ValueError: If the input format is invalid or the range is invalid
+                       (min >= max).
         """
-        # Parse min and max values using the UnitQuantity class
-        self._min = self.UNIT_QUANTITY_CLASS(min)
-        self._max = self.UNIT_QUANTITY_CLASS(max)
+        # Case 1: The user gave us a single string that starts with ±
+        if max is None and isinstance(min, str) and min.strip().startswith("±"):
+            # Attempt to parse something like "±5V" or "± 5 V"
+            min_str, max_str = self._parse_plus_minus_string(min)
+            self._min = self.UNIT_QUANTITY_CLASS(min_str)
+            self._max = self.UNIT_QUANTITY_CLASS(max_str)
+
+        # Case 2: The user gave the original (min, max) form
+        else:
+            self._min = self.UNIT_QUANTITY_CLASS(min)
+            self._max = self.UNIT_QUANTITY_CLASS(max)
 
         # Validate that min < max in the base unit
         if float(self._min) >= float(self._max):
@@ -337,6 +370,29 @@ class RangeWithUnits:
 
         # Set the base unit as the first key from the allowed units and multipliers
         self.unit = next(iter(self.UNIT_QUANTITY_CLASS.ALLOWED_UNITS_AND_MULTIPLIERS))
+
+    def _parse_plus_minus_string(self, pm_str: str) -> tuple[str, str]:
+        """
+        Given a string like '±5V' or '± 5 V',
+        return ('-5 V', '+5 V') for usage in UnitQuantity.
+
+        Raises:
+            ValueError if it cannot parse the string properly.
+        """
+        # Example pattern to match ±, then optional spaces, a number, optional decimal,
+        # optional spaces, then a unit (e.g. 'mV', 'V', etc.)
+        pattern = r"^[±]\s*([+-]?\d+(?:\.\d+)?)\s*([a-zA-Z]+)\s*$"
+        match = re.match(pattern, pm_str.strip())
+        if not match:
+            raise ValueError(f"Unable to parse ± string '{pm_str}'.")
+
+        numeric_part = match.group(1)  # e.g. '5' or '5.0'
+        unit_part = match.group(2)     # e.g. 'V' or 'mV'
+
+        # Construct the negative and positive strings for UnitQuantity
+        min_str = f"-{numeric_part} {unit_part}"
+        max_str = f"{numeric_part} {unit_part}"
+        return (min_str, max_str)
 
     @property
     def min(self) -> UnitQuantity:
@@ -379,6 +435,14 @@ class RangeWithUnits:
 
     def __repr__(self) -> str:
         return f"{type(self).__name__}({self._min}, {self._max})"
+    
+    def __eq__(self, other):
+        if not isinstance(other, self.__class__):
+            return NotImplemented
+        return self.min == other.min and self.max == other.max
+    
+    def __hash__(self):
+        return hash((self.min, self.max))
 
 
 class AngleRange(RangeWithUnits):
@@ -417,6 +481,13 @@ class FrequencyRange(RangeWithUnits):
     Represents a position range with units (e.g. Hz, kHz, MHz, GHz)
     """
     UNIT_QUANTITY_CLASS = Frequency
+
+
+class SampleRateRange(RangeWithUnits):
+    """
+    Represents a position range with units (e.g. S/s, kS/s, MS/s, GS/s)
+    """
+    UNIT_QUANTITY_CLASS = SampleRate
 
 
 @dataclass
