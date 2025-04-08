@@ -5,7 +5,7 @@ import nidaqmx
 import nidaqmx.system
 from nidaqmx.stream_readers import AnalogUnscaledReader, CounterReader
 from nidaqmx.constants import (
-    ProductCategory, Coupling, Edge, AcquisitionType
+    ProductCategory, Coupling, Edge, AcquisitionType, TerminalConfiguration
 )
 
 from dirigo import units
@@ -56,6 +56,7 @@ class NIAnalogChannel(digitizer.Channel):
         self._coupling: Coupling = None 
         self._impedance: float = None  # Not adjustable on most boards
         self._range: tuple[float, float] = None # (min, max)
+        self._inverted = False
         self._enabled = False
 
     @property
@@ -132,6 +133,16 @@ class NIAnalogChannel(digitizer.Channel):
         return {
             (units.VoltageRange(min=l,max=h)) for l,h in zip(r[0::2],r[1::2])
         }
+    
+    @property
+    def inverted(self) -> bool:
+        return self._inverted
+    
+    @inverted.setter
+    def inverted(self, invert: bool):
+        if not isinstance(invert, bool):
+            raise ValueError("Inverted must be set with a boolean")
+        self._inverted = invert
 
     @property
     def enabled(self) -> bool:
@@ -202,6 +213,14 @@ class NICounterChannel(digitizer.Channel):
     @cached_property
     def range_options(self) -> set[units.VoltageRange]:
         return None
+
+    @property
+    def inverted(self) -> bool:
+        return False # can't invert counting
+    
+    @inverted.setter
+    def inverted(self, invert: bool):
+        pass
 
     @property
     def enabled(self) -> bool:
@@ -533,11 +552,12 @@ class NIAcquire(digitizer.Acquire):
                 if not channel.enabled:
                     continue
                 
-                self._task.ai_channels.add_ai_voltage_chan(
+                ai_channel = self._task.ai_channels.add_ai_voltage_chan(
                     physical_channel=channel.channel_name,
                     min_val=channel.range.min,
                     max_val=channel.range.max,
                 ) 
+                ai_channel.ai_term_cfg = TerminalConfiguration.RSE
 
             # Configure trigger
             edge = Edge.RISING if self._trigger.slope == "rising" else Edge.FALLING
@@ -594,6 +614,11 @@ class NIAcquire(digitizer.Acquire):
                 dtype=np.uint32
             )
 
+        self._inverted_vector = np.array(
+            [-2*channel.inverted+1 for channel in self._channels if channel.enabled],
+            dtype=np.int8
+        )
+
         # Start the task(s)
         if self._mode == "analog":
             self._task.start()
@@ -629,6 +654,13 @@ class NIAcquire(digitizer.Acquire):
                 data=data,
                 number_of_samples_per_channel=nsamples
             )
+            # Returned data is actually 2's compliment int16, add 2**15 to map to uint16 range
+            data += 2**15 
+
+            # Invert channels if necessary
+            for i, invert in enumerate(self._inverted_channels):
+                if invert:
+                    data[i,:] = ~data[i,:] 
 
             # The buffer dimensions need to be reordered for further processing
             data.shape = (self.n_channels_enabled, self.records_per_buffer, self.record_length)
@@ -684,6 +716,10 @@ class NIAcquire(digitizer.Acquire):
             return "analog"
         else:
             return "edge counting"
+        
+    @cached_property
+    def _inverted_channels(self) -> list[bool]:
+        return [chan.inverted for chan in self._channels if chan.enabled]
 
 class NIAuxillaryIO(digitizer.AuxillaryIO):
     def __init__(self, device: nidaqmx.system.Device):

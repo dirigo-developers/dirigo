@@ -116,16 +116,16 @@ if __name__ == "__main__":
     acquisition = diri.acquisition_factory('frame')
     processor = diri.processor_factory(acquisition)
     display = diri.display_factory(processor)
-    #logging = diri.logger_factory(processor)
+    logging = diri.logger_factory(processor)
 
     # Connect threads
     acquisition.add_subscriber(processor)
     processor.add_subscriber(display)
-    #processor.add_subscriber(logging)
+    processor.add_subscriber(logging)
 
     processor.start()
     display.start()
-    #logging.start()
+    logging.start()
     acquisition.start()
 
     acquisition.join(timeout=100.0)

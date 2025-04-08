@@ -110,6 +110,17 @@ class Channel(ABC):
     def range_options(self) -> set[str]:
         """Set of available voltage ranges."""
         pass
+    
+    @property
+    @abstractmethod
+    def inverted(self) -> bool:
+        """Indicates whether the channel values should be inverted."""
+        pass
+
+    @inverted.setter
+    @abstractmethod
+    def inverted(self, invert: bool):
+        pass
 
     @property
     @abstractmethod
@@ -549,6 +560,8 @@ class Digitizer(ABC):
                 channel.impedance = profile["channels"]["impedance"][i]
             if "range" in profile["channels"]:
                 channel.range = units.VoltageRange(profile["channels"]["range"][i])
+            if "inverted" in profile["channels"]:
+                channel.inverted = profile["channels"]["inverted"][i]
 
         if "external_range" in profile["trigger"]:
             self.trigger.external_range = profile["trigger"]["external_range"]
