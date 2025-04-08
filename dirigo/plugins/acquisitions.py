@@ -62,10 +62,11 @@ class LineAcquisitionSpec(AcquisitionSpec):
 
     # Convenience properties
     @property
-    def scan_width(self) -> units.Position:
+    def extended_scan_width(self) -> units.Position:
         """
-        Returns the scan width required to reach the line width with the given
-        the fill fraction (scan width > line width).
+        Returns the desired line width divided by the fill fraction. For sinusoidal
+        scanpaths this is the full scan amplitude required to cover the line
+        width given a certain fill fraction.
         """
         return units.Position(self.line_width / self.fill_fraction)
     
@@ -112,14 +113,13 @@ class LineAcquisition(Acquisition):
                 self.spec.pixel_rate / round(self.spec.pixels_per_line / self.spec.fill_fraction) # TODO, pixel periods per line OK?
             self.hw.fast_raster_scanner.waveform = "asymmetric triangle"
             self.hw.fast_raster_scanner.duty_cycle = self.spec.fill_fraction
-
-        self.configure_digitizer(profile_name=self.spec.digitizer_profile)
         
-        # Setup scanner
-        self.hw.fast_raster_scanner.amplitude = \
-            self.hw.laser_scanning_optics.object_position_to_scan_angle(self.spec.scan_width)
-        # for res scanner: frequency is set (fixed), waveform is set (fixed), duty cycle is set (fixed)
-        # for other scanners--TBD
+        else:
+            self.hw.fast_raster_scanner.amplitude = \
+                self.hw.laser_scanning_optics.object_position_to_scan_angle(self.spec.extended_scan_width)
+            # for res scanner: frequency fixed, waveform fixed, duty cycle fixed
+        
+        self.configure_digitizer(profile_name=self.spec.digitizer_profile)
 
     def configure_digitizer(self, profile_name: str):
         """
@@ -323,44 +323,3 @@ class FrameAcquisition(LineAcquisition):
         self.hw.slow_raster_scanner.stop()
         super().cleanup()
 
-
-class GalvoGalvoFrameAcquisition(Acquisition):
-    REQUIRED_RESOURCES = [Digitizer, FastRasterScanner, SlowRasterScanner] # TODO or FastGalvoRasterScanner
-    SPEC_LOCATION = Path(user_config_dir("Dirigo")) / "acquisition/frame" # TODO, should spec change?
-    SPEC_OBJECT = FrameAcquisitionSpec
-
-    def __init__(self, hw, spec: FrameAcquisitionSpec):
-        super().__init__(hw, spec)
-        self.spec: FrameAcquisitionSpec
-
-        """
-        Game plan:
-        2 AOs outputting analog waveform for XY galvo-galvo raster scan
-
-        Issue: all AOs on board share the same sample clock, so the slow axis
-        require a very large number of samples per period (per frame), larger
-        than the buffer. Therefore we can't simply use regeneration
-        # 
-        """
-
-        # Set up a pixel clock
-
-        # Set up slow scanner
-        self.hw.slow_raster_scanner.amplitude = \
-            self.hw.laser_scanning_optics.object_position_to_scan_angle(spec.frame_height)
-        self.hw.slow_raster_scanner.frequency = (
-            self.hw.fast_raster_scanner.frequency / spec.records_per_buffer
-        )
-        self.hw.slow_raster_scanner.waveform = 'asymmetric triangle'
-        self.hw.slow_raster_scanner.duty_cycle = (
-            1 - spec.flyback_periods / spec.records_per_buffer
-        )
-
-        self.hw.slow_raster_scanner.prepare_frame_clock(self.hw.fast_raster_scanner, spec)
-
-
-    def run(self):
-        pass
-
-    def cleanup(self):
-        pass
