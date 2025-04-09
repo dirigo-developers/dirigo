@@ -258,7 +258,6 @@ class GalvoScannerViaNI(GalvoScanner):
     
     def generate_waveform(self, sample_rate: units.SampleRate): # TODO, njit this? parameters: waveform, amplitude, duty_cycle, waveform_length, samples_per_period
         """Returns are waveform vector in units of radian."""
-        amp_rad = self.amplitude / 2 # divide pk-pk amplitude by 2 to get amplitude (converts to radians)
         offset = self.offset
         # TODO, adjustable phase?
 
@@ -269,18 +268,30 @@ class GalvoScannerViaNI(GalvoScanner):
         if self.waveform == 'sinusoid':
             t = np.linspace(start=0, stop=2*np.pi, num=waveform_length)
 
-            waveform = (offset + amp_rad * np.cos(t)) * self._volts_per_radian
+            waveform = (self.amplitude/2) * np.cos(t) + offset # amplitude is pk-pk hence the 1/2
         
         elif self.waveform in {'triangle', 'asymmetric triangle', 'sawtooth'}:
-            num_up = int(exact_samples_per_period * self.duty_cycle) + 1
-            num_down = waveform_length - num_up
-            parts = (
-                np.linspace(start=-amp_rad + offset, stop=amp_rad + offset, num=num_up),
-                np.linspace(start=amp_rad + offset, stop=-amp_rad + offset, num=num_down)
-            )
-            waveform = np.concatenate(parts, axis=0) * self._volts_per_radian
+            # TODO clean this up
+            num_up = round(exact_samples_per_period * self.duty_cycle) 
+            #num_down = waveform_length - num_up
+            A = self.amplitude
+            F = num_up / waveform_length # fill fraction (aka duty cycle, %scan with usable data)
+            F2 = (F + 1) / 2
+            k = float(A) / (F*(F2**2 - F)) # acceleration constant
 
-        return waveform
+            # minus 0.5/waveform_length helps with some round-off issues when waveform length becomes large
+            t0 = np.arange(0, F - 0.5/waveform_length, 1/waveform_length) # linear part
+            t1 = np.arange(F, F2 - 0.5/waveform_length, 1/waveform_length) # flyback (negative acceleration)
+            t2 = np.arange(t1[-1] + 1/waveform_length, 1 - 0.5/waveform_length, 1/waveform_length) # flyback (positive acceleration)
+
+            parts = (
+                A/F * t0,
+                -k*t1**2/2 - k*F**2/2 + k*F*t1 + A/F*t1,
+                k*t2**2/2 + A*t2/F - k*t2 + k/2 - A/F
+            )
+            waveform = np.concatenate(parts, axis=0) - A/2 # minus A/2 to center around 0 degrees (rather than 0 to +A)
+
+        return waveform * self._volts_per_radian
     
     def generate_clock(self, sample_rate: units.SampleRate): # TODO, njit this? parameters: waveform, amplitude, duty_cycle, waveform_length, samples_per_period
         """Returns a digital signal representing the line or frame clock."""
