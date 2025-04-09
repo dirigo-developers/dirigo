@@ -16,6 +16,7 @@ TWO_PI = 2 * math.pi
 
 class LineAcquisitionSpec(AcquisitionSpec): 
     """Specification for a point-scanned line acquisition"""
+    MAX_PIXEL_SIZE_ADJUSTMENT = 0.01
     def __init__(
             self,
             line_width: str,
@@ -34,7 +35,16 @@ class LineAcquisitionSpec(AcquisitionSpec):
         if pixel_rate:
             self.pixel_rate = units.Frequency(pixel_rate)
         self.line_width = units.Position(line_width)
-        self.pixel_size = units.Position(pixel_size)
+        pixel_size = units.Position(pixel_size)
+
+        # Adjust pixel size such that line_width/pixel_size is an integer
+        self.pixel_size = self.line_width / round(self.line_width / pixel_size)
+        if abs(self.pixel_size - pixel_size) / pixel_size > self.MAX_PIXEL_SIZE_ADJUSTMENT:
+            raise ValueError(
+                f"To maintain integer number of pixels in line, required adjusting " \
+                f"the pixel size by more than pre-specified limit: {100*self.MAX_PIXEL_SIZE_ADJUSTMENT}%"
+            )
+
         if not (0 < fill_fraction <= 1):
             raise ValueError(f"Invalid fill fraction, got {fill_fraction}. "
                              "Must be between 0.0 and 1.0 (upper bound incl.)")
@@ -107,7 +117,7 @@ class LineAcquisition(Acquisition):
 
         # If using galvo scanner, then set it up based on acquisition spec parameters
         if isinstance(self.hw.fast_raster_scanner, GalvoScanner):
-            self.hw.slow_raster_scanner.amplitude = \
+            self.hw.fast_raster_scanner.amplitude = \
                 self.hw.laser_scanning_optics.object_position_to_scan_angle(spec.line_width)
             self.hw.fast_raster_scanner.frequency = \
                 self.spec.pixel_rate / round(self.spec.pixels_per_line / self.spec.fill_fraction) # TODO, pixel periods per line OK?
@@ -255,16 +265,24 @@ class LineAcquisition(Acquisition):
 
 
 class FrameAcquisitionSpec(LineAcquisitionSpec):
+    MAX_PIXEL_HEIGHT_ADJUSTMENT = 0.01
     def __init__(self, frame_height: str, flyback_periods: int, pixel_height: str = None, **kwargs):
         super().__init__(**kwargs)
 
         self.frame_height = units.Position(frame_height)
 
         if pixel_height is not None:
-            self.pixel_height = units.Position(pixel_height)
+            pixel_height = units.Position(pixel_height)
         else:
             # If no pixel height is specified, assume square pixel shape
-            self.pixel_height = self.pixel_size
+            pixel_height = self.pixel_size
+
+        self.pixel_height = self.frame_height / round(self.frame_height / pixel_height)
+        if abs(self.pixel_height - pixel_height) / pixel_height > self.MAX_PIXEL_HEIGHT_ADJUSTMENT:
+            raise ValueError(
+                f"To maintain integer number of pixels in frame height, required adjusting " \
+                f"the pixel height by more than pre-specified limit: {100*self.MAX_PIXEL_HEIGHT_ADJUSTMENT}%"
+            )
 
         self.flyback_periods = flyback_periods
 

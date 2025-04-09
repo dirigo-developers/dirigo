@@ -476,6 +476,13 @@ class PositionRange(RangeWithUnits):
     UNIT_QUANTITY_CLASS = Position
 
 
+class TimeRange(RangeWithUnits):
+    """
+    Represents a time/duration range with units (e.g. s, ms, μs, ns, min, hr, days)
+    """
+    UNIT_QUANTITY_CLASS = Time
+    
+
 class FrequencyRange(RangeWithUnits):
     """
     Represents a position range with units (e.g. Hz, kHz, MHz, GHz)

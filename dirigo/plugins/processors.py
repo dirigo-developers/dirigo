@@ -147,7 +147,9 @@ class RasterFrameProcessor(Processor):
 
         # Trigger timing
         self._fixed_trigger_delay = self._acq.hw.digitizer.acquire.trigger_delay_samples
-        self._trigger_phase = 0 # This value is adjustable
+        self._trigger_phase = 0 # This value can be adjusted
+        if hasattr(self._acq.hw.fast_raster_scanner, 'input_delay'):
+            self._trigger_phase = self._acq.hw.fast_raster_scanner.input_delay * self._spec.pixel_rate
         
     def run(self):
         # Calculate preliminary start indices

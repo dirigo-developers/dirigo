@@ -259,11 +259,11 @@ class PolygonScanner(RasterScanner):
         raise NotImplemented("Polygon scanners can not be parked.")
 
 
-
 class GalvoScanner(RasterScanner):
     """Abstraction for galvanometer mirror servo scanner."""
+    INPUT_DELAY_RANGE = units.TimeRange(min=0, max=units.Time('0.5 ms'))
 
-    def __init__(self, **kwargs):
+    def __init__(self, input_delay: units.Time = None, **kwargs):
         super().__init__(**kwargs)
 
         self._amplitude = units.Angle(0.0)
@@ -272,6 +272,12 @@ class GalvoScanner(RasterScanner):
         self._frequency = None
         self._waveform = None
         self._duty_cycle = None
+
+        if input_delay:
+            input_delay = units.Time(input_delay)
+            if not self.INPUT_DELAY_RANGE.within_range(input_delay):
+                raise ValueError(f"input_delay out of valid range ({self.INPUT_DELAY_RANGE})")
+            self.input_delay = input_delay
 
     @property
     def amplitude(self) -> units.Angle:

@@ -108,7 +108,7 @@ class Dirigo:
         )
     
 
-        
+# Run this as a test and to help debug
 if __name__ == "__main__":
 
     diri = Dirigo()
