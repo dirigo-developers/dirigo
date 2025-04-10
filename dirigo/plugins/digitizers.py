@@ -47,6 +47,8 @@ class NIAnalogChannel(digitizer.Channel):
         device_name: e.g. "Dev1"
         channel_name: physical channel name, e.g. "Dev1/ai0".
         """
+        super().__init__()
+
         self._device = device
         self._channel_name = validate_ni_channel(channel_name)
 
@@ -56,8 +58,6 @@ class NIAnalogChannel(digitizer.Channel):
         self._coupling: Coupling = None 
         self._impedance: float = None  # Not adjustable on most boards
         self._range: tuple[float, float] = None # (min, max)
-        self._inverted = False
-        self._enabled = False
 
     @property
     def index(self) -> int:
@@ -135,27 +135,6 @@ class NIAnalogChannel(digitizer.Channel):
         }
     
     @property
-    def inverted(self) -> bool:
-        return self._inverted
-    
-    @inverted.setter
-    def inverted(self, invert: bool):
-        if not isinstance(invert, bool):
-            raise ValueError("Inverted must be set with a boolean")
-        self._inverted = invert
-
-    @property
-    def enabled(self) -> bool:
-        return self._enabled
-
-    @enabled.setter
-    def enabled(self, state: bool):
-        if not isinstance(state, bool):
-            raise ValueError(f"enabled must be set with a boolean value, got {type(state)}")
-        
-        self._enabled = state
-
-    @property
     def channel_name(self) -> str:
         """Returns the NI physical channel name, e.g. Dev1/ai0"""
         return self._channel_name
@@ -165,13 +144,13 @@ class NICounterChannel(digitizer.Channel):
     """For edge counting (e.g. photon counting)."""
     _INDEX = 0 
     def __init__(self, device: nidaqmx.system.Device, channel_name: str):
+        super().__init__()
+
         self._device = device
         self._channel_name = validate_ni_channel(channel_name)
 
         self._index = self.__class__._INDEX
         self.__class__._INDEX += 1
-
-        self._enabled = False
 
     @property
     def index(self) -> int:
@@ -216,22 +195,13 @@ class NICounterChannel(digitizer.Channel):
 
     @property
     def inverted(self) -> bool:
+        # Specifically override the inverted getter/setter methods because 
+        # inverting the channel values do not make sense for edge counting
         return False # can't invert counting
     
     @inverted.setter
     def inverted(self, invert: bool):
         pass
-
-    @property
-    def enabled(self) -> bool:
-        return self._enabled
-
-    @enabled.setter
-    def enabled(self, state: bool):
-        if not isinstance(state, bool):
-            raise ValueError(f"enabled must be set with a boolean value, got {type(state)}")
-        
-        self._enabled = state
 
     @property
     def channel_name(self) -> str:

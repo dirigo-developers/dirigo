@@ -37,6 +37,42 @@ alazar = "dirigo_alazar:AlazarDigitizer"
 
 class Channel(ABC):
     """Abstract base class for a digitizer's input channel configuration."""
+    def __init__(self, 
+                 enabled: bool = False, 
+                 inverted: bool = False):
+        super().__init__() # Is this needed?
+
+        self.enabled = enabled
+        self.inverted = inverted
+
+    @property
+    def enabled(self) -> bool:
+        """Indicates whether the channel is enabled for acquisition."""
+        return self._enabled
+
+    @enabled.setter
+    def enabled(self, enable: bool):
+        """Enable or disable the channel."""
+        if not isinstance(enable, bool):
+            raise ValueError("`inverted` must be set with a boolean")
+        self._enabled = enable
+
+    @property
+    def inverted(self) -> bool:
+        """
+        Indicates whether the channel values should be inverted.
+        
+        Channel subclasses that don't support inverted inputs (i.e. edge 
+        counting) should override setter method."""
+        return self._inverted
+
+    @inverted.setter
+    def inverted(self, invert: bool):
+        # For edge counting (e.g. photon counting) channels, override this with
+        # empty method (with 'pass')
+        if not isinstance(invert, bool):
+            raise ValueError("`inverted` must be set with a boolean")
+        self._inverted = invert
 
     @property
     @abstractmethod
@@ -111,28 +147,9 @@ class Channel(ABC):
         """Set of available voltage ranges."""
         pass
     
-    @property
-    @abstractmethod
-    def inverted(self) -> bool:
-        """Indicates whether the channel values should be inverted."""
-        pass
+    
 
-    @inverted.setter
-    @abstractmethod
-    def inverted(self, invert: bool):
-        pass
-
-    @property
-    @abstractmethod
-    def enabled(self) -> bool:
-        """Indicates whether the channel is enabled for acquisition."""
-        pass
-
-    @enabled.setter
-    @abstractmethod
-    def enabled(self, state: bool):
-        """Enable or disable the channel."""
-        pass
+    
 
 
 class SampleClock(ABC):

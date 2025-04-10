@@ -34,6 +34,8 @@ class LineAcquisitionSpec(AcquisitionSpec):
         self.bidirectional_scanning = bidirectional_scanning 
         if pixel_rate:
             self.pixel_rate = units.Frequency(pixel_rate)
+        else:
+            self.pixel_rate = None # nonlinear scan path (ie resonant scanning)
         self.line_width = units.Position(line_width)
         pixel_size = units.Position(pixel_size)
 
@@ -189,7 +191,7 @@ class LineAcquisition(Acquisition):
         self.hw.digitizer.acquire.stop()
         self.hw.fast_raster_scanner.stop()
 
-        # Put None into queue to signal finished, stop scanning
+        # Put None into queue to signal to subscribers that we are finished
         self.publish(None)
 
     def read_positions(self):
@@ -339,5 +341,6 @@ class FrameAcquisition(LineAcquisition):
     def cleanup(self):
         """Over-ride LineAcquisition's finally method to alter the HW stop order"""
         self.hw.slow_raster_scanner.stop()
+        self.hw.slow_raster_scanner.park() # Parking should be done before 
         super().cleanup()
 

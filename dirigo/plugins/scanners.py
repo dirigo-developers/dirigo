@@ -256,13 +256,14 @@ class GalvoScannerViaNI(GalvoScanner):
         """Scaling factor between analog control voltge and optical scan angle."""
         return self._analog_control_range.range / self.angle_limits.range
     
-    def generate_waveform(self, sample_rate: units.SampleRate): # TODO, njit this? parameters: waveform, amplitude, duty_cycle, waveform_length, samples_per_period
+    def generate_waveform(self, 
+                          sample_rate: units.SampleRate,
+                          rearm_time: units.Time = units.Time(0)): # TODO, njit this? parameters: waveform, amplitude, duty_cycle, waveform_length, samples_per_period
         """Returns are waveform vector in units of radian."""
         offset = self.offset
         # TODO, adjustable phase?
 
         exact_samples_per_period = sample_rate / self.frequency
-        rearm_time = 0
         waveform_length = round(exact_samples_per_period - rearm_time * sample_rate)
 
         if self.waveform == 'sinusoid':
@@ -408,7 +409,10 @@ class GalvoWaveformWriter(threading.Thread):
                 return np.vstack((fast_waveform,))
         
         else:
-            slow_waveform = slow_scanner.generate_waveform(self._sample_rate)
+            slow_waveform = slow_scanner.generate_waveform(
+                sample_rate=self._sample_rate,
+                rearm_time=self._rearm_time # Rearm is only applicable to external line clock-synced acquisitions (e.g. resonant scanner)
+            )
             return np.vstack((slow_waveform,))
 
         
@@ -621,9 +625,14 @@ class SlowGalvoScannerViaNI(GalvoScannerViaNI, SlowRasterScanner):
         self._active = True
 
         try:
+            # If external line clock specified, the fast axis is free-running 
+            # (doesn't require explicit analog control signal, generate only the slow axis waveform)
             if self._external_line_clock_channel:
                 if not isinstance(periods_per_frame, int) or periods_per_frame < 1:
                     raise ValueError("Periods per frame must be a positive integer")
+                
+                # TODO, 2 or 1 periods of buffer?
+                rearm_time = units.Time(2 / self._fast_scanner.frequency) # Use equivalent of 1 period of time as buffer
 
                 self._fclock_task = nidaqmx.Task("Frame clock")
 
@@ -651,7 +660,7 @@ class SlowGalvoScannerViaNI(GalvoScannerViaNI, SlowRasterScanner):
                 self._ao_task.timing.cfg_samp_clk_timing(
                     rate=self._ao_sample_rate,
                     sample_mode=AcquisitionType.FINITE,
-                    samps_per_chan=self.generate_waveform(self._ao_sample_rate).shape[0]
+                    samps_per_chan=self.generate_waveform(self._ao_sample_rate, rearm_time).shape[0]
                 )
 
                 self._ao_task.triggers.start_trigger.cfg_dig_edge_start_trig(
@@ -667,7 +676,7 @@ class SlowGalvoScannerViaNI(GalvoScannerViaNI, SlowRasterScanner):
                 # Set up the waveform writer worker
                 self._writer = GalvoWaveformWriter(
                     slow_scanner=self,
-                    rearm_time=units.Time(2 / self.frequency) # Use equivalent of 2 periods of time as buffer
+                    rearm_time=rearm_time
                 ) 
                 if adjustable:
                     self._writer.start()
@@ -676,6 +685,7 @@ class SlowGalvoScannerViaNI(GalvoScannerViaNI, SlowRasterScanner):
                 self._fclock_task.start()
                 
         except:
+            # start failed, so revert the _active flag, propagate the error up with 'raise'
             self._active = False
             raise
 
