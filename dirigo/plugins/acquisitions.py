@@ -339,8 +339,23 @@ class FrameAcquisition(LineAcquisition):
         super().run() # The hard work is done by super's run method
 
     def cleanup(self):
-        """Over-ride LineAcquisition's finally method to alter the HW stop order"""
-        self.hw.slow_raster_scanner.stop()
-        self.hw.slow_raster_scanner.park() # Parking should be done before 
+        """Extends LineAcquisition's cleanup method to stop both slow axis and fast"""
         super().cleanup()
+        # LineAcquisition's cleanup (ie super().cleanup()):
+        # self.hw.digitizer.acquire.stop()
+        # self.hw.fast_raster_scanner.stop()
+
+        # # Put None into queue to signal to subscribers that we are finished
+        # self.publish(None)
+
+        self.hw.slow_raster_scanner.stop()
+
+        self.hw.slow_raster_scanner.park()
+        try:
+            self.hw.fast_raster_scanner.park()
+        except NotImplemented:
+            pass # Scanners like resonant scanners can't be parked.
+        
+        
+
 

@@ -524,13 +524,13 @@ class FastGalvoScannerViaNI(GalvoScannerViaNI, FastRasterScanner):
 
             self._do_task.timing.cfg_samp_clk_timing(
                 rate=pixel_frequency,
-                source=self._external_pixel_clock_channel, # if None, will use internal AO clock engine
+                source="/Dev1/ao/SampleClock", # if None, will use internal AO clock engine
                 sample_mode=AcquisitionType.CONTINUOUS,
                 samps_per_chan=self._periods_per_write * self._pixels_per_period 
             )
-            self._do_task.triggers.start_trigger.cfg_dig_edge_start_trig(
-                trigger_source="/Dev1/ao/StartTrigger"
-            )
+            # self._do_task.triggers.start_trigger.cfg_dig_edge_start_trig(
+            #     trigger_source="/Dev1/ao/StartTrigger"
+            # )
             
             # Set up the waveform writer worker
             self._writer = GalvoWaveformWriter(

@@ -106,6 +106,8 @@ class NIAnalogChannel(digitizer.Channel):
     def impedance_options(self) -> set[str]:
         if self._device.product_category == ProductCategory.X_SERIES_DAQ:
             return {units.Resistance("10 Gohm")}
+        
+        # TODO add impedance for S series
 
     @property
     def range(self) -> units.VoltageRange:
@@ -527,7 +529,11 @@ class NIAcquire(digitizer.Acquire):
                     min_val=channel.range.min,
                     max_val=channel.range.max,
                 ) 
-                ai_channel.ai_term_cfg = TerminalConfiguration.RSE
+                if self._device.product_category == ProductCategory.X_SERIES_DAQ:
+                    ai_channel.ai_term_cfg = TerminalConfiguration.RSE
+                elif self._device.product_category == ProductCategory.S_SERIES_DAQ:
+                    # S series only supports pseudo differential
+                    ai_channel.ai_term_cfg = TerminalConfiguration.PSEUDO_DIFF
 
             # Configure trigger
             edge = Edge.RISING if self._trigger.slope == "rising" else Edge.FALLING
@@ -549,7 +555,7 @@ class NIAcquire(digitizer.Acquire):
             # Set up stream reader
             self._reader = AnalogUnscaledReader(self._task.in_stream)
         
-        else:
+        else: # For edge counting:
             self._tasks: list[nidaqmx.Task] = []
             self._readers: list[CounterReader] = []
             for channel in self._channels:
@@ -753,38 +759,25 @@ class NIDigitizer(digitizer.Digitizer):
         # Create auxiliary IO
         self.aux_io = NIAuxillaryIO(device=self._device)
 
-    @property
+    @cached_property
     def bit_depth(self) -> int:
-        """
-        AI bit depth. For all X series cards, this is 16.
-        """
-        if self._device.product_category == ProductCategory.X_SERIES_DAQ:
-            return 16
-        else:
-            raise RuntimeError(
-                "Unsupported NI DAQ device. Only supports X-series, got "
-                + str(self._device.product_category)
-            )
+        """ Analog input bit depth. """
+        # Make dummy task to get at the .ai_resolution property
+        task = nidaqmx.Task("AI dummy")
+        channel = task.ai_channels.add_ai_voltage_chan(
+            physical_channel=self._device.ai_physical_chans.channel_names[0]
+        )
+        return int(channel.ai_resolution)
 
-    @property
+    @cached_property
     def data_range(self) -> units.ValueRange:
         """Range of the returned data."""
         if self._mode == "analog":
             # For analog mode, we use AnalogUnscaledReader.read_uint16()
-            return units.ValueRange(min=0, max=2**16 - 1)
+            return units.ValueRange(min=0, max=2**self.bit_depth - 1)
         else:
             # For edge counting
             # technically the counters support up to 32 bits, but it's unlikely
             # anyone will need this range
             return units.ValueRange(min=0, max=2**16 - 1)
     
-
-# for testing
-if __name__ == "__main__":
-    # device = get_device("Dev1")
-    # channels = [NIChannel(device, i) for i in range(5)]
-    # channels[2].range = units.VoltageRange('-1 V', '1 V')
-    # print(channels[2].range)
-
-    digitizer = NIDigitizer("Dev1", n_analog_channels=2)
-

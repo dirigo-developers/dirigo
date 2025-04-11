@@ -202,5 +202,6 @@ class Display(Worker):
         
     @property
     def data_range(self) -> ValueRange:
+        """ Returns the raw data range from the data acquisition device (digitizer or camera)"""
         return self._acquisition.data_acquisition_device.data_range
 
