@@ -9,11 +9,11 @@ from dirigo.sw_interfaces.acquisition import Acquisition, AcquisitionBuffer
 from dirigo.sw_interfaces.display import Display, ColorVector, DisplayChannel, DisplayPixelFormat
 
 
-
-@njit(
+sigs = [
     (types.uint16[:,:,:,:], types.int64, types.uint16[:,:,:]),
-    nogil=True, parallel=True, fastmath=True, cache=True
-)
+    (types.int16[:,:,:,:],  types.int64, types.int16[:,:,:] ),
+]
+@njit(sigs, nogil=True, parallel=True, fastmath=True, cache=True)
 def rolling_average_kernel(ring_buffer: np.ndarray, frame_index: int, averaged: np.ndarray) -> np.ndarray:
     Nf, Ny, Nx, Nc = ring_buffer.shape
     d = min(Nf, frame_index + 1)
@@ -31,28 +31,23 @@ def rolling_average_kernel(ring_buffer: np.ndarray, frame_index: int, averaged: 
     return averaged
 
 
-# Generate gamma correction LUT
-x = np.arange(2**16) / (2**16-1)
-gamma_lut = np.round((2**8 - 1) * x**(1/Display.GAMMA)).astype(np.uint8)
-
-
-@njit(
-    types.uint8[:,:,:](types.uint16[:,:,:], types.uint16[:,:,:]), 
-    nogil=True, parallel=True, fastmath=True, cache=True
-)
-def additive_display_kernel(data: np.ndarray, luts: np.ndarray) -> np.ndarray:
+sigs = [
+    types.uint8[:,:,:](types.int16[:,:,:],  types.uint16[:,:,:], types.uint8[:]),
+    types.uint8[:,:,:](types.uint16[:,:,:], types.uint16[:,:,:], types.uint8[:]),
+    # Not implemented yet: >8bit gamma LUT (for HDR displays)
+]
+@njit(sigs, nogil=True, parallel=True, fastmath=True, cache=True)
+def additive_display_kernel(data: np.ndarray, luts: np.ndarray, gamma_lut: np.ndarray) -> np.ndarray:
     """Applies LUTs and blends channels additively."""
     Ny, Nx, Nc = data.shape
-    bpp = luts.shape[2]
-    transfer_function_max_index = 2**16 - 1
+    _, transfer_function_max_index, bpp = luts.shape
     
     image = np.zeros(shape=(Ny, Nx, bpp), dtype=np.uint8)
 
     for yi in prange(Ny):
         for xi in prange(Nx):
 
-            #r, g, b = types.uint32(0), types.uint32(0), types.uint32(0)
-            r, g, b = 0, 0, 0  # Explicitly typing these as uint32 for some reason triggers a conversion to float64 which can't be used to index
+            r, g, b = 0, 0, 0  # Typing these as uint32 for some reason triggers a conversion to float64 which can't be used to index
             for ci in range(Nc):
                 lut_index = data[yi, xi, ci]
                 r += luts[ci, lut_index, 0]
@@ -82,8 +77,9 @@ class FrameDisplay(Display):
     """Worker to perform processing for display (blending, LUTs, etc)"""
 
     def __init__(self, acq: Acquisition, proc: Processor, 
-                 display_pixel_format = DisplayPixelFormat.RGB24):
-        super().__init__(acq, proc)
+                 display_pixel_format = DisplayPixelFormat.RGB24,
+                 **kwargs):
+        super().__init__(acq, proc, **kwargs)
 
         self._prev_data = None # None indicates that no data has been acquired yet
         self._prev_position = None
@@ -99,21 +95,21 @@ class FrameDisplay(Display):
         self._average_buffer_lock = threading.Lock()  # Add a lock for thread safety
 
         bpp = 3 if display_pixel_format == DisplayPixelFormat.RGB24 else 4
-        self.luts = np.zeros(shape=(self.nchannels, self.data_range.range, bpp), dtype=np.uint16)
+        # LUTS: look-up tables (note it's plural). LUTs for each channel enabled for display.
+        self._luts = np.zeros(shape=(self.nchannels, self.data_range.range + 1, bpp), dtype=np.uint16)
 
         self.display_channels: list[DisplayChannel] = []
 
         for ci, colormap_name in enumerate(default_colormap_lists(self.nchannels)):
             dc = DisplayChannel(
-                lut_slice=self.luts[ci],
+                lut_slice=self._luts[ci],
                 color_vector=ColorVector[colormap_name.upper()],
-                display_min=self.data_range.min,
-                display_max=self.data_range.max - 1,
+                display_range=self.data_range,
                 pixel_format=display_pixel_format,
-                update_method=self.update_display
+                update_method=self.update_display,
+                gamma_lut_length=self.gamma_lut_length
             )
             self.display_channels.append(dc)
-
 
     def run(self):
         while True:
@@ -158,16 +154,22 @@ class FrameDisplay(Display):
                 # _average_buffer is initially None and the first frame establishes height, width, etc
                 # Averaging can also be reset or changed by setting this to None, prompting reallocation
                 if self._average_buffer is None:
-                    buf_shape = buf.data.shape
-                    buffer_shape = (self.n_frame_average,) + buf_shape
-                    self._average_buffer = np.zeros(buffer_shape, dtype=np.uint16)
-                    averaged_frame = np.zeros(buf_shape, np.uint16)
+                    frame_shape = buf.data.shape
+                    ring_frame_buffer_shape = (self.n_frame_average,) + frame_shape
+                    self._average_buffer = np.zeros(
+                        shape=ring_frame_buffer_shape, 
+                        dtype=self.data_range.recommended_dtype
+                    )
+                    averaged_frame = np.zeros(
+                        shape=frame_shape, 
+                        dtype=self.data_range.recommended_dtype
+                    )
                     self._i = 0
 
                 self._average_buffer[self._i % self.n_frame_average] = buf.data
 
                 rolling_average_kernel(self._average_buffer, self._i, averaged_frame)
-                processed = self._apply_display_kernel(averaged_frame, self.luts)
+                processed = self._apply_display_kernel(averaged_frame, self._luts)
 
                 self.publish(processed)
                 self._prev_data = averaged_frame # store reference for use after thread finishes  
@@ -177,7 +179,7 @@ class FrameDisplay(Display):
             print(f"Channel display processing: {1000*(t1-t0):.1f}ms. Position data shape: {buf.positions}")
 
     def _apply_display_kernel(self, average_frame, luts):
-        return additive_display_kernel(average_frame, luts)
+        return additive_display_kernel(average_frame, luts, self.gamma_lut)
                      
     @property
     def n_frame_average(self) -> int:
@@ -192,7 +194,8 @@ class FrameDisplay(Display):
             self._average_buffer = None # Triggers reset of the average buffer 
 
     def update_display(self, skip_when_acquisition_in_progress: bool = True):
-        """On demand reprocessing of the last acquired frame for display.
+        """
+        On demand reprocessing of the last acquired frame for display.
         
         Used when the acquisition is stopped and need to update the appearance  
         of the last acquired frame.
@@ -205,7 +208,7 @@ class FrameDisplay(Display):
             # Don't update if no previous data exists
             return
         
-        processed = additive_display_kernel(self._prev_data, self.luts)
+        processed = self._apply_display_kernel(self._prev_data, self._luts)
         self.publish(processed)
 
 

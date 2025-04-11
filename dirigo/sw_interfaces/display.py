@@ -10,27 +10,33 @@ from dirigo.sw_interfaces.worker import Worker
 from dirigo.sw_interfaces import Acquisition, Processor
 
 
-@njit(
-    (types.uint16[:], types.int64, types.int64, types.float64[:], types.uint16[:,:]),
-    cache=True
-)
-def _update_lut(input_values, display_min, display_max, colormap, lut):
-    N = input_values.size
-    display_min_f32 = np.float32(display_min)
-    display_range = np.float32(display_max - display_min)
-    max_output_value = np.float32(2**16 - 1)
 
+
+sigs = [
+    (types.int16[:],  types.int64, types.int64, types.float64[:], types.uint16[:,:], types.int64),
+    (types.uint16[:], types.int64, types.int64, types.float64[:], types.uint16[:,:], types.int64)
+]
+@njit(sigs, cache=True)
+def _update_lut_kernel(input_values, display_min, display_max, colormap, lut, gamma_lut_length):
+    display_min_f32 = np.float32(display_min)
+    display_range = np.float32(display_max - display_min) # possibly needs to be a +1 here
+
+    max_output_value = np.float32(gamma_lut_length - 1)
+    
     max0 = max_output_value * np.float32(colormap[0])
     max1 = max_output_value * np.float32(colormap[1])
     max2 = max_output_value * np.float32(colormap[2])
+
     zero = np.float32(0.0)
     one = np.float32(1.0)
 
-    for i in range(N):
+    for i in input_values:
+
         y_norm = min(
-            max(input_values[i] - display_min_f32, zero) / display_range, 
+            max(i - display_min_f32, zero) / display_range, 
             one
-        )
+        ) # y_norm will be 0.0 - 1.0
+
         lut[i, 0] = int(max0 * y_norm)
         lut[i, 1] = int(max1 * y_norm)
         lut[i, 2] = int(max2 * y_norm)
@@ -51,48 +57,38 @@ class ColorVector(Enum):
 
     @classmethod
     def get_color_names(cls):
-        """Return a list of string of available color names.
-        """
+        """Return a list of string of available color names."""
         return [name.capitalize() for name in cls.__members__.keys()]
+
 
 class DisplayPixelFormat(Enum):
     RGB24   = 0     # red, green, blue, each 8-bits (Tkinter)
     BGRX32  = 1     # blue, green, red, and 1 ignored, each 8 bits (PyQt/PySide)
 
 
-class DisplayChannel(): #ABC?
+class DisplayChannel(): # should this be a ABC?
     """Represents an individual channel to be processed for display."""
     def __init__(self, lut_slice: np.ndarray, color_vector: ColorVector, 
-                 display_min: int, display_max: int, update_method: Callable[[], None],
-                 pixel_format: DisplayPixelFormat):
-        """Constructs a DisplayChannel object
-        
-        Args:
-            lut_slice: a view (slice) to underlying 3D LUT numpy array.
-            color_vector
-            display_min
-            display_max
-        """
+                 display_range: ValueRange, update_method: Callable[[], None],
+                 pixel_format: DisplayPixelFormat, gamma_lut_length: int):
+
         if not isinstance(lut_slice, np.ndarray) or (lut_slice.base is None):
             raise ValueError("`lut_slice` property must be a numpy slice.")
         self._lut = lut_slice # reference to this channel's 'slice' of multichannel LUT
         self._pixel_format = pixel_format
         self._update_display_method = update_method
+        self._gamma_lut_length = gamma_lut_length
 
         # Adjustable parameters (see getter/setters)
         self._enabled = True
         self._color_vector = color_vector
-        self._display_min = display_min 
-        self._display_max = display_max
+        self._display_range = display_range 
 
-        input_min = 0
-        input_max = lut_slice.shape[0] - 1
-        if input_max > 255:
-            input_dtype = np.uint16 
-        else:
-            input_dtype = np.uint8
-
-        self._input_values = np.arange(input_min, input_max+1, dtype=input_dtype)
+        self._input_values = np.arange(
+            start=display_range.min, 
+            stop=display_range.max + 1, 
+            dtype=display_range.recommended_dtype
+        )
 
         self._update_lut()
 
@@ -120,20 +116,20 @@ class DisplayChannel(): #ABC?
 
     @property
     def display_min(self) -> int:
-        return self._display_min
+        return self._display_range.min
 
     @display_min.setter
     def display_min(self, value: int):
-        self._display_min = int(value)
+        self._display_range.min = int(value)
         self._update_lut()
 
     @property
     def display_max(self) -> int:
-        return self._display_max
+        return self._display_range.max
     
     @display_max.setter
     def display_max(self, value: int):
-        self._display_max = int(value)
+        self._display_range.max = int(value)
         self._update_lut()
 
     def _update_lut(self):
@@ -142,12 +138,13 @@ class DisplayChannel(): #ABC?
         elif self._pixel_format == DisplayPixelFormat.BGRX32:
             colormap = tuple(reversed(self._color_vector.value)) + (0.0,) if self.enabled else (0.0, 0.0, 0.0, 0.0)
 
-        _update_lut(
+        _update_lut_kernel(
             input_values=self._input_values,
             display_min=self.display_min,
             display_max=self.display_max,
             colormap=np.array(colormap),
-            lut=self._lut
+            lut=self._lut,
+            gamma_lut_length=self._gamma_lut_length
         )
         self._update_display_method()
 
@@ -156,10 +153,31 @@ class Display(Worker):
     """
     Dirigo interface for display processing.
     """
-    GAMMA = 2.2 # sRGB
-    def __init__(self, acquisition: Acquisition = None, processor: Processor = None):
+    def __init__(self, 
+                 acquisition: Acquisition = None, 
+                 processor: Processor = None,
+                 monitor_bit_depth: int = 8,
+                 gamma: float = 2.2):
         """Instantiate with either an Acquisition or Processor"""
         super().__init__()
+
+        if not isinstance(monitor_bit_depth, int) or not (8 <= monitor_bit_depth <= 12):
+            raise ValueError("Unsupported monitor bit depth")
+        self._monitor_bit_depth = monitor_bit_depth
+        
+        if not isinstance(gamma, (float, int)) or not (0.1 <= gamma <= 10):
+            raise ValueError("Display gamma out of range")
+        self._gamma = gamma
+
+        # Generate gamma correction LUT
+        x = np.arange(self.gamma_lut_length) \
+            / (self.gamma_lut_length - 1) # TODO, not sure about the -1
+        
+        gamma_lut = (2**self._monitor_bit_depth - 1) * x**(1/self._gamma)
+        if self._monitor_bit_depth > 8:
+            self.gamma_lut = np.round(gamma_lut).astype(np.uint16)
+        else:
+            self.gamma_lut = np.round(gamma_lut).astype(np.uint8)
 
         if (acquisition is not None) and (processor is not None):
             raise ValueError("Error creating Display worker: "
@@ -202,6 +220,20 @@ class Display(Worker):
         
     @property
     def data_range(self) -> ValueRange:
-        """ Returns the raw data range from the data acquisition device (digitizer or camera)"""
-        return self._acquisition.data_acquisition_device.data_range
+        """ 
+        The incoming data range from either the processor or the acquisition worker. 
+        """
+        if self._processor:
+            return self._processor.data_range
+        else:
+            return self._acquisition.data_acquisition_device.data_range
+        
+    @property
+    def gamma_lut_length(self) -> int:
+        """
+        To compute the gamma function, use a LUT of this length.
+        
+        Default: 2^[monitor bit depth + 4]
+        """
+        return 2**(self._monitor_bit_depth + 4)
 

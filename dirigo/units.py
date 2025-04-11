@@ -3,6 +3,8 @@ import re
 from typing import Dict
 from dataclasses import dataclass
 
+import numpy as np
+
 
 class UnitQuantity(float):
     """
@@ -505,3 +507,36 @@ class ValueRange:
     @property
     def range(self) -> int:
         return self.max - self.min
+    
+    @property
+    def recommended_dtype(self):
+        """
+        Returns the recommended Numpy data type to store data of this range.
+        """
+        if self.min < 0:
+            # signed data types ...
+            if self.max < 2**7:
+                return np.int8
+            elif self.max < 2**15:
+                return np.int16
+            elif self.max < 2**31:
+                return np.int32
+            elif self.max < 2**63:
+                return np.int64
+            else:
+                return np.int128
+
+        else: 
+            # unsigned data types ..
+            if self.min == False and self.max == True:
+                return np.bool
+            elif self.max < 2**8:
+                return np.uint8
+            elif self.max < 2**16:
+                return np.uint16
+            elif self.max < 2**32:
+                return np.uint32
+            elif self.max < 2**64:
+                return np.uint64
+            else:
+                return np.uint128
