@@ -206,7 +206,7 @@ class ResonantScanner(RasterScanner):
         )
     
     def park(self):
-        raise NotImplemented("Resonant scanners can not be parked.")
+        raise NotImplementedError("Resonant scanners can not be parked.")
 
 
 class PolygonScanner(RasterScanner):
