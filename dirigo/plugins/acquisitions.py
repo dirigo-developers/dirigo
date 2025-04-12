@@ -353,7 +353,7 @@ class FrameAcquisition(LineAcquisition):
         self.hw.slow_raster_scanner.park()
         try:
             self.hw.fast_raster_scanner.park()
-        except NotImplemented:
+        except NotImplementedError:
             pass # Scanners like resonant scanners can't be parked.
         
         
