@@ -15,9 +15,14 @@ TWO_PI = 2 * np.pi
 
 # issues:
 # need to support uint16 and uint8 (rarer)
-sig = (types.uint16[:,:,:], types.uint16[:,:,:], types.int32[:,:], types.int32[:,:])
-@njit(sig, parallel=True, fastmath=True, nogil=True, cache=True)
+sigs = [
+    #buffer_data          scaling_factor  resampled            start_indices     nsamples_to_sum
+    (types.int16[:,:,:],  types.int32,    types.int16[:,:,:],  types.int32[:,:], types.int32[:,:]),
+    (types.uint16[:,:,:], types.int32,    types.uint16[:,:,:], types.int32[:,:], types.int32[:,:])
+]
+@njit(sigs, parallel=True, fastmath=True, nogil=True, cache=True)
 def resample_kernel(buffer_data: np.ndarray, 
+                    scaling_factor: int,
                     resampled: np.ndarray, 
                     start_indices: np.ndarray, 
                     nsamples_to_sum: np.ndarray) -> np.ndarray:
@@ -65,18 +70,18 @@ def resample_kernel(buffer_data: np.ndarray,
             # resampled[si, fi, 1] = tmp1 // Nsum
             # Store the average back into resampled
             for c in range(Nchannels):
-                resampled[si, fi, c] = tmp_values[c] // Nsum
+                resampled[si, fi, c] = (scaling_factor * tmp_values[c]) // Nsum
 
     return resampled
 
 
-
-@njit(
-    types.float32[:,:](types.uint16[:,:,:], types.int64, types.int64, types.float64), 
-    nogil=True, parallel=True, fastmath=True, cache=True
-)
-def window_bidi_data(data: np.ndarray, lines_per_frame: int, trigger_delay:int, samples_per_period: float):
-    """Select ranages and convert to float32.
+sigs = [
+    types.float32[:,:](types.uint16[:,:,:], types.int64, types.int64, types.float64),
+    types.float32[:,:](types.int16[:,:,:], types.int64, types.int64, types.float64)
+]
+@njit(sigs, nogil=True, parallel=True, fastmath=True, cache=True)
+def crop_bidi_data(data: np.ndarray, lines_per_frame: int, trigger_delay:int, samples_per_period: float):
+    """Crops time trace data to a power of 2 and converts to float32.
 
     Note: operates on channel 0 only.
     """
@@ -129,8 +134,22 @@ def compute_cross_power_spectrum(F: np.ndarray):
 
 
 class RasterFrameProcessor(Processor):
-    def __init__(self, acquisition):
+    def __init__(self, 
+                 acquisition,
+                 bits_precision: int = 16):
+        """
+        Initialize a raster frame processor worker for the Acquisition worker.
+
+        To change default behavior of computing average for each pixel in 16-
+        bit precision, change the bits_precision argument.
+        """
         super().__init__(acquisition)
+
+        if (not isinstance(bits_precision, int)) or (bits_precision % 2) or not (8 <= bits_precision <= 16):
+            raise ValueError("Bits precision must be even integer between 8 and 16")
+        elif bits_precision < self._acq.data_acquisition_device.bit_depth:
+            raise ValueError("Bit precision can't be less than the data acquisition device bit depth.")
+        self._bits_precision = bits_precision
         
         self._spec: FrameAcquisitionSpec # to refine type hinting
         self.processed_shape = ( # Final shape after processing
@@ -143,13 +162,19 @@ class RasterFrameProcessor(Processor):
         self._fast_scanner_frequency = self._acq.hw.fast_raster_scanner.frequency
 
         # Pre-allocate array for processed image
-        self.processed = np.zeros(self.processed_shape, dtype=np.uint16)
+        if self._acq.data_acquisition_device.data_range.min < 0:
+            # If the data range min is negative, then we will need SIGNED integer data
+            self.processed = np.zeros(self.processed_shape, dtype=np.int16)
+        else:
+            self.processed = np.zeros(self.processed_shape, dtype=np.uint16)
 
         # Trigger timing
         self._fixed_trigger_delay = self._acq.hw.digitizer.acquire.trigger_delay_samples
         self._trigger_phase = 0 # This value can be adjusted
         if hasattr(self._acq.hw.fast_raster_scanner, 'input_delay'):
             self._trigger_phase = self._acq.hw.fast_raster_scanner.input_delay * self._spec.pixel_rate
+
+        self._scaling_factor = 2**(self._bits_precision - self._acq.data_acquisition_device.bit_depth)
         
     def run(self):
         # Calculate preliminary start indices
@@ -165,7 +190,7 @@ class RasterFrameProcessor(Processor):
                 return # concludes run() - this thread ends
 
             t0 = time.perf_counter()
-            resample_kernel(buf.data, self.processed, start_indices, nsamples_to_sum)
+            resample_kernel(buf.data, self._scaling_factor, self.processed, start_indices, nsamples_to_sum)
             
             self.publish(ProcessedFrame(
                 data=self.processed, 
@@ -235,7 +260,7 @@ class RasterFrameProcessor(Processor):
         """Measure the apparent fast raster scanner trigger phase for bidirectional acquisitions."""
         UPSAMPLE = 8 # TODO move this somewhere else
         
-        data_window = window_bidi_data(data, self._spec.lines_per_frame, self._acq.hw.digitizer.acquire.trigger_delay_samples, self.samples_per_period) # todo preallocate data_window
+        data_window = crop_bidi_data(data, self._spec.lines_per_frame, self._acq.hw.digitizer.acquire.trigger_delay_samples, self.samples_per_period) # todo preallocate data_window
 
         F = fft.rfft(data_window, axis=1, workers=4)
         xps = compute_cross_power_spectrum(F)
@@ -259,6 +284,25 @@ class RasterFrameProcessor(Processor):
     
     @property
     def samples_per_period(self) -> float:
-        """The exact number of digitizer samples per fast raster scanner period.
+        """
+        The exact number of digitizer samples per fast raster scanner period.
         """
         return self._sample_clock_rate / self._fast_scanner_frequency 
+    
+    @property
+    def data_range(self):
+        """
+        The data range after processing (resampling) has been performed.
+
+        May be higher than the native bit depth of the data capture device.
+        """
+        if self._acq.data_acquisition_device.data_range.min < 0:
+            return units.ValueRange(
+                min=-2**(self._bits_precision-1), 
+                max=2**(self._bits_precision-1) - 1
+            )
+        else: # unsigned data
+            return units.ValueRange(
+                min=0, 
+                max=2**self._bits_precision - 1
+            )

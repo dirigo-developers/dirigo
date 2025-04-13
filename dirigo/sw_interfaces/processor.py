@@ -1,7 +1,9 @@
 from dataclasses import dataclass
+from abc import abstractmethod
 
 import numpy as np
 
+from dirigo import units 
 from dirigo.sw_interfaces.worker import Worker
 from dirigo.sw_interfaces.acquisition import Acquisition
 
@@ -31,3 +33,12 @@ class Processor(Worker):
         self._acq = acquisition
         self._spec = acquisition.spec
     
+    @property
+    @abstractmethod # Not sure this is absolutely needed for every subclass of this.
+    def data_range(self) -> units.ValueRange:
+        """
+        The data range after processing (resampling) has been performed.
+
+        May be higher than the native bit depth of the data capture device.
+        """
+        pass

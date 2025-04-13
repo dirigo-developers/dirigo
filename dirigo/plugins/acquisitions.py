@@ -179,7 +179,7 @@ class LineAcquisition(Acquisition):
                 digi.acquire.buffers_acquired < self.spec.buffers_per_acquisition:
                 print(f"Acquired {digi.acquire.buffers_acquired} of {self.spec.buffers_per_acquisition}")
                 buffer = digi.acquire.get_next_completed_buffer()
-                if hasattr(self.hw, 'stage'):
+                if self.hw.stage or self.hw.objective_scanner:
                     buffer.positions = self.read_positions()
                 self.publish(buffer)
 

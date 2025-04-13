@@ -541,7 +541,7 @@ class NIAcquire(digitizer.Acquire):
                 trigger_source=self._trigger.source,
                 trigger_edge=edge
             )
-            # For analog triggers, use cfg_anlg_edge_start_trig
+            # Not implemented yet: for analog triggers, use cfg_anlg_edge_start_trig
 
             # Configure the sample clock
             self._task.timing.cfg_samp_clk_timing(
@@ -607,7 +607,6 @@ class NIAcquire(digitizer.Acquire):
 
     @property
     def buffers_acquired(self) -> int:
-        # For a simpler approach, let’s store how many times we read
         return self._buffers_acquired
 
     def get_next_completed_buffer(self, blocking: bool = True) -> AcquisitionBuffer:
@@ -622,27 +621,26 @@ class NIAcquire(digitizer.Acquire):
         nsamples = self.records_per_buffer * self.record_length 
 
         if self._mode == "analog":
+
             data = np.zeros( # TODO use preallocated array?
                 shape=(self.n_channels_enabled, nsamples), 
-                dtype=np.uint16
+                dtype=np.int16
             ) 
-            self._reader.read_uint16(
+            self._reader.read_int16(
                 data=data,
                 number_of_samples_per_channel=nsamples
             )
-            # Returned data is actually 2's compliment int16, add 2**15 to map to uint16 range
-            data += 2**15 
 
-            # Invert channels if necessary
+            # Invert channels if necessary (TODO, may be slightly faster to broadcast multiply a +/-1 vector)
             for i, invert in enumerate(self._inverted_channels):
                 if invert:
-                    data[i,:] = ~data[i,:] 
+                    data[i,:] = -data[i,:] 
 
             # The buffer dimensions need to be reordered for further processing
             data.shape = (self.n_channels_enabled, self.records_per_buffer, self.record_length)
             data = np.transpose(data, axes=(1,2,0)) # Move channels dimension from major to minor (ie interleaved)
 
-        else:
+        else: # Edge counting mode
             data_single_channel = np.zeros((nsamples,), dtype=np.uint32) # reader only supports reading into contiguous array
             data_multiple_channels = np.zeros(
                 shape=(nsamples+1, self.n_channels_enabled), #+1 b/c we will do np.diff
@@ -763,18 +761,18 @@ class NIDigitizer(digitizer.Digitizer):
     def bit_depth(self) -> int:
         """ Analog input bit depth. """
         # Make dummy task to get at the .ai_resolution property
-        task = nidaqmx.Task("AI dummy")
-        channel = task.ai_channels.add_ai_voltage_chan(
-            physical_channel=self._device.ai_physical_chans.channel_names[0]
-        )
-        return int(channel.ai_resolution)
+        with nidaqmx.Task("AI dummy") as task:
+            channel = task.ai_channels.add_ai_voltage_chan(
+                physical_channel=self._device.ai_physical_chans.channel_names[0]
+            )
+            return int(channel.ai_resolution)
 
     @cached_property
     def data_range(self) -> units.ValueRange:
         """Range of the returned data."""
         if self._mode == "analog":
-            # For analog mode, we use AnalogUnscaledReader.read_uint16()
-            return units.ValueRange(min=0, max=2**self.bit_depth - 1)
+            N = self.bit_depth
+            return units.ValueRange(min=-2**N//2, max=2**N//2 - 1)
         else:
             # For edge counting
             # technically the counters support up to 32 bits, but it's unlikely
