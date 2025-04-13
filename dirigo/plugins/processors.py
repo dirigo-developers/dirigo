@@ -75,13 +75,13 @@ def resample_kernel(buffer_data: np.ndarray,
     return resampled
 
 
-
-@njit(
-    types.float32[:,:](types.uint16[:,:,:], types.int64, types.int64, types.float64), 
-    nogil=True, parallel=True, fastmath=True, cache=True
-)
-def window_bidi_data(data: np.ndarray, lines_per_frame: int, trigger_delay:int, samples_per_period: float):
-    """Select ranages and convert to float32.
+sigs = [
+    types.float32[:,:](types.uint16[:,:,:], types.int64, types.int64, types.float64),
+    types.float32[:,:](types.int16[:,:,:], types.int64, types.int64, types.float64)
+]
+@njit(sigs, nogil=True, parallel=True, fastmath=True, cache=True)
+def crop_bidi_data(data: np.ndarray, lines_per_frame: int, trigger_delay:int, samples_per_period: float):
+    """Crops time trace data to a power of 2 and converts to float32.
 
     Note: operates on channel 0 only.
     """
@@ -260,7 +260,7 @@ class RasterFrameProcessor(Processor):
         """Measure the apparent fast raster scanner trigger phase for bidirectional acquisitions."""
         UPSAMPLE = 8 # TODO move this somewhere else
         
-        data_window = window_bidi_data(data, self._spec.lines_per_frame, self._acq.hw.digitizer.acquire.trigger_delay_samples, self.samples_per_period) # todo preallocate data_window
+        data_window = crop_bidi_data(data, self._spec.lines_per_frame, self._acq.hw.digitizer.acquire.trigger_delay_samples, self.samples_per_period) # todo preallocate data_window
 
         F = fft.rfft(data_window, axis=1, workers=4)
         xps = compute_cross_power_spectrum(F)
