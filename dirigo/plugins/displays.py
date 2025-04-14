@@ -40,8 +40,9 @@ sigs = [
 def additive_display_kernel(data: np.ndarray, luts: np.ndarray, gamma_lut: np.ndarray) -> np.ndarray:
     """Applies LUTs and blends channels additively."""
     Ny, Nx, Nc = data.shape
-    _, transfer_function_max_index, bpp = luts.shape
-    
+    bpp = luts.shape[2]
+    gamma_lut_length = gamma_lut.shape[0]
+
     image = np.zeros(shape=(Ny, Nx, bpp), dtype=np.uint8)
 
     for yi in prange(Ny):
@@ -55,9 +56,9 @@ def additive_display_kernel(data: np.ndarray, luts: np.ndarray, gamma_lut: np.nd
                 b += luts[ci, lut_index, 2]
             
             # Gamma correct blended values and assign to output image 
-            image[yi, xi, 0] = gamma_lut[min(r, transfer_function_max_index)]
-            image[yi, xi, 1] = gamma_lut[min(g, transfer_function_max_index)]
-            image[yi, xi, 2] = gamma_lut[min(b, transfer_function_max_index)]
+            image[yi, xi, 0] = gamma_lut[min(r, gamma_lut_length-1)]
+            image[yi, xi, 1] = gamma_lut[min(g, gamma_lut_length-1)]
+            image[yi, xi, 2] = gamma_lut[min(b, gamma_lut_length-1)]
 
     return image
 
