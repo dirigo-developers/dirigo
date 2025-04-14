@@ -479,7 +479,7 @@ class NIAcquire(digitizer.Acquire):
 
     @property
     def record_length_resolution(self) -> int:
-        return 1
+        return 32
 
     @property
     def records_per_buffer(self) -> int:

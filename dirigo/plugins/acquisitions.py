@@ -117,12 +117,19 @@ class LineAcquisition(Acquisition):
         super().__init__(hw, spec) # sets up thread, inbox, stores hw, checks resources
         self.spec: LineAcquisitionSpec # to refine type hints
 
+        self.hw.digitizer.load_profile(profile_name=self.spec.digitizer_profile)
+
         # If using galvo scanner, then set it up based on acquisition spec parameters
         if isinstance(self.hw.fast_raster_scanner, GalvoScanner):
             self.hw.fast_raster_scanner.amplitude = \
                 self.hw.laser_scanning_optics.object_position_to_scan_angle(spec.line_width)
-            self.hw.fast_raster_scanner.frequency = 1 / (self.spec.pixel_time \
-                * round(self.spec.pixels_per_line / self.spec.fill_fraction)) 
+
+            # Fast axis period should be multiple of digitizer sample resolution
+            T_exact = self.spec.pixel_time * self.spec.pixels_per_line / self.spec.fill_fraction
+            dt = units.Time(self.hw.digitizer.acquire.record_length_resolution / self.hw.digitizer.sample_clock.rate)
+            T_rounded = round(T_exact / dt) * dt
+            self.hw.fast_raster_scanner.frequency = 1 / T_rounded 
+
             self.hw.fast_raster_scanner.waveform = "asymmetric triangle"
             self.hw.fast_raster_scanner.duty_cycle = self.spec.fill_fraction
         
@@ -146,7 +153,7 @@ class LineAcquisition(Acquisition):
         """
         digi = self.hw.digitizer # for brevity
 
-        digi.load_profile(profile_name)
+        #digi.load_profile(profile_name)
 
         # Configure acquisition timing and sizes
         digi.acquire.pre_trigger_samples = 0 # TODO, maybe allow this to be adjustable?
@@ -167,7 +174,7 @@ class LineAcquisition(Acquisition):
 
         elif isinstance(self.hw.fast_raster_scanner, GalvoScanner):
             self.hw.fast_raster_scanner.start(
-                sample_rate=self.hw.digitizer.sample_clock.rate,
+                ai_sample_rate=self.hw.digitizer.sample_clock.rate,
                 pixels_per_period=self.spec.pixels_per_line,
                 periods_per_write=self.spec.records_per_buffer
             )
