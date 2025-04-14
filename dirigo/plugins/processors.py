@@ -7,7 +7,8 @@ from scipy import fft
 
 from dirigo import units
 from dirigo.sw_interfaces.processor import Processor, ProcessedFrame
-from dirigo.sw_interfaces.acquisition import AcquisitionBuffer
+from dirigo.sw_interfaces.acquisition import Acquisition, AcquisitionBuffer
+from dirigo.hw_interfaces.digitizer import Digitizer
 from dirigo.plugins.acquisitions import FrameAcquisitionSpec
 
 
@@ -22,7 +23,7 @@ sigs = [
 ]
 @njit(sigs, parallel=True, fastmath=True, nogil=True, cache=True)
 def resample_kernel(buffer_data: np.ndarray, 
-                    scaling_factor: int,
+                    scaling_factor: int, # faster/better to bit shift than multiply (scale)
                     resampled: np.ndarray, 
                     start_indices: np.ndarray, 
                     nsamples_to_sum: np.ndarray) -> np.ndarray:
@@ -54,8 +55,6 @@ def resample_kernel(buffer_data: np.ndarray,
             Nsum = nsamples_to_sum[fwd_rvs, fi]
             start = start_indices[fwd_rvs, fi]
 
-            # tmp0 = types.int32(0)
-            # tmp1 = types.int32(0)
             tmp_values = np.zeros(Nchannels, dtype=np.int32)
 
             # Step through the raw samples
@@ -63,11 +62,7 @@ def resample_kernel(buffer_data: np.ndarray,
             for sample in range(start, end, stride):
                 for c in range(Nchannels):
                     tmp_values[c] += buffer_data[ri, sample, c]
-                # tmp0 += buffer_data[ri, sample, 0] # unrolled channels
-                # tmp1 += buffer_data[ri, sample, 1]
 
-            # resampled[si, fi, 0] = tmp0 // Nsum
-            # resampled[si, fi, 1] = tmp1 // Nsum
             # Store the average back into resampled
             for c in range(Nchannels):
                 resampled[si, fi, c] = (scaling_factor * tmp_values[c]) // Nsum
@@ -75,13 +70,13 @@ def resample_kernel(buffer_data: np.ndarray,
     return resampled
 
 
-sigs = [
-    types.float32[:,:](types.uint16[:,:,:], types.int64, types.int64, types.float64),
-    types.float32[:,:](types.int16[:,:,:], types.int64, types.int64, types.float64)
-]
-@njit(sigs, nogil=True, parallel=True, fastmath=True, cache=True)
-def crop_bidi_data(data: np.ndarray, lines_per_frame: int, trigger_delay:int, samples_per_period: float):
-    """Crops time trace data to a power of 2 and converts to float32.
+
+@njit(
+    types.float32[:,:](types.uint16[:,:,:], types.int64, types.int64, types.float64), 
+    nogil=True, parallel=True, fastmath=True, cache=True
+)
+def window_bidi_data(data: np.ndarray, lines_per_frame: int, trigger_delay:int, samples_per_period: float):
+    """Select ranages and convert to float32.
 
     Note: operates on channel 0 only.
     """
@@ -135,7 +130,7 @@ def compute_cross_power_spectrum(F: np.ndarray):
 
 class RasterFrameProcessor(Processor):
     def __init__(self, 
-                 acquisition,
+                 acquisition: Acquisition,
                  bits_precision: int = 16):
         """
         Initialize a raster frame processor worker for the Acquisition worker.
@@ -152,11 +147,20 @@ class RasterFrameProcessor(Processor):
         self._bits_precision = bits_precision
         
         self._spec: FrameAcquisitionSpec # to refine type hinting
+        if isinstance(acquisition.data_acquisition_device, Digitizer):
+            n_channels = sum(
+                [c.enabled for c in acquisition.data_acquisition_device.channels]
+            )
+        else:
+            raise NotImplementedError(
+                f"RasterFrameProcessor implemented for use with Digitizer, "
+                f"got type: {type(acquisition.data_acquisition_device)}"
+            )
         self.processed_shape = ( # Final shape after processing
                 self._spec.lines_per_frame,
                 self._spec.pixels_per_line,
-                acquisition.hw.nchannels_enabled
-            )
+                n_channels
+        )
         
         # Initialize with the nominal rate, will measure with data timestamps
         self._fast_scanner_frequency = self._acq.hw.fast_raster_scanner.frequency
@@ -172,9 +176,12 @@ class RasterFrameProcessor(Processor):
         self._fixed_trigger_delay = self._acq.hw.digitizer.acquire.trigger_delay_samples
         self._trigger_phase = 0 # This value can be adjusted
         if hasattr(self._acq.hw.fast_raster_scanner, 'input_delay'):
-            self._trigger_phase = self._acq.hw.fast_raster_scanner.input_delay * self._spec.pixel_rate
+            self._trigger_phase = self._acq.hw.fast_raster_scanner.input_delay * self._acq.hw.digitizer.sample_clock.rate
 
-        self._scaling_factor = 2**(self._bits_precision - self._acq.data_acquisition_device.bit_depth)
+        self._scaling_factor = 2**(self._bits_precision - self._acq.data_acquisition_device.bit_depth) # should we bit shift instead of scale with multiply?
+
+        # for testing
+        #self.calculate_start_indices(self._trigger_phase)
         
     def run(self):
         # Calculate preliminary start indices
@@ -221,7 +228,7 @@ class RasterFrameProcessor(Processor):
 
         # Create a resampling function based on fast axis waveform type
         waveform = self._acq.hw.fast_raster_scanner.waveform
-        if waveform == "sinusoid":
+        if waveform == "sinusoid": # resonant scanner
             # image line should be taken from center of sinusoid sweep
             pixel_edges = np.linspace(ff, -ff, self._spec.pixels_per_line + 1)
 
@@ -229,10 +236,10 @@ class RasterFrameProcessor(Processor):
             temporal_edges = np.arccos(pixel_edges) / TWO_PI
 
         elif waveform == "sawtooth":
-            pass # like a polygon scanner
+            pass # polygon scanner
         elif waveform == "triangle":
             pass # galvo running birectional
-        elif waveform == "asymmetric triangle":
+        elif waveform == "asymmetric triangle": #TODO, rename to smooth triangle or something
             # Fill fraction needs to be slightly adjusted to reflect pixel period rounding 
             ff_corrected = self._spec.pixels_per_line / round(self._spec.pixels_per_line / self._spec.fill_fraction)
 
@@ -260,7 +267,7 @@ class RasterFrameProcessor(Processor):
         """Measure the apparent fast raster scanner trigger phase for bidirectional acquisitions."""
         UPSAMPLE = 8 # TODO move this somewhere else
         
-        data_window = crop_bidi_data(data, self._spec.lines_per_frame, self._acq.hw.digitizer.acquire.trigger_delay_samples, self.samples_per_period) # todo preallocate data_window
+        data_window = window_bidi_data(data, self._spec.lines_per_frame, self._acq.hw.digitizer.acquire.trigger_delay_samples, self.samples_per_period) # todo preallocate data_window
 
         F = fft.rfft(data_window, axis=1, workers=4)
         xps = compute_cross_power_spectrum(F)

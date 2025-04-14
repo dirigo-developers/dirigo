@@ -1,5 +1,6 @@
 from functools import cached_property
 import threading
+import time
 
 import numpy as np
 
@@ -364,7 +365,7 @@ class GalvoWaveformWriter(threading.Thread):
                                  "GalvoWaveformWriter")
             
             # If a fast scanner exists, use its AO task and its sample rate (=pixel frequency)
-            self._sample_rate = units.SampleRate(self._fast_scanner._pixel_frequency)
+            self._sample_rate = units.SampleRate(self._fast_scanner._sample_rate)
             self._ao_writer = AnalogMultiChannelWriter(self._fast_scanner._ao_task.out_stream)
 
         else:
@@ -422,7 +423,7 @@ class GalvoWaveformWriter(threading.Thread):
         Exact number (e.g. fractional) of output sample clock periods per fast 
         scanner period (if available), or slow scanner (if not).
         """
-        if fast_scanner:
+        if self._fast_scanner:
             return self._sample_rate / self._fast_scanner.frequency
         else:
             return self._sample_rate / self._slow_scanner.frequency
@@ -461,7 +462,7 @@ class FastGalvoScannerViaNI(GalvoScannerViaNI, FastRasterScanner):
         self._slow_scanner: SlowGalvoScannerViaNI = None
 
     def start(self, 
-              pixel_frequency: units.Frequency, 
+              sample_rate: units.SampleRate, 
               pixels_per_period: int, # e.g. pixels per line
               periods_per_write: int, # e.g. lines per frame
               adjustable = False # allows changing amplitude & offset mid-acquisition, but may be taxing for very high frame rates
@@ -469,14 +470,14 @@ class FastGalvoScannerViaNI(GalvoScannerViaNI, FastRasterScanner):
         self._active = True
 
         try:
-            # Validate pixel frequency
-            if not isinstance(pixel_frequency, units.Frequency):
-                raise ValueError("Pixel frequency must be set with Frequency object")
+            # Validate sample rate
+            if not isinstance(sample_rate, units.SampleRate):
+                raise ValueError("AO sample rate must be set with Frequency object")
             
             device = get_device(self._analog_control_channel.split('/')[0])
-            if pixel_frequency > get_max_ao_rate(device):
-                raise ValueError("Pixel frequency higher than DAQ card supports")
-            self._pixel_frequency = pixel_frequency
+            if sample_rate > get_max_ao_rate(device):
+                raise ValueError("AO sample rate higher than DAQ card supports")
+            self._sample_rate = sample_rate
             
             # Validate pixels per period
             if (not isinstance(pixels_per_period, int)) or (pixels_per_period < 1):
@@ -512,8 +513,8 @@ class FastGalvoScannerViaNI(GalvoScannerViaNI, FastRasterScanner):
             
             # Set timing
             self._ao_task.timing.cfg_samp_clk_timing(
-                rate=pixel_frequency,
-                source=self._external_pixel_clock_channel, # if None, will use internal AO clock engine
+                rate=self._sample_rate,
+                source="/" + self._ao_task.devices[0].name + "/ai/SampleClock", # TODO, divided down
                 sample_mode=AcquisitionType.CONTINUOUS,
                 samps_per_chan=self._periods_per_write * self._pixels_per_period 
             )
@@ -523,14 +524,11 @@ class FastGalvoScannerViaNI(GalvoScannerViaNI, FastRasterScanner):
                     RegenerationMode.DONT_ALLOW_REGENERATION
 
             self._do_task.timing.cfg_samp_clk_timing(
-                rate=pixel_frequency,
-                source="/Dev1/ao/SampleClock", # if None, will use internal AO clock engine
+                rate=self._sample_rate,
+                source="/" + self._ao_task.devices[0].name + "/ai/SampleClock", # TODO, divided down
                 sample_mode=AcquisitionType.CONTINUOUS,
                 samps_per_chan=self._periods_per_write * self._pixels_per_period 
             )
-            # self._do_task.triggers.start_trigger.cfg_dig_edge_start_trig(
-            #     trigger_source="/Dev1/ao/StartTrigger"
-            # )
             
             # Set up the waveform writer worker
             self._writer = GalvoWaveformWriter(
@@ -542,20 +540,18 @@ class FastGalvoScannerViaNI(GalvoScannerViaNI, FastRasterScanner):
 
             # Write clocks
             line_clock = np.tile(
-                self.generate_clock(self._pixel_frequency),
+                self.generate_clock(self._sample_rate),
                 reps=self._periods_per_write
             )
             if self._slow_scanner:
-                frame_clock = self._slow_scanner.generate_clock(self._pixel_frequency)
+                frame_clock = self._slow_scanner.generate_clock(self._sample_rate)
                 clocks = np.vstack((line_clock, frame_clock))
             else:
                 clocks = np.vstack((line_clock,))
             self._do_task.write(clocks)
 
-            # Export the AO timebase as 'pixel clock'
-            self._ao_task.export_signals.samp_clk_output_term = self._pixel_clock_channel
-
-            self._do_task.start() # DO uses AO's start trigger
+            # Start tasks (new samples will be clocked off AI sample clock)
+            self._do_task.start() 
             self._ao_task.start()
 
         except Exception:
@@ -699,61 +695,4 @@ class SlowGalvoScannerViaNI(GalvoScannerViaNI, SlowRasterScanner):
 
             self._ao_task.stop()
             self._ao_task.close()
-
-
-
-
-if __name__ == "__main__":
-    import time
-    
-    pclk_frequency = units.Frequency('200 kHz')
-    pix_per_line = 500
-    lines_per_frame = 500
-    ampl = units.Angle("10 deg")
-
-    fast_scanner = FastGalvoScannerViaNI(
-        axis="x",
-        analog_control_channel="Dev1/ao0",
-        angle_limits={"min": "-20.0 deg", "max": "20.0 deg"},
-        analog_control_range={"min": "-10 V", "max": "10 V"},
-        pixel_clock_channel="/Dev1/PFI13",
-        line_clock_channel="Dev1/port0/line0",
-        #external_pixel_clock_channel="/Dev1/PFI11"
-    )
-
-    slow_scanner = SlowGalvoScannerViaNI(
-        axis="y",
-        analog_control_channel="Dev1/ao1",
-        angle_limits={"min": "-20.0 deg", "max": "20.0 deg"},
-        analog_control_range={"min": "-10 V", "max": "10 V"},
-        fast_scanner=fast_scanner,
-        frame_clock_channel="Dev1/port0/line1",
-    )
-
-    fast_scanner.frequency = pclk_frequency / pix_per_line
-    fast_scanner.amplitude = ampl
-    fast_scanner.waveform = "asymmetric triangle"
-    fast_scanner.duty_cycle = 0.8
-
-    slow_scanner.frequency = pclk_frequency / pix_per_line / lines_per_frame
-    slow_scanner.amplitude = ampl
-    slow_scanner.waveform = "asymmetric triangle"
-    slow_scanner.duty_cycle = 0.9
-
-    slow_scanner.start() # This doesn't actually do anything
-    fast_scanner.start(
-        pixel_frequency=pclk_frequency,
-        pixels_per_period=pix_per_line,
-        periods_per_write=lines_per_frame,
-        adjustable=True
-    )
-
-    time.sleep(5)
-    fast_scanner.amplitude = 1*ampl
-    fast_scanner.offset = -0.5*ampl
-    slow_scanner.amplitude = 2*ampl
-    time.sleep(5)
-
-
-    fast_scanner.stop()
 

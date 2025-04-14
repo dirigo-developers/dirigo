@@ -506,7 +506,7 @@ class ValueRange:
 
     @property
     def range(self) -> int:
-        return self.max - self.min
+        return 1 + self.max - self.min
     
     @property
     def recommended_dtype(self):

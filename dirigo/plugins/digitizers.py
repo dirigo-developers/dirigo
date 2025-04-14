@@ -35,7 +35,6 @@ def get_min_ai_rate(device: nidaqmx.system.Device) -> units.SampleRate:
     return units.SampleRate(device.ai_min_rate)
 
 
-
 class NIAnalogChannel(digitizer.Channel):
     """
     Represents a single analog input channel on an NI board.
@@ -236,11 +235,22 @@ class NISampleClock(digitizer.SampleClock):
 
     @property
     def source(self) -> str:
+        """
+        Digitizer sample clock source.
+        
+        Pass None to use internal AI clock engine or pass a valid terminal 
+        string to use an external sample clock.
+        """
         return self._source
 
     @source.setter
     def source(self, source: str):
-        self._source = validate_ni_channel(source)
+        if not isinstance(source, str):
+            raise ValueError("Sample clock source must be set with a string")
+        if source.lower() in ["internal", "internal clock"]:
+            self._source = None
+        else:
+            self._source = validate_ni_channel(source)
 
     @property
     def source_options(self) -> set[str]:
@@ -274,12 +284,19 @@ class NISampleClock(digitizer.SampleClock):
         or a wide range object.
         """
         if self._mode == "analog":
-            # For analog sampling, sample rate needs to be within the aggregrate sample rate
-            nchannels_enabled = sum([channel.enabled for channel in self._channels])
-            return units.SampleRateRange(
-                min=get_min_ai_rate(self._device), 
-                max=get_max_ai_rate(self._device, nchannels_enabled)
-            )
+            if self._device.product_category == ProductCategory.X_SERIES_DAQ:
+                # For X-series analog sampling, sample rate needs to be within the aggregrate sample rate
+                nchannels_enabled = sum([channel.enabled for channel in self._channels])
+                return units.SampleRateRange(
+                    min=get_min_ai_rate(self._device), 
+                    max=get_max_ai_rate(self._device, nchannels_enabled)
+                )
+            elif self._device.product_category == ProductCategory.S_SERIES_DAQ:
+                # For S-series (Simultaneous sampling), sample rate is independent of number channels activated
+                return units.SampleRateRange(
+                    min=get_min_ai_rate(self._device), 
+                    max=get_max_ai_rate(self._device)
+                )
         else:
             # For edge counting, sample rate needs to just be within valid AO range
             return units.SampleRateRange(
@@ -532,21 +549,21 @@ class NIAcquire(digitizer.Acquire):
                 if self._device.product_category == ProductCategory.X_SERIES_DAQ:
                     ai_channel.ai_term_cfg = TerminalConfiguration.RSE
                 elif self._device.product_category == ProductCategory.S_SERIES_DAQ:
-                    # S series only supports pseudo differential
+                    # S series only supports pseudo-differential
                     ai_channel.ai_term_cfg = TerminalConfiguration.PSEUDO_DIFF
 
             # Configure trigger
-            edge = Edge.RISING if self._trigger.slope == "rising" else Edge.FALLING
-            self._task.triggers.start_trigger.cfg_dig_edge_start_trig(
-                trigger_source=self._trigger.source,
-                trigger_edge=edge
-            )
+            # edge = Edge.RISING if self._trigger.slope == "rising" else Edge.FALLING
+            # self._task.triggers.start_trigger.cfg_dig_edge_start_trig(
+            #     trigger_source=self._trigger.source,
+            #     trigger_edge=edge
+            # )
             # Not implemented yet: for analog triggers, use cfg_anlg_edge_start_trig
 
             # Configure the sample clock
             self._task.timing.cfg_samp_clk_timing(
                 rate=self._sample_clock.rate, 
-                source=self._sample_clock.source,
+                source=self._sample_clock.source, 
                 active_edge=edge,
                 sample_mode=sample_mode,
                 samps_per_chan=samples_per_chan*2 #TODO, not sure about 2x
@@ -758,24 +775,19 @@ class NIDigitizer(digitizer.Digitizer):
         self.aux_io = NIAuxillaryIO(device=self._device)
 
     @cached_property
-    def bit_depth(self) -> int:
-        """ Analog input bit depth. """
-        # Make dummy task to get at the .ai_resolution property
-        with nidaqmx.Task("AI dummy") as task:
-            channel = task.ai_channels.add_ai_voltage_chan(
-                physical_channel=self._device.ai_physical_chans.channel_names[0]
-            )
-            return int(channel.ai_resolution)
-
-    @cached_property
     def data_range(self) -> units.ValueRange:
         """Range of the returned data."""
         if self._mode == "analog":
-            N = self.bit_depth
+            # Make dummy task to get at the .ai_resolution property
+            with nidaqmx.Task("AI dummy") as task:
+                channel = task.ai_channels.add_ai_voltage_chan(
+                    physical_channel=self._device.ai_physical_chans.channel_names[0]
+                )
+                N = int(channel.ai_resolution)
             return units.ValueRange(min=-2**N//2, max=2**N//2 - 1)
         else:
-            # For edge counting
+            # For edge counting, use uint8 (max 256 edges/photons per pixel)
             # technically the counters support up to 32 bits, but it's unlikely
             # anyone will need this range
-            return units.ValueRange(min=0, max=2**16 - 1)
+            return units.ValueRange(min=0, max=2**8 - 1)
     

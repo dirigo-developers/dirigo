@@ -1,5 +1,6 @@
 from abc import ABC, abstractmethod
 from pathlib import Path
+import math
 
 from platformdirs import user_config_dir
 
@@ -562,7 +563,7 @@ class Digitizer(ABC):
         profile_fn = profile_name + ".toml"
         profile = load_toml(self.PROFILE_LOCATION / profile_fn)
         
-        self.sample_clock.source = profile["sample_clock"]["clock_source"]
+        self.sample_clock.source = profile["sample_clock"]["source"]
         if "rate" in profile["sample_clock"]:
             # rate setter method should handle converting string representation into units.SampleRate
             self.sample_clock.rate = profile["sample_clock"]["rate"] 
@@ -591,12 +592,6 @@ class Digitizer(ABC):
 
     @property
     @abstractmethod
-    def bit_depth(self) -> int:
-        """Returns the bit depth (sample resolution) of the digitizer."""
-        pass
-
-    @property
-    @abstractmethod
     def data_range(self) -> units.ValueRange:
         """
         Returns the range of values returned by the digitizer 
@@ -605,3 +600,10 @@ class Digitizer(ABC):
         for in-place averaging.
         """
         pass
+
+    @property
+    def bit_depth(self) -> int:
+        """Returns the bit depth (sample resolution) of the digitizer.
+        
+        Requires data_range to be set up accurately in subclass."""
+        return math.ceil(math.log2(self.data_range.range))
