@@ -1,5 +1,6 @@
 import numpy as np
 from functools import cached_property
+import time
 
 import nidaqmx
 import nidaqmx.system
@@ -229,7 +230,7 @@ class NISampleClock(digitizer.SampleClock):
         else:
             self._mode = "edge counting"
 
-        self._source = "/Dev1/ao/SampleClock" # TODO not hard code?
+        self._source = None
         self._rate = None 
         self._edge = "rising"
 
@@ -589,12 +590,17 @@ class NIAcquire(digitizer.Acquire):
                 ci_chan.ci_count_edges_term = channel.channel_name
 
                 # Configure the sample clock
+                if self._sample_clock.source is None:
+                    source = "/" + self._device.name + "/ao/SampleClock"
+                else:
+                    source = self._sample_clock.source
+
                 task.timing.cfg_samp_clk_timing(
                     rate=self._sample_clock.rate, 
-                    source="/Dev1/ai/SampleClock",
+                    source=source,
                     active_edge=edge,
                     sample_mode=sample_mode,
-                    samps_per_chan=samples_per_chan*2 # TODO not sure about 2x?
+                    samps_per_chan=samples_per_chan*4 # TODO not sure about 2x?
                 )
 
                 reader = CounterReader(task.in_stream)
@@ -607,22 +613,6 @@ class NIAcquire(digitizer.Acquire):
                 dtype=np.uint32
             )
 
-            # Finally set up an AI channel that will be used only for its sample clock
-            task = nidaqmx.Task(f"Analog input (for clock only)")
-            task.ai_channels.add_ai_voltage_chan(
-                physical_channel="Dev1/ai0"
-            )
-            task.timing.cfg_samp_clk_timing(
-                rate=self._sample_clock.rate, 
-                source=None, # use internal clock engine
-                active_edge=edge,
-                sample_mode=sample_mode,
-                samps_per_chan=samples_per_chan*2 #TODO, not sure about 2x
-            )
-            reader = AnalogUnscaledReader(task.in_stream)
-            self._tasks.append(task)
-            self._readers.append(reader)
-
         self._inverted_vector = np.array(
             [-2*channel.inverted+1 for channel in self._channels if channel.enabled],
             dtype=np.int8
@@ -634,7 +624,6 @@ class NIAcquire(digitizer.Acquire):
         else:
             for task in self._tasks:
                 task.start()
-                # Note that the final task in this list is the AI task, whose clock is used by all other tasks
 
         self._started = True
         self._buffers_acquired = 0
@@ -682,13 +671,14 @@ class NIAcquire(digitizer.Acquire):
             )
             
             for i, reader in enumerate(self._readers):
-
+                t0 = time.perf_counter()
                 reader.read_many_sample_uint32(
                     data=data_single_channel,
                     number_of_samples_per_channel=nsamples
                 )
+                t1 = time.perf_counter()
                 data_multiple_channels[1:,i] = data_single_channel
-                print(f'read {nsamples} samples')
+                print(f'Read {nsamples} samples. Waited {t1-t0}')
 
             # Difference along the samples dim and reorder dims for further processing
             data_multiple_channels[0,:] = self._last_samples

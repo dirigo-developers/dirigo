@@ -172,19 +172,28 @@ class LineAcquisition(Acquisition):
             digi.acquire.start() # This includes the buffer allocation
 
         elif isinstance(self.hw.fast_raster_scanner, GalvoScanner):
-            channel = "/Dev1/ai/SampleClock"
+            if digi._mode == "analog":
+                self.hw.fast_raster_scanner.start(
+                    input_sample_rate=digi.sample_clock.rate,
+                    input_sample_clock_channel=digi.sample_clock.source,
+                    pixels_per_period=self.spec.pixels_per_line,
+                    periods_per_write=self.spec.records_per_buffer
+                )
+                digi.acquire.start()
 
-            self.hw.fast_raster_scanner.start(
-                input_sample_rate=digi.sample_clock.rate,
-                input_sample_clock_channel=channel,
-                pixels_per_period=self.spec.pixels_per_line,
-                periods_per_write=self.spec.records_per_buffer
-            )
-            digi.acquire.start()
+            elif digi._mode == "edge counting":
+                digi.acquire.start()
+                self.hw.fast_raster_scanner.start(
+                    input_sample_rate=digi.sample_clock.rate,
+                    input_sample_clock_channel=digi.sample_clock.source,
+                    pixels_per_period=self.spec.pixels_per_line,
+                    periods_per_write=self.spec.records_per_buffer
+                )
 
         try:
             while not self._stop_event.is_set() and \
                 digi.acquire.buffers_acquired < self.spec.buffers_per_acquisition:
+
                 print(f"Acquired {digi.acquire.buffers_acquired} of {self.spec.buffers_per_acquisition}")
                 buffer = digi.acquire.get_next_completed_buffer()
                 if self.hw.stage or self.hw.objective_scanner:
@@ -196,8 +205,14 @@ class LineAcquisition(Acquisition):
 
     def cleanup(self):
         """Closes resources started during the acquisition."""
-        self.hw.digitizer.acquire.stop()
-        self.hw.fast_raster_scanner.stop()
+        try:
+            self.hw.digitizer.acquire.stop()
+        except:
+            pass  # TODO, remove these try except blocks
+        try:
+            self.hw.fast_raster_scanner.stop()
+        except:
+            pass
 
         # Put None into queue to signal to subscribers that we are finished
         self.publish(None)
