@@ -259,11 +259,17 @@ class NISampleClock(digitizer.SampleClock):
 
     @property
     def rate(self) -> units.SampleRate:
-        return units.SampleRate(self._rate)
+        if self._rate:
+            return units.SampleRate(self._rate)
+        else:
+            return None
 
     @rate.setter
-    def rate(self, value: units.SampleRate):
-        # TODO switch for AI/CI tasks
+    def rate(self, value: units.SampleRate | None):
+        if value is None:
+            self._rate = None
+            return
+        
         if not isinstance(value, units.SampleRate):
             value = units.SampleRate(value)
 
@@ -479,7 +485,10 @@ class NIAcquire(digitizer.Acquire):
 
     @property
     def record_length_resolution(self) -> int:
-        return 32
+        if self._mode == "analog":
+            return 32
+        elif self._mode == "edge counting":
+            return 1
 
     @property
     def records_per_buffer(self) -> int:
@@ -533,9 +542,7 @@ class NIAcquire(digitizer.Acquire):
 
         if self._mode == "analog":
 
-            self._task = nidaqmx.Task(
-                "Analog input" if self._mode == "analog" else "Counter input"
-            )
+            self._task = nidaqmx.Task("Analog input")
 
             for channel in self._channels:
                 if not channel.enabled:
@@ -552,14 +559,6 @@ class NIAcquire(digitizer.Acquire):
                     # S series only supports pseudo-differential
                     ai_channel.ai_term_cfg = TerminalConfiguration.PSEUDO_DIFF
 
-            # Configure trigger
-            # edge = Edge.RISING if self._trigger.slope == "rising" else Edge.FALLING
-            # self._task.triggers.start_trigger.cfg_dig_edge_start_trig(
-            #     trigger_source=self._trigger.source,
-            #     trigger_edge=edge
-            # )
-            # Not implemented yet: for analog triggers, use cfg_anlg_edge_start_trig
-
             # Configure the sample clock
             self._task.timing.cfg_samp_clk_timing(
                 rate=self._sample_clock.rate, 
@@ -575,6 +574,7 @@ class NIAcquire(digitizer.Acquire):
         else: # For edge counting:
             self._tasks: list[nidaqmx.Task] = []
             self._readers: list[CounterReader] = []
+
             for channel in self._channels:
                 if not channel.enabled:
                     continue
@@ -591,10 +591,10 @@ class NIAcquire(digitizer.Acquire):
                 # Configure the sample clock
                 task.timing.cfg_samp_clk_timing(
                     rate=self._sample_clock.rate, 
-                    source=self._sample_clock.source,
+                    source="/Dev1/ai/SampleClock",
                     active_edge=edge,
                     sample_mode=sample_mode,
-                    samps_per_chan=samples_per_chan*10 # TODO not sure about 2x?
+                    samps_per_chan=samples_per_chan*2 # TODO not sure about 2x?
                 )
 
                 reader = CounterReader(task.in_stream)
@@ -607,6 +607,22 @@ class NIAcquire(digitizer.Acquire):
                 dtype=np.uint32
             )
 
+            # Finally set up an AI channel that will be used only for its sample clock
+            task = nidaqmx.Task(f"Analog input (for clock only)")
+            task.ai_channels.add_ai_voltage_chan(
+                physical_channel="Dev1/ai0"
+            )
+            task.timing.cfg_samp_clk_timing(
+                rate=self._sample_clock.rate, 
+                source=None, # use internal clock engine
+                active_edge=edge,
+                sample_mode=sample_mode,
+                samps_per_chan=samples_per_chan*2 #TODO, not sure about 2x
+            )
+            reader = AnalogUnscaledReader(task.in_stream)
+            self._tasks.append(task)
+            self._readers.append(reader)
+
         self._inverted_vector = np.array(
             [-2*channel.inverted+1 for channel in self._channels if channel.enabled],
             dtype=np.int8
@@ -618,6 +634,7 @@ class NIAcquire(digitizer.Acquire):
         else:
             for task in self._tasks:
                 task.start()
+                # Note that the final task in this list is the AI task, whose clock is used by all other tasks
 
         self._started = True
         self._buffers_acquired = 0

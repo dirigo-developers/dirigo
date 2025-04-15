@@ -118,6 +118,8 @@ class LineAcquisition(Acquisition):
         self.spec: LineAcquisitionSpec # to refine type hints
 
         self.hw.digitizer.load_profile(profile_name=self.spec.digitizer_profile)
+        if self.hw.digitizer.sample_clock.rate is None:
+            self.hw.digitizer.sample_clock.rate = units.SampleRate(1 / self.spec.pixel_time)
 
         # If using galvo scanner, then set it up based on acquisition spec parameters
         if isinstance(self.hw.fast_raster_scanner, GalvoScanner):
@@ -126,7 +128,9 @@ class LineAcquisition(Acquisition):
 
             # Fast axis period should be multiple of digitizer sample resolution
             T_exact = self.spec.pixel_time * self.spec.pixels_per_line / self.spec.fill_fraction
-            dt = units.Time(self.hw.digitizer.acquire.record_length_resolution / self.hw.digitizer.sample_clock.rate)
+            dt = units.Time(
+                self.hw.digitizer.acquire.record_length_resolution / self.hw.digitizer.sample_clock.rate
+            )
             T_rounded = round(T_exact / dt) * dt
             self.hw.fast_raster_scanner.frequency = 1 / T_rounded 
 
@@ -138,31 +142,26 @@ class LineAcquisition(Acquisition):
                 self.hw.laser_scanning_optics.object_position_to_scan_angle(self.spec.extended_scan_width)
             # for res scanner: frequency fixed, waveform fixed, duty cycle fixed
         
-        self.configure_digitizer(profile_name=self.spec.digitizer_profile)
+        self.configure_digitizer()
 
-    def configure_digitizer(self, profile_name: str):
+    def configure_digitizer(self):
         """
-        Loads digitizer profile and sets record and buffer settings.
-
-        Digitizer profile is a set of user-modifiable settings, like channels
-        enabled, voltage ranges, impedances, trigger source, sample rate, etc.
+        Sets record and buffer settings.
 
         Record and buffer settings, such as record length, number of records per
         buffer, etc. are automatically calculated for the profile, acquisition
         specificiaton, and other system properties.
         """
-        digi = self.hw.digitizer # for brevity
-
-        #digi.load_profile(profile_name)
+        acq = self.hw.digitizer.acquire # for brevity
 
         # Configure acquisition timing and sizes
-        digi.acquire.pre_trigger_samples = 0 # TODO, maybe allow this to be adjustable?
-        digi.acquire.timestamps_enabled = True # testing
-        digi.acquire.trigger_delay_samples = self._calculate_trigger_delay()
-        digi.acquire.record_length = self._calculate_record_length()
-        digi.acquire.records_per_buffer = self.spec.records_per_buffer
-        digi.acquire.buffers_per_acquisition = self.spec.buffers_per_acquisition
-        digi.acquire.buffers_allocated = self.spec.buffers_allocated
+        acq.pre_trigger_samples = 0 # TODO, maybe allow this to be adjustable?
+        acq.timestamps_enabled = True # testing
+        acq.trigger_delay_samples = self._calculate_trigger_delay()
+        acq.record_length = self._calculate_record_length()
+        acq.records_per_buffer = self.spec.records_per_buffer
+        acq.buffers_per_acquisition = self.spec.buffers_per_acquisition
+        acq.buffers_allocated = self.spec.buffers_allocated
 
     def run(self):
         digi = self.hw.digitizer # for brevity
@@ -173,8 +172,11 @@ class LineAcquisition(Acquisition):
             digi.acquire.start() # This includes the buffer allocation
 
         elif isinstance(self.hw.fast_raster_scanner, GalvoScanner):
+            channel = "/Dev1/ai/SampleClock"
+
             self.hw.fast_raster_scanner.start(
-                ai_sample_rate=self.hw.digitizer.sample_clock.rate,
+                input_sample_rate=digi.sample_clock.rate,
+                input_sample_clock_channel=channel,
                 pixels_per_period=self.spec.pixels_per_line,
                 periods_per_write=self.spec.records_per_buffer
             )
@@ -240,7 +242,7 @@ class LineAcquisition(Acquisition):
 
     def _calculate_record_length(self, round_up: bool = True) -> int | float:
         ff = self.spec.fill_fraction
-        sr = self.hw.digitizer.sample_clock.rate
+        rate = self.hw.digitizer.sample_clock.rate
         f = self.hw.fast_raster_scanner.frequency
 
         if isinstance(self.hw.fast_raster_scanner, ResonantScanner): #TODO consider scanner types and logic here
@@ -251,14 +253,14 @@ class LineAcquisition(Acquisition):
             else:
                 end = math.acos(-ff) / TWO_PI
 
-            record_len = (end - start) * sr / f
+            record_len = (end - start) * rate / f
             
             # For tolerance to error in initial frequency, extend record length
             record_len *= 1.01
 
         elif isinstance(self.hw.fast_raster_scanner, GalvoScanner):
             # For galvo-galvo scanning, we record 100% of time including flyback
-            record_len = round(sr / f)
+            record_len = round(rate / f)
         # OLD:
         # else: #TODO make elif and refine logic with above
         #     record_len = round(self.spec.pixels_per_line / ff)

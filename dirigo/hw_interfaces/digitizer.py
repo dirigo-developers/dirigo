@@ -567,6 +567,8 @@ class Digitizer(ABC):
         if "rate" in profile["sample_clock"]:
             # rate setter method should handle converting string representation into units.SampleRate
             self.sample_clock.rate = profile["sample_clock"]["rate"] 
+        else:
+            self.sample_clock.rate = None
         self.sample_clock.edge = profile["sample_clock"]["edge"]
 
         for i, channel in enumerate(self.channels):
@@ -585,7 +587,8 @@ class Digitizer(ABC):
             self.trigger.external_range = profile["trigger"]["external_range"]
         if "external_coupling" in profile["trigger"]:
             self.trigger.external_coupling = profile["trigger"]["external_coupling"]
-        self.trigger.source = profile["trigger"]["source"]
+        if "source" in profile["trigger"]:
+            self.trigger.source = profile["trigger"]["source"]
         self.trigger.slope = profile["trigger"]["slope"]
         if "level" in profile["trigger"]:
             self.trigger.level = 0

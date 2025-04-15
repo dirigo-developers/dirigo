@@ -454,7 +454,8 @@ class FastGalvoScannerViaNI(GalvoScannerViaNI, FastRasterScanner):
         self._slow_scanner: SlowGalvoScannerViaNI = None
 
     def start(self, 
-              ai_sample_rate: units.SampleRate, 
+              input_sample_rate: units.SampleRate, 
+              input_sample_clock_channel: str,
               pixels_per_period: int, # e.g. pixels per line
               periods_per_write: int, # e.g. lines per frame
               adjustable = False # allows changing amplitude & offset mid-acquisition, but may be taxing for very high frame rates
@@ -463,8 +464,8 @@ class FastGalvoScannerViaNI(GalvoScannerViaNI, FastRasterScanner):
 
         try:
             # Validate sample rate
-            if not isinstance(ai_sample_rate, units.SampleRate):
-                raise ValueError("AO sample rate must be set with Frequency object")
+            if not isinstance(input_sample_rate, units.SampleRate):
+                raise ValueError("Input sample rate must be set with Frequency object")
             
             # Validate pixels per period
             if (not isinstance(pixels_per_period, int)) or (pixels_per_period < 1):
@@ -476,7 +477,7 @@ class FastGalvoScannerViaNI(GalvoScannerViaNI, FastRasterScanner):
                 raise ValueError("Periods per write must be a positive integer")
             self._periods_per_write = periods_per_write
 
-            # Set up AO (for wavefrom) and DO (for line clock) tasks
+            # Set up AO (for waveform) and DO (for line clock) tasks
             self._ao_task = nidaqmx.Task("Galvo waveform(s)") # for analog galvo command waveforms
             self._ao_task.ao_channels.add_ao_voltage_chan(
                 physical_channel=self._analog_control_channel
@@ -499,7 +500,7 @@ class FastGalvoScannerViaNI(GalvoScannerViaNI, FastRasterScanner):
                 )
 
             # Set up CO task (to divide AI sample clock frequency down to target AO sample rate)
-            freq_div_factor = 2**int(np.log2(ai_sample_rate / self.TARGET_SAMPLE_RATE))
+            freq_div_factor = 2**int(np.log2(input_sample_rate / self.TARGET_SAMPLE_RATE))
             if freq_div_factor > 32: # 32 corresponds to the digitizer 'record resolution'--know we can divide up to this factor
                 freq_div_factor = 32
             if freq_div_factor > 1:
@@ -508,7 +509,7 @@ class FastGalvoScannerViaNI(GalvoScannerViaNI, FastRasterScanner):
                 self._co_task = nidaqmx.Task("AI clock frequency divided")
                 freq_div_ch = self._co_task.co_channels.add_co_pulse_chan_ticks(
                     counter=CounterRegistry.allocate_counter(),
-                    source_terminal="/Dev1/ai/SampleClock",
+                    source_terminal=input_sample_clock_channel,
                     high_ticks=high_ticks,
                     low_ticks=freq_div_factor - high_ticks
                 )
@@ -521,11 +522,11 @@ class FastGalvoScannerViaNI(GalvoScannerViaNI, FastRasterScanner):
                 # If AI sample rate is approximately the target AO sample rate, 
                 # then we can just use the AI sample clock as is
                 freq_div_factor = 1
-                source = "/" + self._ao_task.devices[0].name + "/ai/SampleClock"
+                source = input_sample_clock_channel
                 self._co_task = None
             
             # Set timing
-            self._sample_rate = ai_sample_rate / freq_div_factor
+            self._sample_rate = input_sample_rate / freq_div_factor
             self._ao_task.timing.cfg_samp_clk_timing(
                 rate=self._sample_rate,
                 source=source, # see above about frequency divider counter

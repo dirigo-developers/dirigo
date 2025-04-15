@@ -176,7 +176,7 @@ class RasterFrameProcessor(Processor):
         self._fixed_trigger_delay = self._acq.hw.digitizer.acquire.trigger_delay_samples
         self._trigger_phase = 0 # This value can be adjusted
         if hasattr(self._acq.hw.fast_raster_scanner, 'input_delay'):
-            self._trigger_phase = self._acq.hw.fast_raster_scanner.input_delay * self._acq.hw.digitizer.sample_clock.rate
+            self._trigger_phase = self._acq.hw.fast_raster_scanner.input_delay * self._sample_clock_rate
 
         self._scaling_factor = 2**(self._bits_precision - self._acq.data_acquisition_device.bit_depth) # should we bit shift instead of scale with multiply?
 
