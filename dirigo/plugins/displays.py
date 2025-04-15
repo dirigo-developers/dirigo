@@ -194,6 +194,28 @@ class FrameDisplay(Display):
             self._n_frame_average = n_frames
             self._average_buffer = None # Triggers reset of the average buffer 
 
+    @property
+    def gamma(self) -> float:
+        return self._gamma
+    
+    @gamma.setter
+    def gamma(self, new_gamma: float):
+        if not isinstance(new_gamma, float):
+            raise ValueError("Gamma must be set with a float value")
+        if not (0 < new_gamma <= 10):
+            raise ValueError("Gamma must be between 0.0 and 10.0")
+        self._gamma = new_gamma
+
+        # Generate gamma correction LUT
+        x = np.arange(self.gamma_lut_length) \
+            / (self.gamma_lut_length - 1) # TODO, not sure about the -1
+        
+        gamma_lut = (2**self._monitor_bit_depth - 1) * x**(self._gamma)
+        if self._monitor_bit_depth > 8:
+            self.gamma_lut = np.round(gamma_lut).astype(np.uint16)
+        else:
+            self.gamma_lut = np.round(gamma_lut).astype(np.uint8)
+
     def update_display(self, skip_when_acquisition_in_progress: bool = True):
         """
         On demand reprocessing of the last acquired frame for display.
