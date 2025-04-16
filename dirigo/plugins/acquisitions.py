@@ -26,7 +26,7 @@ class LineAcquisitionSpec(AcquisitionSpec):
             self,
             line_width: str,
             pixel_size: str,
-            buffers_per_acquisition: int | float, # float('inf')
+            buffers_per_acquisition: int | float = float('inf'),
             bidirectional_scanning: bool = False,
             pixel_time: str = None, # e.g. "1 μs"
             fill_fraction: float = 1.0,
@@ -397,8 +397,8 @@ class StackAcquisitionSpec(FrameAcquisitionSpec):
                  lower_limit: str | units.Position, 
                  upper_limit: str | units.Position, 
                  depth_spacing: str | units.Position,
-                 saved_frames_per_step: int = 1, 
-                 sacrificial_frames_per_step: int = 1,
+                 saved_frames_per_step: int = 2, 
+                 sacrificial_frames_per_step: int = 2,
                  **kwargs):
         super().__init__(**kwargs)
 
@@ -445,7 +445,6 @@ class StackAcquisition(FrameAcquisition):
 
         # Set up child FrameAcquisition & subscribe to it
         spec.buffers_per_acquisition = float('inf')
-        spec.bidirectional_scanning = False
         self._frame_acquisition = FrameAcquisition(hw, spec)
         self._frame_acquisition.add_subscriber(self)
 
@@ -481,16 +480,18 @@ class StackAcquisition(FrameAcquisition):
             # Get sacrificial frames
             for _ in range(self.spec._sacrificial_frames_per_step):
                 # pocket the sacrificial frames (don't pass them on to subscribers)
-                if self.inbox.get(block=True)  is None:
-                    return
+                if self.inbox.get(block=True) is None:
+                    return # runs finally: block on its way out
 
             for i in range(1, self.spec.depths_per_acquisition+1):
                 for _ in range(self.spec._saved_frames_per_step):
                     # Wait for frame data, and pass along
                     buf: AcquisitionBuffer = self.inbox.get(block=True)
                     if buf is None:
-                        return
+                        return # runs finally: block on its way out
                     self.publish(buf)
+
+                    # TOOD, blank laser beam for step time (sacrificial frames)
 
                 if i < self.spec.depths_per_acquisition:
                     # Move Z scanner to next depth
@@ -500,7 +501,7 @@ class StackAcquisition(FrameAcquisition):
                     for _ in range(self.spec._sacrificial_frames_per_step):
                         # pocket the sacrificial frames (don't pass them on)
                         if self.inbox.get(block=True) is None:
-                            return
+                            return # runs finally: block on its way out
         finally:
             self._frame_acquisition.stop()
             self.publish(None) # publish the sentinel

@@ -18,7 +18,7 @@ class TiffLogger(Logger):
     def __init__(self, 
                  acquisition: Acquisition = None, 
                  processor: Processor = None,
-                 max_frames_per_file: int | float = 1,
+                 max_frames_per_file: int = 1,
                  basename: str = "experiment"
                  ):
         super().__init__(acquisition, processor)
