@@ -40,8 +40,9 @@ sigs = [
 def additive_display_kernel(data: np.ndarray, luts: np.ndarray, gamma_lut: np.ndarray) -> np.ndarray:
     """Applies LUTs and blends channels additively."""
     Ny, Nx, Nc = data.shape
-    _, transfer_function_max_index, bpp = luts.shape
-    
+    bpp = luts.shape[2]
+    gamma_lut_length = gamma_lut.shape[0]
+
     image = np.zeros(shape=(Ny, Nx, bpp), dtype=np.uint8)
 
     for yi in prange(Ny):
@@ -55,9 +56,9 @@ def additive_display_kernel(data: np.ndarray, luts: np.ndarray, gamma_lut: np.nd
                 b += luts[ci, lut_index, 2]
             
             # Gamma correct blended values and assign to output image 
-            image[yi, xi, 0] = gamma_lut[min(r, transfer_function_max_index)]
-            image[yi, xi, 1] = gamma_lut[min(g, transfer_function_max_index)]
-            image[yi, xi, 2] = gamma_lut[min(b, transfer_function_max_index)]
+            image[yi, xi, 0] = gamma_lut[min(r, gamma_lut_length-1)]
+            image[yi, xi, 1] = gamma_lut[min(g, gamma_lut_length-1)]
+            image[yi, xi, 2] = gamma_lut[min(b, gamma_lut_length-1)]
 
     return image
 
@@ -192,6 +193,28 @@ class FrameDisplay(Display):
         with self._average_buffer_lock:
             self._n_frame_average = n_frames
             self._average_buffer = None # Triggers reset of the average buffer 
+
+    @property
+    def gamma(self) -> float:
+        return self._gamma
+    
+    @gamma.setter
+    def gamma(self, new_gamma: float):
+        if not isinstance(new_gamma, float):
+            raise ValueError("Gamma must be set with a float value")
+        if not (0 < new_gamma <= 10):
+            raise ValueError("Gamma must be between 0.0 and 10.0")
+        self._gamma = new_gamma
+
+        # Generate gamma correction LUT
+        x = np.arange(self.gamma_lut_length) \
+            / (self.gamma_lut_length - 1) # TODO, not sure about the -1
+        
+        gamma_lut = (2**self._monitor_bit_depth - 1) * x**(self._gamma)
+        if self._monitor_bit_depth > 8:
+            self.gamma_lut = np.round(gamma_lut).astype(np.uint16)
+        else:
+            self.gamma_lut = np.round(gamma_lut).astype(np.uint8)
 
     def update_display(self, skip_when_acquisition_in_progress: bool = True):
         """

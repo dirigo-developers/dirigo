@@ -1,5 +1,6 @@
 from abc import ABC, abstractmethod
 from pathlib import Path
+import math
 
 from platformdirs import user_config_dir
 
@@ -562,10 +563,12 @@ class Digitizer(ABC):
         profile_fn = profile_name + ".toml"
         profile = load_toml(self.PROFILE_LOCATION / profile_fn)
         
-        self.sample_clock.source = profile["sample_clock"]["clock_source"]
+        self.sample_clock.source = profile["sample_clock"]["source"]
         if "rate" in profile["sample_clock"]:
             # rate setter method should handle converting string representation into units.SampleRate
             self.sample_clock.rate = profile["sample_clock"]["rate"] 
+        else:
+            self.sample_clock.rate = None
         self.sample_clock.edge = profile["sample_clock"]["edge"]
 
         for i, channel in enumerate(self.channels):
@@ -584,16 +587,11 @@ class Digitizer(ABC):
             self.trigger.external_range = profile["trigger"]["external_range"]
         if "external_coupling" in profile["trigger"]:
             self.trigger.external_coupling = profile["trigger"]["external_coupling"]
-        self.trigger.source = profile["trigger"]["source"]
+        if "source" in profile["trigger"]:
+            self.trigger.source = profile["trigger"]["source"]
         self.trigger.slope = profile["trigger"]["slope"]
         if "level" in profile["trigger"]:
             self.trigger.level = 0
-
-    @property
-    @abstractmethod
-    def bit_depth(self) -> int:
-        """Returns the bit depth (sample resolution) of the digitizer."""
-        pass
 
     @property
     @abstractmethod
@@ -605,3 +603,10 @@ class Digitizer(ABC):
         for in-place averaging.
         """
         pass
+
+    @property
+    def bit_depth(self) -> int:
+        """Returns the bit depth (sample resolution) of the digitizer.
+        
+        Requires data_range to be set up accurately in subclass."""
+        return math.ceil(math.log2(self.data_range.range))

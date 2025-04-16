@@ -23,7 +23,7 @@ class LineAcquisitionSpec(AcquisitionSpec):
             pixel_size: str,
             buffers_per_acquisition: int | float, # float('inf')
             bidirectional_scanning: bool = False,
-            pixel_rate: str = None, # e.g. "100 kHz"
+            pixel_time: str = None, # e.g. "1 μs"
             fill_fraction: float = 1.0,
             digitizer_profile: Optional[str] = None,
             buffers_allocated: Optional[int] = None,
@@ -32,10 +32,10 @@ class LineAcquisitionSpec(AcquisitionSpec):
     ):
         super().__init__(**kwargs)
         self.bidirectional_scanning = bidirectional_scanning 
-        if pixel_rate:
-            self.pixel_rate = units.Frequency(pixel_rate)
+        if pixel_time:
+            self.pixel_time = units.Time(pixel_time)
         else:
-            self.pixel_rate = None # nonlinear scan path (ie resonant scanning)
+            self.pixel_time = None # None codes for non-constant pixel time (ie resonant scanning)
         self.line_width = units.Position(line_width)
         pixel_size = units.Position(pixel_size)
 
@@ -51,7 +51,7 @@ class LineAcquisitionSpec(AcquisitionSpec):
             raise ValueError(f"Invalid fill fraction, got {fill_fraction}. "
                              "Must be between 0.0 and 1.0 (upper bound incl.)")
         self.fill_fraction = fill_fraction
-        # TODO validate lines per buffer
+        # TODO validate lines per buffer [What is this for?]
         self.lines_per_buffer = lines_per_buffer
 
         # Validate buffers per acquisition
@@ -74,7 +74,7 @@ class LineAcquisitionSpec(AcquisitionSpec):
 
     # Convenience properties
     @property
-    def extended_scan_width(self) -> units.Position:
+    def extended_scan_width(self) -> units.Position: # TODO remove this b/c this calculation should be done explicitly where its needed for transparency
         """
         Returns the desired line width divided by the fill fraction. For sinusoidal
         scanpaths this is the full scan amplitude required to cover the line
@@ -117,12 +117,23 @@ class LineAcquisition(Acquisition):
         super().__init__(hw, spec) # sets up thread, inbox, stores hw, checks resources
         self.spec: LineAcquisitionSpec # to refine type hints
 
+        self.hw.digitizer.load_profile(profile_name=self.spec.digitizer_profile)
+        if self.hw.digitizer.sample_clock.rate is None:
+            self.hw.digitizer.sample_clock.rate = units.SampleRate(1 / self.spec.pixel_time)
+
         # If using galvo scanner, then set it up based on acquisition spec parameters
         if isinstance(self.hw.fast_raster_scanner, GalvoScanner):
             self.hw.fast_raster_scanner.amplitude = \
                 self.hw.laser_scanning_optics.object_position_to_scan_angle(spec.line_width)
-            self.hw.fast_raster_scanner.frequency = \
-                self.spec.pixel_rate / round(self.spec.pixels_per_line / self.spec.fill_fraction) # TODO, pixel periods per line OK?
+
+            # Fast axis period should be multiple of digitizer sample resolution
+            T_exact = self.spec.pixel_time * self.spec.pixels_per_line / self.spec.fill_fraction
+            dt = units.Time(
+                self.hw.digitizer.acquire.record_length_resolution / self.hw.digitizer.sample_clock.rate
+            )
+            T_rounded = round(T_exact / dt) * dt
+            self.hw.fast_raster_scanner.frequency = 1 / T_rounded 
+
             self.hw.fast_raster_scanner.waveform = "asymmetric triangle"
             self.hw.fast_raster_scanner.duty_cycle = self.spec.fill_fraction
         
@@ -131,33 +142,26 @@ class LineAcquisition(Acquisition):
                 self.hw.laser_scanning_optics.object_position_to_scan_angle(self.spec.extended_scan_width)
             # for res scanner: frequency fixed, waveform fixed, duty cycle fixed
         
-        self.configure_digitizer(profile_name=self.spec.digitizer_profile)
+        self.configure_digitizer()
 
-    def configure_digitizer(self, profile_name: str):
+    def configure_digitizer(self):
         """
-        Loads digitizer profile and sets record and buffer settings.
-
-        Digitizer profile is a set of user-modifiable settings, like channels
-        enabled, voltage ranges, impedances, trigger source, sample rate, etc.
+        Sets record and buffer settings.
 
         Record and buffer settings, such as record length, number of records per
         buffer, etc. are automatically calculated for the profile, acquisition
         specificiaton, and other system properties.
         """
-        digi = self.hw.digitizer # for brevity
-
-        digi.load_profile(profile_name)
-        if self.spec.pixel_rate:
-            digi.sample_clock.rate = self.spec.pixel_rate
+        acq = self.hw.digitizer.acquire # for brevity
 
         # Configure acquisition timing and sizes
-        digi.acquire.pre_trigger_samples = 0 # TODO, maybe allow this to be adjustable?
-        digi.acquire.timestamps_enabled = True #testing
-        digi.acquire.trigger_delay_samples = self._calculate_trigger_delay()
-        digi.acquire.record_length = self._calculate_record_length()
-        digi.acquire.records_per_buffer = self.spec.records_per_buffer
-        digi.acquire.buffers_per_acquisition = self.spec.buffers_per_acquisition
-        digi.acquire.buffers_allocated = self.spec.buffers_allocated
+        acq.pre_trigger_samples = 0 # TODO, maybe allow this to be adjustable?
+        acq.timestamps_enabled = True # testing
+        acq.trigger_delay_samples = self._calculate_trigger_delay()
+        acq.record_length = self._calculate_record_length()
+        acq.records_per_buffer = self.spec.records_per_buffer
+        acq.buffers_per_acquisition = self.spec.buffers_per_acquisition
+        acq.buffers_allocated = self.spec.buffers_allocated
 
     def run(self):
         digi = self.hw.digitizer # for brevity
@@ -166,17 +170,30 @@ class LineAcquisition(Acquisition):
         if isinstance(self.hw.fast_raster_scanner, ResonantScanner):
             self.hw.fast_raster_scanner.start()        
             digi.acquire.start() # This includes the buffer allocation
+
         elif isinstance(self.hw.fast_raster_scanner, GalvoScanner):
-            digi.acquire.start()
-            self.hw.fast_raster_scanner.start(
-                pixel_frequency=self.spec.pixel_rate,
-                pixels_per_period=self.spec.pixels_per_line,
-                periods_per_write=self.spec.records_per_buffer
-            )
+            if digi._mode == "analog":
+                self.hw.fast_raster_scanner.start(
+                    input_sample_rate=digi.sample_clock.rate,
+                    input_sample_clock_channel=digi.sample_clock.source,
+                    pixels_per_period=self.spec.pixels_per_line,
+                    periods_per_write=self.spec.records_per_buffer
+                )
+                digi.acquire.start()
+
+            elif digi._mode == "edge counting":
+                digi.acquire.start()
+                self.hw.fast_raster_scanner.start(
+                    input_sample_rate=digi.sample_clock.rate,
+                    input_sample_clock_channel=digi.sample_clock.source,
+                    pixels_per_period=self.spec.pixels_per_line,
+                    periods_per_write=self.spec.records_per_buffer
+                )
 
         try:
             while not self._stop_event.is_set() and \
                 digi.acquire.buffers_acquired < self.spec.buffers_per_acquisition:
+
                 print(f"Acquired {digi.acquire.buffers_acquired} of {self.spec.buffers_per_acquisition}")
                 buffer = digi.acquire.get_next_completed_buffer()
                 if self.hw.stage or self.hw.objective_scanner:
@@ -188,8 +205,14 @@ class LineAcquisition(Acquisition):
 
     def cleanup(self):
         """Closes resources started during the acquisition."""
-        self.hw.digitizer.acquire.stop()
-        self.hw.fast_raster_scanner.stop()
+        try:
+            self.hw.digitizer.acquire.stop()
+        except:
+            pass  # TODO, remove these try except blocks
+        try:
+            self.hw.fast_raster_scanner.stop()
+        except:
+            pass
 
         # Put None into queue to signal to subscribers that we are finished
         self.publish(None)
@@ -234,6 +257,8 @@ class LineAcquisition(Acquisition):
 
     def _calculate_record_length(self, round_up: bool = True) -> int | float:
         ff = self.spec.fill_fraction
+        rate = self.hw.digitizer.sample_clock.rate
+        f = self.hw.fast_raster_scanner.frequency
 
         if isinstance(self.hw.fast_raster_scanner, ResonantScanner): #TODO consider scanner types and logic here
             start = math.acos(ff) / TWO_PI
@@ -243,14 +268,17 @@ class LineAcquisition(Acquisition):
             else:
                 end = math.acos(-ff) / TWO_PI
 
-            record_len = (end - start) * self.hw.digitizer.sample_clock.rate \
-                / self.hw.fast_raster_scanner.frequency
+            record_len = (end - start) * rate / f
             
             # For tolerance to error in initial frequency, extend record length
             record_len *= 1.01
 
-        else: #TODO make elif and refine logic with above
-            record_len = round(self.spec.pixels_per_line / ff)
+        elif isinstance(self.hw.fast_raster_scanner, GalvoScanner):
+            # For galvo-galvo scanning, we record 100% of time including flyback
+            record_len = round(rate / f)
+        # OLD:
+        # else: #TODO make elif and refine logic with above
+        #     record_len = round(self.spec.pixels_per_line / ff)
         
         if round_up:
             # Round record length up to the next allowable size (or the min)
@@ -261,9 +289,7 @@ class LineAcquisition(Acquisition):
             if record_len < self.hw.digitizer.acquire.record_length_minimum:
                 record_len = self.hw.digitizer.acquire.record_length_minimum
         
-        print("record length", record_len)
         return record_len
-
 
 
 class FrameAcquisitionSpec(LineAcquisitionSpec):
@@ -357,5 +383,3 @@ class FrameAcquisition(LineAcquisition):
             pass # Scanners like resonant scanners can't be parked.
         
         
-
-

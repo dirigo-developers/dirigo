@@ -125,7 +125,7 @@ if __name__ == "__main__":
 
     processor.start()
     display.start()
-    logging.start()
+    #logging.start()
     acquisition.start()
 
     acquisition.join(timeout=100.0)

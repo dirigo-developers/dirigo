@@ -157,7 +157,7 @@ class Display(Worker):
                  acquisition: Acquisition = None, 
                  processor: Processor = None,
                  monitor_bit_depth: int = 8,
-                 gamma: float = 2.2):
+                 gamma: float = 1/2.2):
         """Instantiate with either an Acquisition or Processor"""
         super().__init__()
 
@@ -165,19 +165,7 @@ class Display(Worker):
             raise ValueError("Unsupported monitor bit depth")
         self._monitor_bit_depth = monitor_bit_depth
         
-        if not isinstance(gamma, (float, int)) or not (0.1 <= gamma <= 10):
-            raise ValueError("Display gamma out of range")
-        self._gamma = gamma
-
-        # Generate gamma correction LUT
-        x = np.arange(self.gamma_lut_length) \
-            / (self.gamma_lut_length - 1) # TODO, not sure about the -1
-        
-        gamma_lut = (2**self._monitor_bit_depth - 1) * x**(1/self._gamma)
-        if self._monitor_bit_depth > 8:
-            self.gamma_lut = np.round(gamma_lut).astype(np.uint16)
-        else:
-            self.gamma_lut = np.round(gamma_lut).astype(np.uint8)
+        self.gamma = gamma # gamma setter will validate this
 
         if (acquisition is not None) and (processor is not None):
             raise ValueError("Error creating Display worker: "
