@@ -1,15 +1,20 @@
 from pathlib import Path
 import math
+import time
 from typing import Optional
 
 from platformdirs import user_config_dir
+import numpy as np
 
 from dirigo import units
 from dirigo.hw_interfaces.digitizer import Digitizer
 from dirigo.hw_interfaces.scanner import (
-    FastRasterScanner, SlowRasterScanner, GalvoScanner, ResonantScanner
+    FastRasterScanner, SlowRasterScanner, GalvoScanner, ResonantScanner,
+    ObjectiveZScanner
 )
-from dirigo.sw_interfaces.acquisition import AcquisitionSpec, Acquisition
+from dirigo.sw_interfaces.acquisition import (
+    AcquisitionSpec, Acquisition, AcquisitionBuffer
+)
 
 
 TWO_PI = 2 * math.pi 
@@ -294,7 +299,11 @@ class LineAcquisition(Acquisition):
 
 class FrameAcquisitionSpec(LineAcquisitionSpec):
     MAX_PIXEL_HEIGHT_ADJUSTMENT = 0.01
-    def __init__(self, frame_height: str, flyback_periods: int, pixel_height: str = None, **kwargs):
+    def __init__(self, 
+                 frame_height: str, 
+                 flyback_periods: int, 
+                 pixel_height: str = None, 
+                 **kwargs):
         super().__init__(**kwargs)
 
         self.frame_height = units.Position(frame_height)
@@ -383,3 +392,117 @@ class FrameAcquisition(LineAcquisition):
             pass # Scanners like resonant scanners can't be parked.
         
         
+class StackAcquisitionSpec(FrameAcquisitionSpec):
+    def __init__(self, 
+                 lower_limit: str | units.Position, 
+                 upper_limit: str | units.Position, 
+                 depth_spacing: str | units.Position,
+                 saved_frames_per_step: int = 1, 
+                 sacrificial_frames_per_step: int = 1,
+                 **kwargs):
+        super().__init__(**kwargs)
+
+        self.lower_limit = units.Position(lower_limit)
+        self.upper_limit = units.Position(upper_limit)
+        if self.depth_range < 0:
+            raise ValueError("Stack upper limit must be greater than lower limit.")
+
+        self.depth_spacing = units.Position(depth_spacing)
+        if self.depth_spacing <= 0:
+            raise ValueError("Stack depth spacing must be greater than 0.")
+        
+        self._saved_frames_per_step = int(saved_frames_per_step)
+        if not (0 <= self._saved_frames_per_step < 10):
+            raise ValueError("Saved frames out of range [0,10)")
+        
+        self._sacrificial_frames_per_step = int(sacrificial_frames_per_step)
+        if not (0 <= self._sacrificial_frames_per_step < 10):
+            raise ValueError("Sacrificial frames out of range [0,10)")
+
+    @property
+    def depth_range(self) -> units.Position:
+        return self.upper_limit - self.lower_limit
+
+    @property
+    def depths_per_acquisition(self) -> int:
+        return int(self.depth_range / self.depth_spacing)
+    
+
+class StackAcquisition(FrameAcquisition):
+    REQUIRED_RESOURCES = [Digitizer, FastRasterScanner, SlowRasterScanner, ObjectiveZScanner]
+    SPEC_LOCATION = Path(user_config_dir("Dirigo")) / "acquisition/stack"
+    SPEC_OBJECT = StackAcquisitionSpec
+
+    def __init__(self, hw, spec: StackAcquisitionSpec):
+        super().__init__(hw, spec)
+        self.spec: StackAcquisitionSpec
+
+        self._depths = np.arange(
+            start=spec.lower_limit,
+            stop=spec.upper_limit,
+            step=spec.depth_spacing
+        )
+
+        # Set up child FrameAcquisition & subscribe to it
+        spec.buffers_per_acquisition = float('inf')
+        spec.bidirectional_scanning = False
+        self._frame_acquisition = FrameAcquisition(hw, spec)
+        self._frame_acquisition.add_subscriber(self)
+
+        # Initialize object scanner
+        self.hw.objective_scanner.max_velocity = units.Velocity("300 um/s")
+        self.hw.objective_scanner.acceleration = units.Acceleration("1 mm/s^2")
+
+
+    def run(self):
+        """
+        For video-rate frame scanning (resonant or polygon scanners), there are
+        3 ways to manage axial movement during a Z stack:
+            1) Continuous actuation--constant slow z axis movement, but end up 
+                with shearing in data
+            2) Very fast step (likely w/ piezo) during frame slow axis flyback 
+            3) Step during a sacrificial frame period
+
+        For galvo-galvo scanning, 
+        """
+        # Move to lower limit
+        z_scanner = self.hw.objective_scanner
+        z = z_scanner.position
+        self.hw.objective_scanner.move_relative(self._depths[0])
+        
+        # wait until reached start position
+        while (z_scanner.position - z) - self._depths[0] > units.Position('1 um'):
+            time.sleep(0.01)
+
+        try:
+            # Start child FrameAcquisition
+            self._frame_acquisition.start()
+
+            # Get sacrificial frames
+            for _ in range(self.spec._sacrificial_frames_per_step):
+                # pocket the sacrificial frames (don't pass them on to subscribers)
+                if self.inbox.get(block=True)  is None:
+                    return
+
+            for i in range(1, self.spec.depths_per_acquisition+1):
+                for _ in range(self.spec._saved_frames_per_step):
+                    # Wait for frame data, and pass along
+                    buf: AcquisitionBuffer = self.inbox.get(block=True)
+                    if buf is None:
+                        return
+                    self.publish(buf)
+
+                if i < self.spec.depths_per_acquisition:
+                    # Move Z scanner to next depth
+                    z_scanner.move_relative(self._depths[i]-self._depths[i-1])
+
+                    # Wait for sacrificial frames
+                    for _ in range(self.spec._sacrificial_frames_per_step):
+                        # pocket the sacrificial frames (don't pass them on)
+                        if self.inbox.get(block=True) is None:
+                            return
+        finally:
+            self._frame_acquisition.stop()
+            self.publish(None) # publish the sentinel
+            z_scanner.move_relative(-self._depths[-1])
+    

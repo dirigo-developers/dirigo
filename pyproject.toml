@@ -11,7 +11,7 @@ authors = [
 ]
 license = {text = "MIT"}
 dependencies = [
-    "numba", # TODO, download from pip OK?
+    "numba",
     "scipy",
     "toml",
     "platformdirs",
@@ -22,6 +22,7 @@ dependencies = [
 [project.entry-points."dirigo_acquisitions"]
 linescan = "dirigo.plugins.acquisitions:LineAcquisition"
 frame = "dirigo.plugins.acquisitions:FrameAcquisition"
+stack = "dirigo.plugins.acquisitions:StackAcquisition"
 
 [project.entry-points."dirigo_encoders"]
 linear_encoders_via_ni = "dirigo.plugins.encoders:MultiAxisLinearEncodersViaNI"

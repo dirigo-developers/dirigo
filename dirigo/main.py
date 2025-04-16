@@ -113,7 +113,7 @@ if __name__ == "__main__":
 
     diri = Dirigo()
     
-    acquisition = diri.acquisition_factory('frame')
+    acquisition = diri.acquisition_factory('stack')
     processor = diri.processor_factory(acquisition)
     display = diri.display_factory(processor)
     logging = diri.logger_factory(processor)
@@ -125,7 +125,7 @@ if __name__ == "__main__":
 
     processor.start()
     display.start()
-    #logging.start()
+    logging.start()
     acquisition.start()
 
     acquisition.join(timeout=100.0)
