@@ -68,22 +68,42 @@ class Dirigo:
             f"Acquisition '{type}' not found in entry points."
         )
     
-    def processor_factory(self, acquisition: Acquisition) -> Processor:
+    def processor_factory(self, acquisition: Acquisition, auto_connect = True) -> Processor:
         # Dynamically load plugin class
         #entry_pts = importlib.metadata.entry_points(group="dirigo_processors")
         #TODO finish entry point loading
 
-        return RasterFrameProcessor(acquisition)
+        processor = RasterFrameProcessor(acquisition)
+
+        if auto_connect:
+            acquisition.add_subscriber(processor)
+
+        return processor
     
     def display_factory(self, 
                         processor: Processor = None, 
                         acquisition: Acquisition = None,
-                        display_pixel_format: DisplayPixelFormat = DisplayPixelFormat.RGB24
+                        display_pixel_format: DisplayPixelFormat = DisplayPixelFormat.RGB24,
+                        auto_connect: bool = True
                         ) -> Display:
-        return FrameDisplay(acquisition, processor, display_pixel_format)
+        
+        display = FrameDisplay(acquisition, processor, display_pixel_format)
+
+        if auto_connect:
+            (acquisition or processor).add_subscriber(display)
+
+        return display
     
-    def logger_factory(self, processor: Processor = None, acquisition: Acquisition = None) -> Logger:
-        return TiffLogger(acquisition, processor)
+    def logger_factory(self, 
+                       processor: Processor = None, 
+                       acquisition: Acquisition = None,
+                       auto_connect: bool = True) -> Logger:
+        logger = TiffLogger(acquisition, processor)
+
+        if auto_connect:
+            (acquisition or processor).add_subscriber(logger)
+
+        return logger
     
     def acquisition_spec(self, acquisition_type: str, spec_name: str = "default"):
         # Dynamically load plugin class
@@ -119,17 +139,11 @@ if __name__ == "__main__":
     logging = diri.logger_factory(processor)
     logging.frames_per_file = float('inf')
 
-    # Connect threads
-    acquisition.add_subscriber(processor)
-    processor.add_subscriber(display)
-    processor.add_subscriber(logging)
-
     processor.start()
     display.start()
     logging.start()
     acquisition.start()
 
     acquisition.join(timeout=100.0)
-    # processor.stop()
 
     print("Acquisition complete")
