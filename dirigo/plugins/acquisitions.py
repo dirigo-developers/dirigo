@@ -428,7 +428,7 @@ class StackAcquisitionSpec(FrameAcquisitionSpec):
         return int(self.depth_range / self.depth_spacing)
     
 
-class StackAcquisition(FrameAcquisition):
+class StackAcquisition(Acquisition):
     REQUIRED_RESOURCES = [Digitizer, FastRasterScanner, SlowRasterScanner, ObjectiveZScanner]
     SPEC_LOCATION = Path(user_config_dir("Dirigo")) / "acquisition/stack"
     SPEC_OBJECT = StackAcquisitionSpec
@@ -507,3 +507,71 @@ class StackAcquisition(FrameAcquisition):
             self.publish(None) # publish the sentinel
             z_scanner.move_relative(-self._depths[-1])
     
+
+
+class BidiFrameCalibrationSpec(FrameAcquisitionSpec):
+    pass
+
+
+class BidiFrameCalibration(Acquisition):
+    REQUIRED_RESOURCES = [Digitizer, FastRasterScanner, SlowRasterScanner]
+    SPEC_LOCATION = Path(user_config_dir("Dirigo")) / "acquisition/frame"
+    SPEC_OBJECT = BidiFrameCalibrationSpec
+
+
+    def __init__(self, hw, spec: BidiFrameCalibrationSpec):
+        super().__init__(hw, spec)
+        self.spec: BidiFrameCalibrationSpec
+
+        # self._amplitudes = np.arange( # TODO
+        #     start=spec.lower_limit,
+        #     stop=spec.upper_limit,
+        #     step=spec.spacing
+        # )
+
+        # Need # blanks, # waits
+
+        # Set up child FrameAcquisition & subscribe to it
+        spec.buffers_per_acquisition = float('inf')
+        self._frame_acquisition = FrameAcquisition(hw, spec)
+        self._frame_acquisition.add_subscriber(self)
+
+        # Initialize hw
+
+    def run(self):
+        """
+        """
+        # Preliminary movements
+
+        try:
+            # Start child FrameAcquisition
+            self._frame_acquisition.start()
+
+            # Get sacrificial frames
+            for _ in range(self.spec._sacrificial_frames_per_step):
+                # pocket the sacrificial frames (don't pass them on to subscribers)
+                if self.inbox.get(block=True) is None:
+                    return # runs finally: block on its way out
+
+            for i in range(1, self.spec.amplitudes_per_acquisition+1):
+                for _ in range(self.spec._saved_frames_per_step):
+                    # Wait for frame data, and pass along
+                    buf: AcquisitionBuffer = self.inbox.get(block=True)
+                    if buf is None:
+                        return # runs finally: block on its way out
+                    self.publish(buf)
+
+                    # TOOD, blank laser beam for step time (sacrificial frames)
+
+                if i < self.spec.amplitudes_per_acquisition:
+                    # Adjust amplitude
+                    #z_scanner.move_relative(self._depths[i]-self._depths[i-1])
+
+                    # Wait for sacrificial frames
+                    for _ in range(self.spec._sacrificial_frames_per_step):
+                        # pocket the sacrificial frames (don't pass them on)
+                        if self.inbox.get(block=True) is None:
+                            return # runs finally: block on its way out
+        finally:
+            self._frame_acquisition.stop()
+            self.publish(None) # publish the sentinel

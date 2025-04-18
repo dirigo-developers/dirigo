@@ -77,10 +77,11 @@ def default_colormap_lists(nchannels: int) -> list[str]:
 class FrameDisplay(Display):
     """Worker to perform processing for display (blending, LUTs, etc)"""
 
-    def __init__(self, acq: Acquisition, proc: Processor, 
+    def __init__(self, 
+                 upstream: Acquisition | Processor, 
                  display_pixel_format = DisplayPixelFormat.RGB24,
                  **kwargs):
-        super().__init__(acq, proc, **kwargs)
+        super().__init__(upstream, **kwargs)
 
         self._prev_data = None # None indicates that no data has been acquired yet
         self._prev_position = None

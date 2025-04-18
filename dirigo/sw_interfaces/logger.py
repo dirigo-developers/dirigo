@@ -10,22 +10,18 @@ from dirigo.sw_interfaces import Acquisition, Processor
 
 class Logger(Worker):
     """Dirigo interface for data logging."""
-    def __init__(self, acquisition: Acquisition = None, processor: Processor = None):
-        """Instantiate with either an Acquisition or Processor"""
+    def __init__(self, upstream: Acquisition | Processor):
+        """Instantiate with either an upstream Acquisition or Processor"""
         super().__init__() # sets up the thread and the publisher-subcriber interface
         
-        if (acquisition is not None) and (processor is not None):
-            raise ValueError("Error creating Display worker: "
-                             "Provide either acquisition or processor, not both")
-        elif (acquisition is None) and (processor is None):
-            raise ValueError("Error creating Display worker: "
-                             "Provide either acquisition or processor.")
-        if processor:
-            self._processor = processor
-            self._acquisition = processor._acq
-        else:
+        if isinstance(upstream, Processor): # TODO refactor
+            self._processor = upstream
+            self._acquisition = upstream._acq
+        elif isinstance(upstream, Acquisition):
             self._processor = None
-            self._acquisition = acquisition
+            self._acquisition = upstream
+        else:
+            raise ValueError("Upstream Worker must be either an Acquisition or a Processor")
 
         self.basename: str = None
         self.save_path: Path = None # potentially this could be a kwarg

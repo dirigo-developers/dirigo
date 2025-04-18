@@ -16,12 +16,11 @@ from dirigo.plugins.acquisitions import FrameAcquisitionSpec
 class TiffLogger(Logger):
 
     def __init__(self, 
-                 acquisition: Acquisition = None, 
-                 processor: Processor = None,
+                 upstream: Acquisition | Processor,
                  max_frames_per_file: int = 1,
                  basename: str = "experiment"
                  ):
-        super().__init__(acquisition, processor)
+        super().__init__(upstream)
 
         self.frames_per_file = max_frames_per_file # TODO add validation
         self.basename = basename
