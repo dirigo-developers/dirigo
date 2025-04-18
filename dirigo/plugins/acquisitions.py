@@ -19,6 +19,27 @@ from dirigo.sw_interfaces.acquisition import (
 
 TWO_PI = 2 * math.pi 
 
+
+
+class SampleAcquisitionSpec(AcquisitionSpec):
+    pass
+
+
+class SampleAcquisition(Acquisition):
+    """
+    Fundamental Acquisition type for digitizer. Acquires a number of digitizer 
+    samples at a rate. Should be independent of any spatial semantics.
+    """
+    REQUIRED_RESOURCES = [Digitizer,]
+    SPEC_LOCATION = Path(user_config_dir("Dirigo")) / "acquisition/sample"
+    SPEC_OBJECT = SampleAcquisitionSpec
+
+    def __init__(self):
+        pass # TODO
+    # This is essential for adding support for such things as SS-OCT, direct-
+    # sampling fluorescence lifetime, pump-probe microscopy, and others...
+
+
 class LineAcquisitionSpec(AcquisitionSpec): 
     """Specification for a point-scanned line acquisition"""
     MAX_PIXEL_SIZE_ADJUSTMENT = 0.01
