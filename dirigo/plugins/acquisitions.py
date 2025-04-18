@@ -194,7 +194,10 @@ class LineAcquisition(Acquisition):
 
         # Start scanner & digitizer
         if isinstance(self.hw.fast_raster_scanner, ResonantScanner):
-            self.hw.fast_raster_scanner.start()        
+            self.hw.fast_raster_scanner.start()
+            # pause for a little while to allow res scanner to reach steady state
+            if hasattr(self.hw.fast_raster_scanner, 'response_time'):
+                time.sleep(self.hw.fast_raster_scanner.response_time)
             digi.acquire.start() # This includes the buffer allocation
 
         elif isinstance(self.hw.fast_raster_scanner, GalvoScanner):
