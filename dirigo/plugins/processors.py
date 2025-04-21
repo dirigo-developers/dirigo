@@ -39,10 +39,10 @@ def resample_kernel(buffer_data: np.ndarray,
     Ns, Nf, Nc = resampled.shape # Acquisition must be in channel-minor order (interleaved)
     Ndirections = start_indices.shape[0]
 
-    # Clamp start_indices so they don't go out of [0, Nsamples]    
+    # Clamp start_indices so they don't go out of [0, Nsamples)    
     for d in prange(Ndirections):
         for fi in prange(Nf):
-            start_indices[d, fi] = min(max(start_indices[d, fi], 0), Nsamples)
+            start_indices[d, fi] = min(max(start_indices[d, fi], 0), Nsamples-1)
     
     # Main loop over slow-axis pixels
     for si in prange(Ns): 
@@ -76,7 +76,9 @@ sigs = [
 ]
 @njit(sigs, nogil=True, parallel=True, fastmath=True, cache=True)
 def crop_bidi_data(data: np.ndarray, lines_per_frame: int, trigger_delay:int, samples_per_period: float):
-    """Select ranages and convert to float32.
+    """
+    Select ranages, flips the reverse scan, and converts to float32 for phase
+    correlation.
 
     Note: operates on channel 0 only.
     """
@@ -130,7 +132,7 @@ def compute_cross_power_spectrum(F: np.ndarray):
 
 class RasterFrameProcessor(Processor):
     def __init__(self, 
-                 acquisition: Acquisition,
+                 upstream: Acquisition | Processor,
                  bits_precision: int = 16):
         """
         Initialize a raster frame processor worker for the Acquisition worker.
@@ -138,7 +140,8 @@ class RasterFrameProcessor(Processor):
         To change default behavior of computing average for each pixel in 16-
         bit precision, change the bits_precision argument.
         """
-        super().__init__(acquisition)
+        super().__init__(upstream)
+        self._test = 0
 
         if (not isinstance(bits_precision, int)) or (bits_precision % 2) or not (8 <= bits_precision <= 16):
             raise ValueError("Bits precision must be even integer between 8 and 16")
@@ -147,14 +150,14 @@ class RasterFrameProcessor(Processor):
         self._bits_precision = bits_precision
         
         self._spec: FrameAcquisitionSpec # to refine type hinting
-        if isinstance(acquisition.data_acquisition_device, Digitizer):
+        if isinstance(upstream.data_acquisition_device, Digitizer):
             n_channels = sum(
-                [c.enabled for c in acquisition.data_acquisition_device.channels]
+                [c.enabled for c in upstream.data_acquisition_device.channels]
             )
         else:
             raise NotImplementedError(
                 f"RasterFrameProcessor implemented for use with Digitizer, "
-                f"got type: {type(acquisition.data_acquisition_device)}"
+                f"got type: {type(upstream.data_acquisition_device)}"
             )
         self.processed_shape = ( # Final shape after processing
                 self._spec.lines_per_frame,
@@ -197,16 +200,14 @@ class RasterFrameProcessor(Processor):
                 return # concludes run() - this thread ends
 
             t0 = time.perf_counter()
-            resample_kernel(buf.data, self._scaling_factor, self.processed, start_indices, nsamples_to_sum)
+            # resample_kernel(buf.data, self._scaling_factor, self.processed, start_indices, nsamples_to_sum)
             
-            self.publish(ProcessedFrame(
-                data=self.processed, 
-                timestamps=buf.timestamps,
-                positions=buf.positions
-            )) # sends off to Logger and/or Display workers
+            # self.publish(ProcessedFrame(
+            #     data=self.processed, 
+            #     timestamps=buf.timestamps,
+            #     positions=buf.positions
+            # )) # sends off to Logger and/or Display workers
             t1 = time.perf_counter()
-            
-            print(f"{self.native_id} Processed a frame in {1000*(t1-t0):.02f} ms")
 
             # If timestamps are assigned (default is None)
             if isinstance(buf.timestamps, np.ndarray):
@@ -220,6 +221,17 @@ class RasterFrameProcessor(Processor):
             # Update resampling start indices--these can change a bit if the scanner frequency drifts
             start_indices = self.calculate_start_indices(self._trigger_phase) - self._fixed_trigger_delay
             nsamples_to_sum = np.abs(np.diff(start_indices, axis=1))
+            t2 = time.perf_counter()
+
+            resample_kernel(buf.data, self._scaling_factor, self.processed, start_indices, nsamples_to_sum)
+            self.publish(ProcessedFrame(
+                data=self.processed, 
+                timestamps=buf.timestamps,
+                positions=buf.positions
+            )) # sends off to Logger and/or Display workers
+
+            print(f"Processed a frame in {1000*(t1-t0):.02f} ms")
+            print(f"Measured phase in {1000*(t2-t1):.02f} ms")
 
 
     def calculate_start_indices(self, trigger_phase: int = 0):
@@ -264,10 +276,19 @@ class RasterFrameProcessor(Processor):
         return start_indices
     
     def measure_phase(self, data: np.ndarray) -> units.Angle:
-        """Measure the apparent fast raster scanner trigger phase for bidirectional acquisitions."""
-        UPSAMPLE = 8 # TODO move this somewhere else
+        """
+        Measure the apparent fast raster scanner trigger phase 
+        (for bidirectional scanning).
+        """
+        UPSAMPLE = 2 # TODO move this somewhere else
+        self._test += 1
         
-        data_window = crop_bidi_data(data, self._spec.lines_per_frame, self._acq.hw.digitizer.acquire.trigger_delay_samples, self.samples_per_period) # todo preallocate data_window
+        data_window = crop_bidi_data(
+            data=data, 
+            lines_per_frame=self._spec.lines_per_frame, 
+            trigger_delay=self._acq.hw.digitizer.acquire.trigger_delay_samples, 
+            samples_per_period=self.samples_per_period
+        ) # todo preallocate data_window
 
         F = fft.rfft(data_window, axis=1, workers=4)
         xps = compute_cross_power_spectrum(F)
@@ -276,14 +297,13 @@ class RasterFrameProcessor(Processor):
         corr = np.abs(fft.irfft(xps, n))
 
         shift = np.argmax(corr)
-        print("N", n, "SHIFT", shift)
+        #print("N", n, "SHIFT", shift)
         if shift > (n//2):  # Handle wrap-around for negative shifts
             shift -= n
 
-        print(f"Estimated shift (samples): {shift / UPSAMPLE}")
+        #print(f"Estimated shift (samples): {shift / UPSAMPLE}")
 
-        #return phase
-        return shift / UPSAMPLE / 2
+        return shift / UPSAMPLE / 2 - 1
     
     @cached_property
     def _sample_clock_rate(self) -> units.SampleRate:

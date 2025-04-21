@@ -164,7 +164,10 @@ class ResonantScanner(RasterScanner):
         amplitude (getter & setter)
 
     """
-    def __init__(self, frequency: str, **kwargs):
+    def __init__(self, 
+                 frequency: str, 
+                 response_time: str = None,
+                 **kwargs):
         super().__init__(**kwargs)
         
         frequency_obj = units.Frequency(frequency)
@@ -173,6 +176,12 @@ class ResonantScanner(RasterScanner):
                              f"got {frequency_obj}")
 
         self._frequency = frequency_obj
+
+        if response_time:
+            response_time = units.Time(response_time)
+            if not (0 < response_time < units.Time('1 s')):
+                raise ValueError("Response time outside of range 0-1 seconds.")
+            self.response_time = response_time
     
     @property
     def frequency(self) -> units.Frequency:

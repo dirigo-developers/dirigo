@@ -76,12 +76,24 @@ class UnitQuantity(float):
         Raises:
             ValueError: If the input string is not in the expected format.
         """
-        #pattern = r"^\s*([-+]?\d+(\.\d+)?)\s*([\w/]+)\s*$"
-        pattern = r"^\s*([-+]?(?:\d+(?:\.\d*)?|\.\d+))\s*([\w/]+)\s*$" # 100% from ChatGPT
-        match = re.match(pattern, quantity)
+        # numeric value = int or float, w/ optional scientific‑notation exponent
+        NUMERIC_VALUE = r"[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?"
+
+        # a “unit token” = letters (incl. Greek μ/µ) followed by optional ^digits exponent
+        UNIT_TOKEN = r"[A-Za-zμµ]+(?:\^\d+)?"
+
+        pattern = rf"""
+            ^\s*                                # optional leading space
+            ({NUMERIC_VALUE})                   # numeric value,
+            \s*                                 # optional space between value and unit
+            ({UNIT_TOKEN}(?:/{UNIT_TOKEN})*)    # unit tokens
+            \s*$                                # optional spaces at end
+        """
+
+        match = re.match(pattern, quantity, re.VERBOSE)
 
         if not match:
-            raise ValueError(f"Invalid format for value with unit: '{quantity}'. Expected format: '<value> <unit>'.")
+            raise ValueError(f"Invalid format for value with unit: '{quantity}'.")
 
         value_str, unit = match.groups()
         return float(value_str), unit

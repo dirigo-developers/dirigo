@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from abc import abstractmethod
+from typing import Self
 
 import numpy as np
 
@@ -7,11 +8,6 @@ from dirigo import units
 from dirigo.sw_interfaces.worker import Worker
 from dirigo.sw_interfaces.acquisition import Acquisition
 
-
-# TODO, 
-# Must a Processor always be associated with an Acquisition? 
-# Can Processors be cascaded?
-# Limitation: currently needs to be linked to Acquisition specifically
 
 
 # TODO, this is virtually the same as the digitizer.Buffer class, worth consolidating?
@@ -27,11 +23,17 @@ class Processor(Worker):
     """
     Dirigo interface for data processing worker thread.
     """
-    def __init__(self, acquisition: Acquisition):
+    def __init__(self, upstream: Acquisition | Self):
         """Stores the acquisition and spec in private attributes"""
         super().__init__()
-        self._acq = acquisition
-        self._spec = acquisition.spec
+        if isinstance(upstream, Acquisition):
+            self._acq = upstream
+            self._spec = upstream.spec
+        elif isinstance(upstream, Processor):
+            self._acq = upstream._acq
+            self._spec = upstream._acq.spec
+        else:
+            raise ValueError("Upstream worker passed to Processor must be either an Acquisition or another Processor")
     
     @property
     @abstractmethod # Not sure this is absolutely needed for every subclass of this.

@@ -38,7 +38,10 @@ class Dirigo:
         entry_pts = importlib.metadata.entry_points(group="dirigo_acquisitions")
         return {entry_pt.name for entry_pt in entry_pts}
     
-    def acquisition_factory(self, type: str, spec: AcquisitionSpec = None, spec_name: str = "default") -> Acquisition:
+    def acquisition_factory(self, 
+                            type: str, 
+                            spec: AcquisitionSpec = None, 
+                            spec_name: str = "default") -> Acquisition:
         """Returns an initialized acquisition worker object."""
 
         # Dynamically load plugin class
@@ -68,22 +71,42 @@ class Dirigo:
             f"Acquisition '{type}' not found in entry points."
         )
     
-    def processor_factory(self, acquisition: Acquisition) -> Processor:
+    def processor_factory(self, 
+                          upstream_worker: Acquisition | Processor, 
+                          auto_connect = True) -> Processor:
         # Dynamically load plugin class
         #entry_pts = importlib.metadata.entry_points(group="dirigo_processors")
         #TODO finish entry point loading
 
-        return RasterFrameProcessor(acquisition)
+        processor = RasterFrameProcessor(upstream_worker)
+
+        if auto_connect:
+            upstream_worker.add_subscriber(processor)
+
+        return processor
     
     def display_factory(self, 
-                        processor: Processor = None, 
-                        acquisition: Acquisition = None,
-                        display_pixel_format: DisplayPixelFormat = DisplayPixelFormat.RGB24
+                        upstream_worker: Acquisition | Processor, 
+                        display_pixel_format: DisplayPixelFormat = DisplayPixelFormat.RGB24,
+                        auto_connect: bool = True
                         ) -> Display:
-        return FrameDisplay(acquisition, processor, display_pixel_format)
+        
+        display = FrameDisplay(upstream_worker, display_pixel_format)
+
+        if auto_connect:
+            upstream_worker.add_subscriber(display)
+
+        return display
     
-    def logger_factory(self, processor: Processor = None, acquisition: Acquisition = None) -> Logger:
-        return TiffLogger(acquisition, processor)
+    def logger_factory(self, 
+                       upstream_worker: Acquisition | Processor,
+                       auto_connect: bool = True) -> Logger:
+        logger = TiffLogger(upstream_worker)
+
+        if auto_connect:
+            upstream_worker.add_subscriber(logger)
+
+        return logger
     
     def acquisition_spec(self, acquisition_type: str, spec_name: str = "default"):
         # Dynamically load plugin class
@@ -117,18 +140,13 @@ if __name__ == "__main__":
     processor = diri.processor_factory(acquisition)
     display = diri.display_factory(processor)
     logging = diri.logger_factory(processor)
-
-    # Connect threads
-    acquisition.add_subscriber(processor)
-    processor.add_subscriber(display)
-    processor.add_subscriber(logging)
+    logging.frames_per_file = float('inf')
 
     processor.start()
     display.start()
-    #logging.start()
+    logging.start()
     acquisition.start()
 
     acquisition.join(timeout=100.0)
-    # processor.stop()
 
     print("Acquisition complete")
