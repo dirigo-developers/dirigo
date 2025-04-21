@@ -25,6 +25,7 @@ class SystemConfig:
     """
     laser_scanning_optics: Optional[dict] = None
     camera_optics: Optional[dict] = None
+    detectors: Optional[dict] = None
     digitizer: Optional[dict] = None
     stage: Optional[dict] = None
     objective_scanner: Optional[dict] = None
@@ -41,6 +42,7 @@ class SystemConfig:
         return cls(
             laser_scanning_optics=toml_data.get("laser_scanning_optics"),
             camera_optics=toml_data.get("camera_optics"),
+            detectors=toml_data.get("detectors"),
             digitizer=toml_data.get("digitizer"),
             stage=toml_data.get("stage"),
             objective_scanner=toml_data.get("objective_scanner"),

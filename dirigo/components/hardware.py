@@ -3,6 +3,7 @@ from typing import Optional
 
 from dirigo.components.io import SystemConfig
 from dirigo.components.optics import LaserScanningOptics, CameraOptics
+from dirigo.hw_interfaces.detector import DetectorSet
 from dirigo.hw_interfaces.digitizer import Digitizer
 from dirigo.hw_interfaces.stage import MultiAxisStage
 from dirigo.hw_interfaces.encoder import MultiAxisLinearEncoder
@@ -31,6 +32,17 @@ class Hardware:
             self.camera_optics = CameraOptics(**default_config.camera_optics)
         else:
             self.camera_optics = None
+
+        if default_config.detectors is not None:
+            self.detectors = DetectorSet()
+            for _, detector_config in default_config.detectors.items():
+                detector = self._try_instantiate(
+                    group="dirigo_detectors",
+                    config=detector_config
+                )
+                self.detectors.append(detector)
+        else:
+            self.detectors = None
 
         self.digitizer: Digitizer = self._try_instantiate(
             group="dirigo_digitizers",
