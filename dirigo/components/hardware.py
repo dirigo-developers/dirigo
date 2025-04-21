@@ -33,17 +33,6 @@ class Hardware:
         else:
             self.camera_optics = None
 
-        if default_config.detectors is not None:
-            self.detectors = DetectorSet()
-            for _, detector_config in default_config.detectors.items():
-                detector = self._try_instantiate(
-                    group="dirigo_detectors",
-                    config=detector_config
-                )
-                self.detectors.append(detector)
-        else:
-            self.detectors = None
-
         self.digitizer: Digitizer = self._try_instantiate(
             group="dirigo_digitizers",
             config=default_config.digitizer
@@ -76,6 +65,18 @@ class Hardware:
             config=default_config.slow_raster_scanner,
             extra_args={"fast_scanner": self.fast_raster_scanner}
         )
+
+        if default_config.detectors is not None:
+            self.detectors = DetectorSet()
+            for _, detector_config in default_config.detectors.items():
+                detector = self._try_instantiate(
+                    group="dirigo_detectors",
+                    config=detector_config,
+                    extra_args={"fast_scanner": self.fast_raster_scanner}
+                )
+                self.detectors.append(detector)
+        else:
+            self.detectors = None
 
         self.frame_grabber: FrameGrabber = self._try_instantiate(
             group="dirigo_frame_grabbers",

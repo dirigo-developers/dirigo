@@ -88,7 +88,7 @@ class DetectorSet(MutableSequence[D], Generic[D]):
 
     def _refresh_indices(self) -> None:
         for i, detector in enumerate(self._detectors):
-            detector.index = i
+            detector._set_index(i)
 
     def _ensure_int(self, idx: object) -> None:
         if not isinstance(idx, int):
