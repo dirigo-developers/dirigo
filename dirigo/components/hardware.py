@@ -3,6 +3,7 @@ from typing import Optional
 
 from dirigo.components.io import SystemConfig
 from dirigo.components.optics import LaserScanningOptics, CameraOptics
+from dirigo.hw_interfaces.detector import DetectorSet, Detector
 from dirigo.hw_interfaces.digitizer import Digitizer
 from dirigo.hw_interfaces.stage import MultiAxisStage
 from dirigo.hw_interfaces.encoder import MultiAxisLinearEncoder
@@ -64,6 +65,18 @@ class Hardware:
             config=default_config.slow_raster_scanner,
             extra_args={"fast_scanner": self.fast_raster_scanner}
         )
+
+        if default_config.detectors is not None:
+            self.detectors: DetectorSet[Detector] = DetectorSet()
+            for _, detector_config in default_config.detectors.items():
+                detector = self._try_instantiate(
+                    group="dirigo_detectors",
+                    config=detector_config,
+                    extra_args={"fast_scanner": self.fast_raster_scanner}
+                )
+                self.detectors.append(detector)
+        else:
+            self.detectors = None
 
         self.frame_grabber: FrameGrabber = self._try_instantiate(
             group="dirigo_frame_grabbers",

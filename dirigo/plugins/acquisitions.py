@@ -7,6 +7,7 @@ from platformdirs import user_config_dir
 import numpy as np
 
 from dirigo import units
+from dirigo.hw_interfaces.detector import DetectorSet, Detector
 from dirigo.hw_interfaces.digitizer import Digitizer
 from dirigo.hw_interfaces.scanner import (
     FastRasterScanner, SlowRasterScanner, GalvoScanner, ResonantScanner,
@@ -133,7 +134,7 @@ class LineAcquisitionSpec(AcquisitionSpec):
 
 
 class LineAcquisition(Acquisition):
-    REQUIRED_RESOURCES = [Digitizer, FastRasterScanner]
+    REQUIRED_RESOURCES = [Digitizer, DetectorSet, FastRasterScanner]
     SPEC_LOCATION = Path(user_config_dir("Dirigo")) / "acquisition/linescan"
     SPEC_OBJECT = LineAcquisitionSpec
     
@@ -192,6 +193,13 @@ class LineAcquisition(Acquisition):
     def run(self):
         digi = self.hw.digitizer # for brevity
 
+        # Enable detectors
+        for detector in self.hw.detectors:
+            try:
+                detector.enabled = True
+            except NotImplementedError:
+                pass
+
         # Start scanner & digitizer
         if isinstance(self.hw.fast_raster_scanner, ResonantScanner):
             self.hw.fast_raster_scanner.start()
@@ -234,6 +242,14 @@ class LineAcquisition(Acquisition):
 
     def cleanup(self):
         """Closes resources started during the acquisition."""
+        # Disable detectors
+        for detector in self.hw.detectors:
+            detector: Detector
+            try:
+                detector.enabled = False
+            except NotImplementedError:
+                pass
+
         try:
             self.hw.digitizer.acquire.stop()
         except:
@@ -371,7 +387,7 @@ class FrameAcquisitionSpec(LineAcquisitionSpec):
 
 
 class FrameAcquisition(LineAcquisition):
-    REQUIRED_RESOURCES = [Digitizer, FastRasterScanner, SlowRasterScanner]
+    REQUIRED_RESOURCES = [Digitizer, DetectorSet, FastRasterScanner, SlowRasterScanner]
     SPEC_LOCATION = Path(user_config_dir("Dirigo")) / "acquisition/frame"
     SPEC_OBJECT = FrameAcquisitionSpec
 
