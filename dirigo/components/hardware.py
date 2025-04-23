@@ -3,7 +3,7 @@ from typing import Optional
 
 from dirigo.components.io import SystemConfig
 from dirigo.components.optics import LaserScanningOptics, CameraOptics
-from dirigo.hw_interfaces.detector import DetectorSet
+from dirigo.hw_interfaces.detector import DetectorSet, Detector
 from dirigo.hw_interfaces.digitizer import Digitizer
 from dirigo.hw_interfaces.stage import MultiAxisStage
 from dirigo.hw_interfaces.encoder import MultiAxisLinearEncoder
@@ -67,7 +67,7 @@ class Hardware:
         )
 
         if default_config.detectors is not None:
-            self.detectors = DetectorSet()
+            self.detectors: DetectorSet[Detector] = DetectorSet()
             for _, detector_config in default_config.detectors.items():
                 detector = self._try_instantiate(
                     group="dirigo_detectors",

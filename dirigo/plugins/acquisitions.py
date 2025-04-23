@@ -195,7 +195,6 @@ class LineAcquisition(Acquisition):
 
         # Enable detectors
         for detector in self.hw.detectors:
-            detector: Detector
             try:
                 detector.enabled = True
             except NotImplementedError:

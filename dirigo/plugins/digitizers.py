@@ -714,10 +714,7 @@ class NIAcquire(digitizer.Acquire):
             return "analog"
         else:
             return "edge counting"
-        
-    @cached_property
-    def _inverted_channels(self) -> list[bool]:
-        return [chan.inverted for chan in self._channels if chan.enabled]
+
 
 class NIAuxillaryIO(digitizer.AuxillaryIO):
     def __init__(self, device: nidaqmx.system.Device):

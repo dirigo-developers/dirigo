@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+from functools import cached_property
 from pathlib import Path
 import math
 
@@ -506,6 +507,10 @@ class Acquire(ABC):
     def stop(self):
         """Stop the acquisition process."""
         pass
+
+    @cached_property
+    def _inverted_channels(self) -> list[bool]:
+        return [chan.inverted for chan in self._channels if chan.enabled]
 
     
 class AuxillaryIO(ABC):

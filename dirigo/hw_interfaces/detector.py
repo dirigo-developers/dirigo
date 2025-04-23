@@ -40,6 +40,10 @@ class Detector(ABC):
 
     @property
     @abstractmethod
+    def gain_range(self) -> units.ValueRange: ...
+
+    @property
+    @abstractmethod
     def bandwidth(self) -> units.Frequency: 
         """Switchable bandwidth; raise NotImplementedError if fixed."""
         ...
