@@ -121,6 +121,13 @@ class UnitQuantity(float):
         """Return a human-readable string with the optimal unit."""
         value, unit = self._get_optimal_unit()
         return f"{value:.3g} {unit}"  # Use 3 significant digits
+    
+    def with_unit(self, unit: str, sig_figs=3) -> str:
+        """Return a human-readable string with the specified unit."""
+        if unit not in self.ALLOWED_UNITS_AND_MULTIPLIERS:
+            raise ValueError(f"Invalid unit: {unit}. Allowed units: {list(self.ALLOWED_UNITS_AND_MULTIPLIERS.keys())}")
+        multiplier = self.ALLOWED_UNITS_AND_MULTIPLIERS[unit]
+        return f"{(self/multiplier):.{sig_figs}g} {unit}"  # Use 3 significant digits
 
     def __repr__(self):
         return str(self)
