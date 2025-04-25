@@ -30,7 +30,7 @@ class Dirigo:
             )
         self.sys_config = SystemConfig.from_toml(config_dir / "system_config.toml")
 
-        self.hw = Hardware(self.sys_config) # TODO, should this be 'resources'?
+        self.hw = Hardware(self.sys_config) 
 
     @property
     def acquisition_types(self) -> set[str]:
