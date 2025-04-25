@@ -231,11 +231,16 @@ class LineAcquisition(Acquisition):
             while not self._stop_event.is_set() and \
                 digi.acquire.buffers_acquired < self.spec.buffers_per_acquisition:
 
-                print(f"Acquired {digi.acquire.buffers_acquired} of {self.spec.buffers_per_acquisition}")
+                t0 = time.perf_counter()
                 buffer = digi.acquire.get_next_completed_buffer()
+                t1 = time.perf_counter()
+
                 if self.hw.stage or self.hw.objective_scanner:
                     buffer.positions = self.read_positions()
                 self.publish(buffer)
+
+                print(f"Acquired {digi.acquire.buffers_acquired} of {self.spec.buffers_per_acquisition} "
+                      f"Waited {1000*(t1-t0):.2f} ms")
 
         finally:
             self.cleanup()

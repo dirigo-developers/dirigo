@@ -207,7 +207,7 @@ class RasterFrameProcessor(Processor):
             #     timestamps=buf.timestamps,
             #     positions=buf.positions
             # )) # sends off to Logger and/or Display workers
-            t1 = time.perf_counter()
+            t0 = time.perf_counter()
 
             # If timestamps are assigned (default is None)
             if isinstance(buf.timestamps, np.ndarray):
@@ -215,13 +215,13 @@ class RasterFrameProcessor(Processor):
                 self._fast_scanner_frequency = 1 / np.mean(np.diff(buf.timestamps))
 
             # Measure phase from bidi data (in uni-directional, phase is not critical)
-            if self._spec.bidirectional_scanning:
-                self._trigger_phase = self.measure_phase(buf.data)
+            # if self._spec.bidirectional_scanning:
+            #     self._trigger_phase = self.measure_phase(buf.data)
 
             # Update resampling start indices--these can change a bit if the scanner frequency drifts
             start_indices = self.calculate_start_indices(self._trigger_phase) - self._fixed_trigger_delay
             nsamples_to_sum = np.abs(np.diff(start_indices, axis=1))
-            t2 = time.perf_counter()
+            t1 = time.perf_counter()
 
             resample_kernel(buf.data, self._scaling_factor, self.processed, start_indices, nsamples_to_sum)
             self.publish(ProcessedFrame(
@@ -229,9 +229,11 @@ class RasterFrameProcessor(Processor):
                 timestamps=buf.timestamps,
                 positions=buf.positions
             )) # sends off to Logger and/or Display workers
+            t2 = time.perf_counter()
 
-            print(f"Processed a frame in {1000*(t1-t0):.02f} ms")
-            print(f"Measured phase in {1000*(t2-t1):.02f} ms")
+            print(f"Recalculated pixel sample edges in {1000*(t1-t0):.02f} ms")
+            print(f"Processed a frame in {1000*(t2-t1):.02f} ms")
+            
 
 
     def calculate_start_indices(self, trigger_phase: int = 0):
