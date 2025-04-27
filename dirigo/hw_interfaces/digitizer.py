@@ -7,7 +7,7 @@ from platformdirs import user_config_dir
 
 from dirigo import units
 from dirigo.components.io import load_toml
-from dirigo.sw_interfaces.acquisition import AcquisitionBuffer
+from dirigo.sw_interfaces.acquisition import AcquisitionProduct
 
 """
 Dirigo digitizer interface.
@@ -492,14 +492,11 @@ class Acquire(ABC):
         pass
 
     @abstractmethod
-    def get_next_completed_buffer(self, blocking: bool = True) -> AcquisitionBuffer:
+    def get_next_completed_buffer(self, acq_buffer: AcquisitionProduct):
         """Retrieve the next completed data buffer.
 
         Args:
-            blocking (bool): Whether to block until a buffer is available.
-
-        Returns:
-            AcquisitionBuffer: The acquired data buffer.
+            acq_buffer (AcquisitionBuffer): Pre-allocated acquisition buffer to copy completed digitizer buffer
         """
         pass
 

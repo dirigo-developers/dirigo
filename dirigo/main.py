@@ -140,7 +140,7 @@ if __name__ == "__main__":
     # processor = diri.processor_factory(acquisition)
     # display = diri.display_factory(processor)
     # logging = diri.logger_factory(processor)
-    # logging.frames_per_file = float('inf')
+    # logging.frames_per_file = float('inf')    
 
     # processor.start()
     # display.start()

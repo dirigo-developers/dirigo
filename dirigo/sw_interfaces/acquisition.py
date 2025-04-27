@@ -1,9 +1,9 @@
-from dataclasses import dataclass
 from typing import TYPE_CHECKING
+from queue import Queue
 
 import numpy as np
 
-from dirigo.sw_interfaces.worker import Worker
+from dirigo.sw_interfaces.worker import Worker, Product
 from dirigo.components.io import load_toml
 
 if TYPE_CHECKING:
@@ -16,11 +16,23 @@ class AcquisitionSpec:
     pass
 
 
-@dataclass
-class AcquisitionBuffer:
-    data: np.ndarray # Dimensions: Record, Sample, Channel
-    timestamps: float | np.ndarray | None = None # should be one or more time points (in seconds since the start)
-    positions: tuple[float] | np.ndarray | None = None # should be one or more sets of coordinates (x,y)
+class AcquisitionProduct(Product):
+    """
+    Container for acquisition's product(s): (raw) data, timestamps (optional), 
+    and positions (optional).
+    
+    Automatically returns itself to acquisition product pool when released by 
+    all subscribing consumers (functionality of the Product base class).
+    """
+    # data: np.ndarray # Dimensions: Record, Sample, Channel
+    # timestamps: float | np.ndarray | None = None # should be one or more time points (in seconds since the start)
+    # positions: tuple[float] | np.ndarray | None = None # should be one or more sets of coordinates (x,y)
+    __slots__ = ("data", "timestamps", "positions")
+    def __init__(self, pool, data, timestamps = None, positions = None):
+        super().__init__(pool)
+        self.data = data
+        self.timestamps = timestamps
+        self.positions = positions
 
 
 class Acquisition(Worker):
@@ -77,3 +89,15 @@ class Acquisition(Worker):
             return self.hw.line_scan_camera
         else:
             raise RuntimeError(f"Invalid data capture device: {acq_device}")
+    
+    def init_product_pool(self, n, shape, dtype):
+        self._product_pool = Queue()
+        for _ in range(n):
+            aq_buf = AcquisitionProduct(
+                pool=self._product_pool,
+                data=np.empty(shape, dtype) # pre-allocates for large buffers
+            )
+            self._product_pool.put(aq_buf)
+
+    def get_idle_buffer(self) -> AcquisitionProduct:
+        return self._product_pool.get()

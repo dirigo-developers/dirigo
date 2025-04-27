@@ -14,7 +14,7 @@ from dirigo.hw_interfaces.scanner import (
     ObjectiveZScanner
 )
 from dirigo.sw_interfaces.acquisition import (
-    AcquisitionSpec, Acquisition, AcquisitionBuffer
+    AcquisitionSpec, Acquisition, AcquisitionProduct
 )
 
 
@@ -200,6 +200,14 @@ class LineAcquisition(Acquisition):
             except NotImplementedError:
                 pass
 
+        # Set up acquisition buffer pool
+        shape = (
+            self.spec.records_per_buffer, 
+            self.hw.digitizer.acquire.record_length,
+            self.hw.digitizer.acquire.n_channels_enabled
+        )
+        self.init_product_pool(n=3, shape=shape, dtype=np.int16)
+
         # Start scanner & digitizer
         if isinstance(self.hw.fast_raster_scanner, ResonantScanner):
             self.hw.fast_raster_scanner.start()
@@ -231,16 +239,14 @@ class LineAcquisition(Acquisition):
             while not self._stop_event.is_set() and \
                 digi.acquire.buffers_acquired < self.spec.buffers_per_acquisition:
 
-                t0 = time.perf_counter()
-                buffer = digi.acquire.get_next_completed_buffer()
-                t1 = time.perf_counter()
+                acq_buf = self.get_idle_buffer()
+                digi.acquire.get_next_completed_buffer(acq_buf)
 
                 if self.hw.stage or self.hw.objective_scanner:
-                    buffer.positions = self.read_positions()
-                self.publish(buffer)
+                    acq_buf.positions = self.read_positions()
+                self.publish(acq_buf)
 
-                print(f"Acquired {digi.acquire.buffers_acquired} of {self.spec.buffers_per_acquisition} "
-                      f"Waited {1000*(t1-t0):.2f} ms")
+                print(f"Acquired {digi.acquire.buffers_acquired} of {self.spec.buffers_per_acquisition} ")
 
         finally:
             self.cleanup()
@@ -531,7 +537,7 @@ class StackAcquisition(Acquisition):
             for i in range(1, self.spec.depths_per_acquisition+1):
                 for _ in range(self.spec._saved_frames_per_step):
                     # Wait for frame data, and pass along
-                    buf: AcquisitionBuffer = self.inbox.get(block=True)
+                    buf: AcquisitionProduct = self.inbox.get(block=True)
                     if buf is None:
                         return # runs finally: block on its way out
                     self.publish(buf)
@@ -601,7 +607,7 @@ class BidiFrameCalibration(Acquisition):
             for i in range(1, self.spec.amplitudes_per_acquisition+1):
                 for _ in range(self.spec._saved_frames_per_step):
                     # Wait for frame data, and pass along
-                    buf: AcquisitionBuffer = self.inbox.get(block=True)
+                    buf: AcquisitionProduct = self.inbox.get(block=True)
                     if buf is None:
                         return # runs finally: block on its way out
                     self.publish(buf)

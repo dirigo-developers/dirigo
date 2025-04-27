@@ -12,7 +12,7 @@ from nidaqmx.constants import (
 from dirigo import units
 from dirigo.components.io import load_toml
 from dirigo.hw_interfaces import digitizer
-from dirigo.sw_interfaces.acquisition import AcquisitionBuffer
+from dirigo.sw_interfaces.acquisition import AcquisitionProduct
 from dirigo.plugins.scanners import (
     CounterRegistry, get_device, validate_ni_channel, 
     get_min_ao_rate, get_max_ao_rate
@@ -632,7 +632,7 @@ class NIAcquire(digitizer.Acquire):
     def buffers_acquired(self) -> int:
         return self._buffers_acquired
 
-    def get_next_completed_buffer(self, blocking: bool = True) -> AcquisitionBuffer:
+    def get_next_completed_buffer(self, blocking: bool = True) -> AcquisitionProduct:
         """
         Reads the next chunk of data from the device buffer. For NI, this typically 
         means calling read once we have enough samples. 
@@ -689,7 +689,7 @@ class NIAcquire(digitizer.Acquire):
         self._buffers_acquired += 1
 
         # Construct an AcquisitionBuffer. NI doesn’t provide built-in timestamps
-        return AcquisitionBuffer(data=data)
+        return AcquisitionProduct(data=data)
 
     def stop(self):
         if not self._started:

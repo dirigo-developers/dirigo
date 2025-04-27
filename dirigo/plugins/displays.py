@@ -5,7 +5,7 @@ import numpy as np
 from numba import njit, prange, types
 
 from dirigo.sw_interfaces.processor import Processor, ProcessedFrame
-from dirigo.sw_interfaces.acquisition import Acquisition, AcquisitionBuffer
+from dirigo.sw_interfaces.acquisition import Acquisition, AcquisitionProduct
 from dirigo.sw_interfaces.display import Display, ColorVector, DisplayChannel, DisplayPixelFormat
 
 
@@ -116,7 +116,7 @@ class FrameDisplay(Display):
     def run(self):
         while True:
             # Get new data from inbox
-            buf: AcquisitionBuffer | ProcessedFrame = self.inbox.get(block=True) # may want to add a timeout
+            buf: AcquisitionProduct | ProcessedFrame = self.inbox.get(block=True) # may want to add a timeout
 
             if buf is None: # Check for sentinel None
                 self.publish(None) # pass sentinel

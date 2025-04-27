@@ -7,7 +7,7 @@ from scipy import fft
 
 from dirigo import units
 from dirigo.sw_interfaces.processor import Processor, ProcessedFrame
-from dirigo.sw_interfaces.acquisition import Acquisition, AcquisitionBuffer
+from dirigo.sw_interfaces.acquisition import Acquisition, AcquisitionProduct
 from dirigo.hw_interfaces.digitizer import Digitizer
 from dirigo.plugins.acquisitions import FrameAcquisitionSpec
 
@@ -192,11 +192,11 @@ class RasterFrameProcessor(Processor):
         nsamples_to_sum = np.abs(np.diff(start_indices, axis=1))
         
         while True: # Loops until receives sentinel None
-            buf: AcquisitionBuffer = self.inbox.get(block=True) # we may want to add a timeout
+            buf: AcquisitionProduct = self.inbox.get(block=True) # we may want to add a timeout
 
             if buf is None: # Check for sentinel None
                 self.publish(None) # pass along sentinel to indicate end
-                print('Exiting processing thread')
+                print('Exiting processing thread ')
                 return # concludes run() - this thread ends
 
             t0 = time.perf_counter()

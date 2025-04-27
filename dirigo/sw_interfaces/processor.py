@@ -10,7 +10,6 @@ from dirigo.sw_interfaces.acquisition import Acquisition
 
 
 
-# TODO, this is virtually the same as the digitizer.Buffer class, worth consolidating?
 @dataclass
 class ProcessedFrame():
     """Data class to encapsulate a processed frame and its metadata."""
