@@ -247,7 +247,6 @@ class LineAcquisition(Acquisition):
                 self.publish(acq_buf)
 
                 print(f"Acquired {digi.acquire.buffers_acquired} of {self.spec.buffers_per_acquisition} ")
-
         finally:
             self.cleanup()
 
