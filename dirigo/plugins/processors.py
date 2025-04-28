@@ -17,16 +17,17 @@ TWO_PI = 2 * np.pi
 # issues:
 # need to support uint16 and uint8 (rarer)
 sigs = [
-    #buffer_data          scaling_factor  resampled            start_indices     nsamples_to_sum
-    (types.int16[:,:,:],  types.int32,    types.int16[:,:,:],  types.int32[:,:], types.int32[:,:]),
-    (types.uint16[:,:,:], types.int32,    types.uint16[:,:,:], types.int32[:,:], types.int32[:,:])
+    #buffer_data          invert_mask,     scaling_factor  resampled            start_indices     nsamples_to_sum
+    (types.int16[:,:,:],  types.int16[:],  types.int32,    types.int16[:,:,:],  types.int32[:,:], types.int32[:,:]),
+    (types.uint16[:,:,:], types.int16[:],  types.int32,    types.uint16[:,:,:], types.int32[:,:], types.int32[:,:])
 ]
 @njit(sigs, parallel=True, fastmath=True, nogil=True, cache=True)
 def resample_kernel(raw_data: np.ndarray, 
+                    invert_mask: list[bool],
                     scaling_factor: int, # faster/better to bit shift than multiply (scale)
                     resampled: np.ndarray, 
                     start_indices: np.ndarray, 
-                    nsamples_to_sum: np.ndarray) -> np.ndarray:
+                    nsamples_to_sum: np.ndarray):
     """
     buffer_data shape: (Nrecords, Nsamples, Nchannels)
     dewarped shape:    (Ns, Nf, Nc)
@@ -65,9 +66,8 @@ def resample_kernel(raw_data: np.ndarray,
 
             # Store the average back into resampled
             for c in range(Nchannels):
-                resampled[si, fi, c] = (scaling_factor * tmp_values[c]) // Nsum
-
-    return resampled
+                # TODO, test whether if and bitwise math faster for inversion
+                resampled[si, fi, c] = invert_mask[c] * (scaling_factor * tmp_values[c]) // Nsum
 
 
 sigs = [
@@ -165,6 +165,9 @@ class RasterFrameProcessor(Processor):
             self._spec.pixels_per_line,
             n_channels
         )
+        self._invert_mask = -2 * np.array(
+            self._acq.hw.digitizer.acquire._inverted_channels, 
+            dtype=np.int16) + 1
        
         # Initialize with the nominal rate, will measure with data timestamps
         self._fast_scanner_frequency = self._acq.hw.fast_raster_scanner.frequency
@@ -216,7 +219,14 @@ class RasterFrameProcessor(Processor):
             nsamples_to_sum = np.abs(np.diff(start_indices, axis=1))
             t1 = time.perf_counter()
 
-            resample_kernel(acq_prod.data, self._scaling_factor, proc_product.data, start_indices, nsamples_to_sum)
+            resample_kernel(
+                raw_data=acq_prod.data, 
+                invert_mask=self._invert_mask,
+                scaling_factor=self._scaling_factor, 
+                resampled=proc_product.data, 
+                start_indices=start_indices, 
+                nsamples_to_sum=nsamples_to_sum
+            )
             proc_product.timestamps = acq_prod.timestamps
             proc_product.positions = acq_prod.positions
             self.publish(proc_product) # sends off to Logger and/or Display workers

@@ -243,7 +243,8 @@ class FrameDisplay(Display):
             # Don't update if no previous data exists
             return
         
-        processed = self._apply_display_kernel(self._prev_data, self._luts)
-        self.publish(processed)
+        disp_product = self.get_free_product()
+        disp_product.frame[...] = self._apply_display_kernel(self._prev_data, self._luts)
+        self.publish(disp_product)
 
 
