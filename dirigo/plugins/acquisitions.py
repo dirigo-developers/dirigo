@@ -239,7 +239,7 @@ class LineAcquisition(Acquisition):
             while not self._stop_event.is_set() and \
                 digi.acquire.buffers_acquired < self.spec.buffers_per_acquisition:
 
-                acq_buf = self.get_idle_buffer()
+                acq_buf = self.get_free_product()
                 digi.acquire.get_next_completed_buffer(acq_buf)
 
                 if self.hw.stage or self.hw.objective_scanner:

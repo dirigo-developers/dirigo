@@ -28,7 +28,7 @@ class AcquisitionProduct(Product):
     # timestamps: float | np.ndarray | None = None # should be one or more time points (in seconds since the start)
     # positions: tuple[float] | np.ndarray | None = None # should be one or more sets of coordinates (x,y)
     __slots__ = ("data", "timestamps", "positions")
-    def __init__(self, pool, data, timestamps = None, positions = None):
+    def __init__(self, pool, data: np.ndarray, timestamps = None, positions = None):
         super().__init__(pool)
         self.data = data
         self.timestamps = timestamps
@@ -91,7 +91,6 @@ class Acquisition(Worker):
             raise RuntimeError(f"Invalid data capture device: {acq_device}")
     
     def init_product_pool(self, n, shape, dtype):
-        self._product_pool = Queue()
         for _ in range(n):
             aq_buf = AcquisitionProduct(
                 pool=self._product_pool,
@@ -99,5 +98,5 @@ class Acquisition(Worker):
             )
             self._product_pool.put(aq_buf)
 
-    def get_idle_buffer(self) -> AcquisitionProduct:
+    def get_free_product(self) -> AcquisitionProduct:
         return self._product_pool.get()

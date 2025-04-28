@@ -137,14 +137,14 @@ if __name__ == "__main__":
     diri = Dirigo()
     
     acquisition = diri.acquisition_factory('frame')
-    # processor = diri.processor_factory(acquisition)
-    # display = diri.display_factory(processor)
-    # logging = diri.logger_factory(processor)
-    # logging.frames_per_file = float('inf')    
+    processor = diri.processor_factory(acquisition)
+    display = diri.display_factory(processor)
+    logging = diri.logger_factory(processor)
+    logging.frames_per_file = float('inf')    
 
-    # processor.start()
-    # display.start()
-    # logging.start()
+    processor.start() # TODO, autostart options?
+    display.start()
+    logging.start()
     acquisition.start()
 
     acquisition.join(timeout=100.0)

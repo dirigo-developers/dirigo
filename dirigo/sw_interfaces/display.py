@@ -6,7 +6,7 @@ import numpy as np
 from numba import njit, types
 
 from dirigo.units import ValueRange
-from dirigo.sw_interfaces.worker import Worker
+from dirigo.sw_interfaces.worker import Worker, Product
 from dirigo.sw_interfaces import Acquisition, Processor
 
 
@@ -149,6 +149,14 @@ class DisplayChannel(): # should this be a ABC?
         self._update_display_method()
 
 
+class DisplayProduct(Product):
+    __slots__ = ("frame")
+    def __init__(self, pool, frame: np.ndarray):
+        super().__init__(pool)
+        self.frame = frame
+
+
+
 class Display(Worker):
     """
     Dirigo interface for display processing.
@@ -220,3 +228,13 @@ class Display(Worker):
         """
         return 2**(self._monitor_bit_depth + 4)
 
+    def init_product_pool(self, n, shape, dtype=np.uint8):
+        for _ in range(n):
+            prod = DisplayProduct(
+                pool=self._product_pool,
+                frame=np.empty(shape, dtype) # pre-allocates for large buffers
+            )
+            self._product_pool.put(prod)
+
+    def get_free_product(self) -> DisplayProduct:
+        return self._product_pool.get()

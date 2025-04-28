@@ -5,17 +5,25 @@ from typing import Self
 import numpy as np
 
 from dirigo import units 
-from dirigo.sw_interfaces.worker import Worker
+from dirigo.sw_interfaces.worker import Worker, Product
 from dirigo.sw_interfaces.acquisition import Acquisition
 
 
 
-@dataclass
-class ProcessedFrame():
-    """Data class to encapsulate a processed frame and its metadata."""
-    data: np.ndarray # Dimensions: Y, X, Channel
-    timestamps: float | np.ndarray | None = None # should be one or more time points (in seconds since the start)
-    positions: tuple[float] | np.ndarray | None = None # should be one or more sets of coordinates (x,y)
+class ProcessorProduct(Product):
+    """
+    Container for processors's product(s): (processed frame) data, timestamps 
+    (optional), and positions (optional).
+    
+    Automatically returns itself to processor product pool when released by 
+    all subscribing consumers (functionality of the Product base class).
+    """
+    __slots__ = ("data", "timestamps", "positions")
+    def __init__(self, pool, data: np.ndarray, timestamps = None, positions = None):
+        super().__init__(pool)
+        self.data = data
+        self.timestamps = timestamps
+        self.positions = positions
 
 
 class Processor(Worker):
@@ -34,6 +42,17 @@ class Processor(Worker):
         else:
             raise ValueError("Upstream worker passed to Processor must be either an Acquisition or another Processor")
     
+    def init_product_pool(self, n, shape, dtype):
+        for _ in range(n):
+            aq_buf = ProcessorProduct(
+                pool=self._product_pool,
+                data=np.empty(shape, dtype) # pre-allocates for large buffers
+            )
+            self._product_pool.put(aq_buf)
+
+    def get_free_product(self) -> ProcessorProduct:
+        return self._product_pool.get()
+
     @property
     @abstractmethod # Not sure this is absolutely needed for every subclass of this.
     def data_range(self) -> units.ValueRange:

@@ -6,7 +6,7 @@ from numba import njit, prange, types
 from scipy import fft
 
 from dirigo import units
-from dirigo.sw_interfaces.processor import Processor, ProcessedFrame
+from dirigo.sw_interfaces.processor import Processor, ProcessorProduct
 from dirigo.sw_interfaces.acquisition import Acquisition, AcquisitionProduct
 from dirigo.hw_interfaces.digitizer import Digitizer
 from dirigo.plugins.acquisitions import FrameAcquisitionSpec
@@ -22,7 +22,7 @@ sigs = [
     (types.uint16[:,:,:], types.int32,    types.uint16[:,:,:], types.int32[:,:], types.int32[:,:])
 ]
 @njit(sigs, parallel=True, fastmath=True, nogil=True, cache=True)
-def resample_kernel(buffer_data: np.ndarray, 
+def resample_kernel(raw_data: np.ndarray, 
                     scaling_factor: int, # faster/better to bit shift than multiply (scale)
                     resampled: np.ndarray, 
                     start_indices: np.ndarray, 
@@ -35,7 +35,7 @@ def resample_kernel(buffer_data: np.ndarray,
     
     Ndirections is 1 (unidirectional) or 2 (bidirectional).
     """
-    Nrecords, Nsamples, Nchannels = buffer_data.shape
+    Nrecords, Nsamples, Nchannels = raw_data.shape
     Ns, Nf, Nc = resampled.shape # Acquisition must be in channel-minor order (interleaved)
     Ndirections = start_indices.shape[0]
 
@@ -61,7 +61,7 @@ def resample_kernel(buffer_data: np.ndarray,
             end = start + (Nsum * stride)
             for sample in range(start, end, stride):
                 for c in range(Nchannels):
-                    tmp_values[c] += buffer_data[ri, sample, c]
+                    tmp_values[c] += raw_data[ri, sample, c]
 
             # Store the average back into resampled
             for c in range(Nchannels):
@@ -142,46 +142,45 @@ class RasterFrameProcessor(Processor):
         """
         super().__init__(upstream)
         self._test = 0
+        data_device = upstream.data_acquisition_device #brevity
 
         if (not isinstance(bits_precision, int)) or (bits_precision % 2) or not (8 <= bits_precision <= 16):
             raise ValueError("Bits precision must be even integer between 8 and 16")
-        elif bits_precision < self._acq.data_acquisition_device.bit_depth:
+        elif bits_precision < data_device.bit_depth:
             raise ValueError("Bit precision can't be less than the data acquisition device bit depth.")
         self._bits_precision = bits_precision
         
         self._spec: FrameAcquisitionSpec # to refine type hinting
-        if isinstance(upstream.data_acquisition_device, Digitizer):
+        if isinstance(data_device, Digitizer):
             n_channels = sum(
-                [c.enabled for c in upstream.data_acquisition_device.channels]
+                [c.enabled for c in data_device.channels]
             )
         else:
             raise NotImplementedError(
                 f"RasterFrameProcessor implemented for use with Digitizer, "
-                f"got type: {type(upstream.data_acquisition_device)}"
+                f"got type: {type(data_device)}"
             )
         self.processed_shape = ( # Final shape after processing
-                self._spec.lines_per_frame,
-                self._spec.pixels_per_line,
-                n_channels
+            self._spec.lines_per_frame,
+            self._spec.pixels_per_line,
+            n_channels
         )
-        
+       
         # Initialize with the nominal rate, will measure with data timestamps
         self._fast_scanner_frequency = self._acq.hw.fast_raster_scanner.frequency
 
         # Pre-allocate array for processed image
-        if self._acq.data_acquisition_device.data_range.min < 0:
-            # If the data range min is negative, then we will need SIGNED integer data
-            self.processed = np.zeros(self.processed_shape, dtype=np.int16)
-        else:
-            self.processed = np.zeros(self.processed_shape, dtype=np.uint16)
+        # If the data range min is negative, then we will need SIGNED integer data
+        dtype = np.int16 if data_device.data_range.min < 0 else np.uint16
+        self.init_product_pool(n=3, shape=self.processed_shape, dtype=dtype)
 
         # Trigger timing
-        self._fixed_trigger_delay = self._acq.hw.digitizer.acquire.trigger_delay_samples
+        self._fixed_trigger_delay = data_device.acquire.trigger_delay_samples
         self._trigger_phase = 0 # This value can be adjusted
         if hasattr(self._acq.hw.fast_raster_scanner, 'input_delay'):
             self._trigger_phase = self._acq.hw.fast_raster_scanner.input_delay * self._sample_clock_rate
 
-        self._scaling_factor = 2**(self._bits_precision - self._acq.data_acquisition_device.bit_depth) # should we bit shift instead of scale with multiply?
+        self._scaling_factor = 2**(self._bits_precision - data_device.bit_depth) # should we bit shift instead of scale with multiply?
 
         # for testing
         #self.calculate_start_indices(self._trigger_phase)
@@ -192,27 +191,21 @@ class RasterFrameProcessor(Processor):
         nsamples_to_sum = np.abs(np.diff(start_indices, axis=1))
         
         while True: # Loops until receives sentinel None
-            buf: AcquisitionProduct = self.inbox.get(block=True) # we may want to add a timeout
+            acq_prod: AcquisitionProduct = self.inbox.get(block=True) # we may want to add a timeout
 
-            if buf is None: # Check for sentinel None
+            if acq_prod is None: # Check for sentinel None
                 self.publish(None) # pass along sentinel to indicate end
                 print('Exiting processing thread ')
                 return # concludes run() - this thread ends
 
             t0 = time.perf_counter()
-            # resample_kernel(buf.data, self._scaling_factor, self.processed, start_indices, nsamples_to_sum)
-            
-            # self.publish(ProcessedFrame(
-            #     data=self.processed, 
-            #     timestamps=buf.timestamps,
-            #     positions=buf.positions
-            # )) # sends off to Logger and/or Display workers
+            proc_product = self.get_free_product() # Request a product object
             t0 = time.perf_counter()
 
             # If timestamps are assigned (default is None)
-            if isinstance(buf.timestamps, np.ndarray):
-                # Measure frequency from timestamps
-                self._fast_scanner_frequency = 1 / np.mean(np.diff(buf.timestamps))
+            if isinstance(acq_prod.timestamps, np.ndarray):
+                # Estimate frequency from timestamps
+                self._fast_scanner_frequency = 1 / np.mean(np.diff(acq_prod.timestamps))
 
             # Measure phase from bidi data (in uni-directional, phase is not critical)
             # if self._spec.bidirectional_scanning:
@@ -223,18 +216,15 @@ class RasterFrameProcessor(Processor):
             nsamples_to_sum = np.abs(np.diff(start_indices, axis=1))
             t1 = time.perf_counter()
 
-            resample_kernel(buf.data, self._scaling_factor, self.processed, start_indices, nsamples_to_sum)
-            self.publish(ProcessedFrame(
-                data=self.processed, 
-                timestamps=buf.timestamps,
-                positions=buf.positions
-            )) # sends off to Logger and/or Display workers
+            resample_kernel(acq_prod.data, self._scaling_factor, proc_product.data, start_indices, nsamples_to_sum)
+            proc_product.timestamps = acq_prod.timestamps
+            proc_product.positions = acq_prod.positions
+            self.publish(proc_product) # sends off to Logger and/or Display workers
+            acq_prod._release() # TODO, context manager this
             t2 = time.perf_counter()
 
-            print(f"Recalculated pixel sample edges in {1000*(t1-t0):.02f} ms")
-            print(f"Processed a frame in {1000*(t2-t1):.02f} ms")
+            print(f"RECALC: {1000*(t1-t0):.03f} | FRAME {1000*(t2-t1):.03f} ")
             
-
 
     def calculate_start_indices(self, trigger_phase: int = 0):
         # Set up an array with the SPATIAL edges of pixels--we will bin samples into the pixel edges

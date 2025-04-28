@@ -45,6 +45,9 @@ class Worker(threading.Thread, ABC):
         self.inbox = queue.Queue()
         self._subscribers: list['Worker'] = []
 
+        # Pool for re-usable product objects
+        self._product_pool = queue.Queue()
+
     @abstractmethod
     def run():
         pass

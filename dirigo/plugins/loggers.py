@@ -6,7 +6,7 @@ import tifffile
 import numpy as np
 from platformdirs import user_documents_path
 
-from dirigo.sw_interfaces.processor import Processor, ProcessedFrame
+from dirigo.sw_interfaces.processor import Processor, ProcessorProduct
 from dirigo.sw_interfaces import Logger
 from dirigo.sw_interfaces.acquisition import Acquisition, AcquisitionProduct
 from dirigo.plugins.acquisitions import FrameAcquisitionSpec
@@ -39,19 +39,20 @@ class TiffLogger(Logger):
     def run(self):
         try:
             while True:
-                frame: AcquisitionProduct | ProcessedFrame = self.inbox.get(block=True)
+                prod: AcquisitionProduct | ProcessorProduct = self.inbox.get(block=True)
 
-                if frame is None: # Check for sentinel None
+                if prod is None: # Check for sentinel None
                     self.publish(None) # pass sentinel
                     print('Exiting TiffLogger thread')
                     return # thread ends
                 
-                self.save_data(frame)
+                self.save_data(prod)
+                prod._release()
 
         finally:
             self._close_and_write_metadata()
 
-    def save_data(self, frame: AcquisitionProduct | ProcessedFrame):
+    def save_data(self, frame: AcquisitionProduct | ProcessorProduct):
         """Save data and metadata to a TIFF file"""
 
         # Create the writer object if necessary
