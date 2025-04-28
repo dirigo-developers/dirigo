@@ -8,27 +8,21 @@ from nidaqmx.constants import (
 from dirigo import units
 from dirigo.components.hardware import Hardware
 from dirigo.hw_interfaces.encoder import LinearEncoder, MultiAxisLinearEncoder
-from dirigo.plugins.scanners import validate_ni_channel
+from dirigo.plugins.scanners import CounterRegistry, validate_ni_channel
 
 
 
 class LinearEncoderViaNI(LinearEncoder):
-    def __init__(self, counter_name: str, 
-                 signal_a_channel: str, signal_b_channel: str,
+    def __init__(self,
+                 signal_a_channel: str, 
+                 signal_b_channel: str,
                  distance_per_pulse: units.Position, 
-                 sample_clock_channel: str = None, trigger_channel: str = None,
-                 timestamp_counter_name: str = None,
+                 sample_clock_channel: str = None, 
+                 trigger_channel: str = None,
+                 timestamp_trigger_events: bool = False,
                  samples_per_channel:int = 2048, # Size of the buffer--set to 2X the expected number of samples to read at once
                  **kwargs):
         super().__init__(**kwargs) # sets axis
-
-        if not isinstance(counter_name, str):
-            raise ValueError("`counter_name` must be a string.")
-        self._counter_name = counter_name
-
-        if not (isinstance(timestamp_counter_name, str) or (timestamp_counter_name is None)):
-            raise ValueError("`counter_name` must be a string.")
-        self._timestamp_counter_name = timestamp_counter_name
 
         # A & B quadrature encoder signals (required)
         validate_ni_channel(signal_a_channel)
@@ -56,13 +50,14 @@ class LinearEncoderViaNI(LinearEncoder):
 
         self._distance_per_pulse = units.Position(distance_per_pulse)
         self._samples_per_channel = samples_per_channel
+        self._timestamp_trigger_events = timestamp_trigger_events
 
     def start_logging(self, initial_position: units.Position, expected_sample_rate: units.SampleRate):
         """Sets up the counter input task and starts it."""
         self._encoder_task = nidaqmx.Task() # TODO give it a name
 
         self._encoder_task.ci_channels.add_ci_lin_encoder_chan(
-            counter=self._counter_name,
+            counter=CounterRegistry.allocate_counter(),
             name_to_assign_to_channel=f"{self.axis} encoder",
             dist_per_pulse=self._distance_per_pulse,
             initial_pos=initial_position
@@ -116,7 +111,7 @@ class LinearEncoderViaNI(LinearEncoder):
 
         # use angular encoder to trig out on every N pulses
         self._encoder_task.ci_channels.add_ci_ang_encoder_chan(
-            counter=self._counter_name,
+            counter=CounterRegistry.allocate_counter(),
             name_to_assign_to_channel=f"{self.axis} encoder-derived trigger",
             decoding_type=EncoderType.X_1, # TODO make this adjustable
             zidx_enable=True,
@@ -134,26 +129,26 @@ class LinearEncoderViaNI(LinearEncoder):
         self._encoder_task.ci_channels[0].ci_encoder_a_input_term = self._signal_a_channel
         self._encoder_task.ci_channels[0].ci_encoder_b_input_term = self._signal_b_channel
 
-        parts = self._counter_name.split('/')
+        parts = self._encoder_task.channel_names[0].split('/')
         cizterm = f"/{parts[0]}/Ctr{parts[1][-1]}InternalOutput" # e.g. /Dev1/Ctr1InternalOutput
         validate_ni_channel(cizterm)
         self._encoder_task.ci_channels[0].ci_encoder_z_input_term = cizterm
 
-        # Creates a separate task (ctr1) that measures the time between edges of
-        # the signal coming from 'Dev1/Ctr0InternalOutput'.
-        if self._timestamp_counter_name:
+        # Creates a separate task that measures the time between edges of
+        # the signal coming from 'DevX/CtrYInternalOutput'.
+        if self._timestamp_trigger_events:
             self._timestamp_task = nidaqmx.Task()
 
-            # Configure a period measurement channel on the second counter (ctr1).
+            # Configure a period measurement channel on free counter
             self._timestamp_task.ci_channels.add_ci_period_chan(
-                counter=self._timestamp_counter_name,           
+                counter=CounterRegistry.allocate_counter(),           
                 min_val=10e-6, # 100 kHz, TODO set this flexibly
                 max_val=1.0,
                 units=TimeUnits.SECONDS
             )
 
             # Set to the internal signal exported by ctr0/1.
-            parts = self._counter_name.split('/')
+            parts = self._encoder_task.channel_names[0].split('/')
             self._timestamp_task.ci_channels[0].ci_period_term = f"/{parts[0]}/Ctr{parts[1][-1]}InternalOutput" # e.g. /Dev1/Ctr1InternalOutput
 
             self._timestamp_task.timing.cfg_implicit_timing(
@@ -168,10 +163,12 @@ class LinearEncoderViaNI(LinearEncoder):
 
     def stop(self):
         self._encoder_task.stop()
+        CounterRegistry.free_counter(self._encoder_task.channel_names[0])
         self._encoder_task.close()
 
-        if self._timestamp_counter_name:
+        if self._timestamp_trigger_events:
             self._timestamp_task.stop()
+            CounterRegistry.free_counter(self._timestamp_task.channel_names[0])
             self._timestamp_task.close()
 
 
