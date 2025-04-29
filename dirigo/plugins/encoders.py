@@ -4,6 +4,7 @@ from nidaqmx.constants import (
     AcquisitionType, EncoderType, EncoderZIndexPhase, AngleUnits, ExportAction,
     TimeUnits
 )
+from nidaqmx.stream_readers import CounterReader
 
 from dirigo import units
 from dirigo.components.hardware import Hardware
@@ -20,7 +21,7 @@ class LinearEncoderViaNI(LinearEncoder):
                  sample_clock_channel: str = None, 
                  trigger_channel: str = None,
                  timestamp_trigger_events: bool = False,
-                 samples_per_channel:int = 2048, # Size of the buffer--set to 2X the expected number of samples to read at once
+                 samples_per_channel: int = 4096, # Size of the buffer--set to 2X the expected number of samples to read at once
                  **kwargs):
         super().__init__(**kwargs) # sets axis
 
@@ -52,13 +53,14 @@ class LinearEncoderViaNI(LinearEncoder):
         self._samples_per_channel = samples_per_channel
         self._timestamp_trigger_events = timestamp_trigger_events
 
+        self._data = None # pre-allocate for use with StreamReaders
+
     def start_logging(self, initial_position: units.Position, expected_sample_rate: units.SampleRate):
         """Sets up the counter input task and starts it."""
         self._encoder_task = nidaqmx.Task() # TODO give it a name
 
         self._encoder_task.ci_channels.add_ci_lin_encoder_chan(
             counter=CounterRegistry.allocate_counter(),
-            name_to_assign_to_channel=f"{self.axis} encoder",
             dist_per_pulse=self._distance_per_pulse,
             initial_pos=initial_position
         )
@@ -73,13 +75,22 @@ class LinearEncoderViaNI(LinearEncoder):
             samps_per_chan=self._samples_per_channel
         )
 
+        self._reader = CounterReader(self._encoder_task.in_stream)
+
+        self._encoder_task.start()
+
     def read_positions(self, n: int):
         """Read n position samples from the task."""
         if not isinstance(n, int):
             raise ValueError("`n_samples` to read must be an integer.")
         if n < 1:
             raise ValueError("Must read at least 1 sample.")
-        return self._encoder_task.read(n)
+        
+        if self._data is None:
+            self._data = np.empty((n,), dtype=np.float64)
+        
+        self._reader.read_many_sample_double(self._data, n)
+        return self._data
     
     def read_timestamps(self, n: int):
         """Read n timestamp samples from the task."""

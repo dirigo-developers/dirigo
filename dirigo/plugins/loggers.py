@@ -151,7 +151,12 @@ class TiffLogger(Logger):
         acq = self._acquisition if self._acquisition else self._processor._acq
         spec: FrameAcquisitionSpec = acq.spec
 
-        pixel_height_inches = ((spec.pixel_height * 1000) / 25.4)
+        if hasattr(spec, 'pixel_height'):
+            pixel_height = spec.pixel_height
+        else:
+            # fallback in case we are processing LineAcquisition data
+            pixel_height = spec.pixel_size
+        pixel_height_inches = ((pixel_height * 1000) / 25.4)
         return 1 / pixel_height_inches
     
     @cached_property

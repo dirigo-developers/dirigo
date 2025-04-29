@@ -135,7 +135,7 @@ class LineAcquisitionSpec(AcquisitionSpec):
 
 class LineAcquisition(Acquisition):
     REQUIRED_RESOURCES = [Digitizer, DetectorSet, FastRasterScanner]
-    SPEC_LOCATION = Path(user_config_dir("Dirigo")) / "acquisition/linescan"
+    SPEC_LOCATION = Path(user_config_dir("Dirigo")) / "acquisition/line"
     SPEC_OBJECT = LineAcquisitionSpec
     
     def __init__(self, hw, spec: LineAcquisitionSpec):
@@ -236,17 +236,22 @@ class LineAcquisition(Acquisition):
                 )
 
         try:
+            print("Start", digi.acquire.buffers_acquired)
             while not self._stop_event.is_set() and \
                 digi.acquire.buffers_acquired < self.spec.buffers_per_acquisition:
-
-                acq_buf = self.get_free_product()
-                digi.acquire.get_next_completed_buffer(acq_buf)
+                print("Buffers acquired", digi.acquire.buffers_acquired)
+                acq_product = self.get_free_product()
+                digi.acquire.get_next_completed_buffer(acq_product)
 
                 if self.hw.stage or self.hw.objective_scanner:
-                    acq_buf.positions = self.read_positions()
-                self.publish(acq_buf)
+                    t0 = time.perf_counter()
+                    acq_product.positions = self.read_positions()
+                    t1 = time.perf_counter()
 
-                print(f"Acquired {digi.acquire.buffers_acquired} of {self.spec.buffers_per_acquisition} ")
+                self.publish(acq_product)
+
+                print(f"Acquired {digi.acquire.buffers_acquired} of {self.spec.buffers_per_acquisition} "
+                      f"Reading stage positions took: {1000*(t1-t0):.3f} ms")
         finally:
             self.cleanup()
 

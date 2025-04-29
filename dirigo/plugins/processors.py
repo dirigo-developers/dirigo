@@ -160,11 +160,14 @@ class RasterFrameProcessor(Processor):
                 f"RasterFrameProcessor implemented for use with Digitizer, "
                 f"got type: {type(data_device)}"
             )
-        self.processed_shape = ( # Final shape after processing
-            self._spec.lines_per_frame,
-            self._spec.pixels_per_line,
-            n_channels
-        )
+        
+        if hasattr(self._spec, 'lines_per_frame'):
+            n_lines = self._spec.lines_per_frame
+        else:
+            # fall-back when processing LineAcquisition as a frame
+            n_lines = self._spec.lines_per_buffer  
+        self.processed_shape = (n_lines, self._spec.pixels_per_line, n_channels)
+
         self._invert_mask = -2 * np.array(
             self._acq.hw.digitizer.acquire._inverted_channels, 
             dtype=np.int16) + 1

@@ -113,20 +113,21 @@ class FrameDisplay(Display):
             )
             self.display_channels.append(dc)
 
-        shape = (
-            self._acquisition.spec.lines_per_frame,
-            self._acquisition.spec.pixels_per_line,
-            bpp
-        )
+        if hasattr(self._acquisition.spec, 'lines_per_frame'):
+            n_lines = self._acquisition.spec.lines_per_frame
+        else:
+            # fall-back when processing LineAcquisition as a frame
+            n_lines = self._acquisition.spec.lines_per_buffer  
+        shape = (n_lines, self._acquisition.spec.pixels_per_line, bpp)
         self.init_product_pool(n=3, shape=shape)
         
 
     def run(self):
         while True:
             # Get new data from inbox
-            prod: AcquisitionProduct | ProcessorProduct = self.inbox.get(block=True) # may want to add a timeout
+            product: AcquisitionProduct | ProcessorProduct = self.inbox.get(block=True)
 
-            if prod is None: # Check for sentinel None
+            if product is None: # Check for sentinel None
                 self.publish(None) # pass sentinel
                 print('exiting display thread')
                 # Ends thread, but this object can still be used (ie to adjust 
@@ -134,12 +135,14 @@ class FrameDisplay(Display):
                 return 
             
             # Check whether position has changed
-            if prod.positions is not None:
+            if product.positions is not None:
+
+                if isinstance(product.positions, np.ndarray):
+                    current_positions = product.positions[-1,:] # use final position only
+                elif isinstance(product.positions, tuple):
+                    current_positions = product.positions
+
                 if (self._prev_position is not None):
-                    if isinstance(prod.positions, np.ndarray):
-                        current_positions = prod.positions[-1,:] # use the final the position reading
-                    elif isinstance(prod.positions, tuple):
-                        current_positions = prod.positions
 
                     dr2 = (current_positions[0] - self._prev_position[0])**2  \
                         + (current_positions[1] - self._prev_position[1])**2
@@ -157,14 +160,14 @@ class FrameDisplay(Display):
                             # Similarly, reset _i if z position changes
                             self._i = 0
                 
-                self._prev_position = prod.positions
+                self._prev_position = current_positions
             
             t0 = time.perf_counter()
             with self._average_buffer_lock:
                 # _average_buffer is initially None and the first frame establishes height, width, etc
                 # Averaging can also be reset or changed by setting this to None, prompting reallocation
                 if self._average_buffer is None:
-                    frame_shape = prod.data.shape
+                    frame_shape = product.data.shape
                     ring_frame_buffer_shape = (self.n_frame_average,) + frame_shape
                     self._average_buffer = np.zeros(
                         shape=ring_frame_buffer_shape, 
@@ -176,7 +179,7 @@ class FrameDisplay(Display):
                     )
                     self._i = 0
 
-                self._average_buffer[self._i % self.n_frame_average] = prod.data
+                self._average_buffer[self._i % self.n_frame_average] = product.data
 
                 disp_product = self.get_free_product()
                 rolling_average_kernel(self._average_buffer, self._i, averaged_frame)
@@ -185,11 +188,11 @@ class FrameDisplay(Display):
                 self.publish(disp_product)
                 
                 self._prev_data = averaged_frame # store reference for use after thread finishes  
-                prod._release()
+                product._release()
 
             t1 = time.perf_counter()
             self._i += 1
-            print(f"Channel display processing: {1000*(t1-t0):.1f}ms. Position data shape: {prod.positions}")
+            print(f"Channel display processing: {1000*(t1-t0):.3f}ms.")
 
     def _apply_display_kernel(self, average_frame, luts):
         return additive_display_kernel(average_frame, luts, self.gamma_lut)

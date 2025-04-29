@@ -20,7 +20,7 @@ dependencies = [
 ]
 
 [project.entry-points."dirigo_acquisitions"]
-linescan = "dirigo.plugins.acquisitions:LineAcquisition"
+line = "dirigo.plugins.acquisitions:LineAcquisition"
 frame = "dirigo.plugins.acquisitions:FrameAcquisition"
 stack = "dirigo.plugins.acquisitions:StackAcquisition"
 

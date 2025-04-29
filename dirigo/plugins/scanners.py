@@ -109,7 +109,6 @@ class CounterRegistry:
         # than we previously initialized, decide how you want to handle that:
         if device_name != cls._device_name:
             # Possibly re‐initialize for the new device?
-            # Or raise an error? This depends on your usage.
             cls.initialize(device_name)
 
         for ctr in cls._available_counters:
