@@ -779,7 +779,7 @@ class NIDigitizer(digitizer.Digitizer):
         self.aux_io = NIAuxillaryIO(device=self._device)
 
     @cached_property
-    def data_range(self) -> units.ValueRange:
+    def data_range(self) -> units.IntRange:
         """Range of the returned data."""
         if self._mode == "analog":
             # Make dummy task to get at the .ai_resolution property
@@ -788,10 +788,10 @@ class NIDigitizer(digitizer.Digitizer):
                     physical_channel=self._device.ai_physical_chans.channel_names[0]
                 )
                 N = int(channel.ai_resolution)
-            return units.ValueRange(min=-2**N//2, max=2**N//2 - 1)
+            return units.IntRange(min=-2**N//2, max=2**N//2 - 1)
         else:
             # For edge counting, use uint8 (max 256 edges/photons per pixel)
             # technically the counters support up to 32 bits, but it's unlikely
             # anyone will need this range
-            return units.ValueRange(min=0, max=2**8 - 1)
+            return units.IntRange(min=0, max=2**8 - 1)
     

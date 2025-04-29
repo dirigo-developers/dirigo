@@ -55,7 +55,7 @@ class Processor(Worker):
 
     @property
     @abstractmethod # Not sure this is absolutely needed for every subclass of this.
-    def data_range(self) -> units.ValueRange:
+    def data_range(self) -> units.IntRange:
         """
         The data range after processing (resampling) has been performed.
 

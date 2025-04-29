@@ -136,15 +136,16 @@ if __name__ == "__main__":
 
     diri = Dirigo()
     
-    acquisition = diri.acquisition_factory('point_scan_strip')
+    #acquisition = diri.acquisition_factory('bidi_calibration', spec_name='bidi_calibration')
+    acquisition = diri.acquisition_factory('frame')
     processor = diri.processor_factory(acquisition)
     display = diri.display_factory(processor)
-    logging = diri.logger_factory(processor)
-    logging.frames_per_file = float('inf')    
+    # logging = diri.logger_factory(processor)
+    # logging.frames_per_file = float('inf')    
 
     processor.start() # TODO, autostart options?
     display.start()
-    logging.start()
+    # logging.start()
     acquisition.start()
 
     acquisition.join(timeout=100.0)

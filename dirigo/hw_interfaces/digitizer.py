@@ -597,7 +597,7 @@ class Digitizer(ABC):
 
     @property
     @abstractmethod
-    def data_range(self) -> units.ValueRange:
+    def data_range(self) -> units.IntRange:
         """
         Returns the range of values returned by the digitizer 
         

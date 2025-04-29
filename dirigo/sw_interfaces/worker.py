@@ -28,6 +28,12 @@ class Product:
             if self._remaining < 1:
                 self._pool.put(self)
 
+    def __enter__(self):
+        return self
+    
+    def __exit__(self, exc_type, exc_value, traceback):
+        self._release()
+
 
 class Worker(threading.Thread, ABC):
     def __init__(self):

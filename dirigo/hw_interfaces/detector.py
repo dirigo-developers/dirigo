@@ -40,7 +40,7 @@ class Detector(ABC):
 
     @property
     @abstractmethod
-    def gain_range(self) -> units.ValueRange: ...
+    def gain_range(self) -> units.IntRange: ...
 
     @property
     @abstractmethod

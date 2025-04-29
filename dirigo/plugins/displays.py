@@ -32,18 +32,18 @@ def rolling_average_kernel(ring_buffer: np.ndarray, frame_index: int, averaged: 
 
 
 sigs = [
-    types.uint8[:,:,:](types.int16[:,:,:],  types.uint16[:,:,:], types.uint8[:]),
-    types.uint8[:,:,:](types.uint16[:,:,:], types.uint16[:,:,:], types.uint8[:]),
+    (types.int16[:,:,:],  types.uint16[:,:,:], types.uint8[:], types.uint8[:,:,:]),
+    (types.uint16[:,:,:], types.uint16[:,:,:], types.uint8[:], types.uint8[:,:,:]),
     # Not implemented yet: >8bit gamma LUT (for HDR displays)
 ]
 @njit(sigs, nogil=True, parallel=True, fastmath=True, cache=True)
-def additive_display_kernel(data: np.ndarray, luts: np.ndarray, gamma_lut: np.ndarray) -> np.ndarray:
+def additive_display_kernel(data: np.ndarray, luts: np.ndarray, gamma_lut: np.ndarray, image: np.ndarray) -> np.ndarray:
     """Applies LUTs and blends channels additively."""
     Ny, Nx, Nc = data.shape
     bpp = luts.shape[2]
     gamma_lut_length = gamma_lut.shape[0]
 
-    image = np.zeros(shape=(Ny, Nx, bpp), dtype=np.uint8)
+    #image = np.zeros(shape=(Ny, Nx, bpp), dtype=np.uint8)
 
     for yi in prange(Ny):
         for xi in prange(Nx):
@@ -183,7 +183,7 @@ class FrameDisplay(Display):
 
                 disp_product = self.get_free_product()
                 rolling_average_kernel(self._average_buffer, self._i, averaged_frame)
-                disp_product.frame[...] = self._apply_display_kernel(averaged_frame, self._luts)
+                self._apply_display_kernel(averaged_frame, self._luts, disp_product.frame)
 
                 self.publish(disp_product)
                 
@@ -194,8 +194,8 @@ class FrameDisplay(Display):
             self._i += 1
             print(f"Channel display processing: {1000*(t1-t0):.3f}ms.")
 
-    def _apply_display_kernel(self, average_frame, luts):
-        return additive_display_kernel(average_frame, luts, self.gamma_lut)
+    def _apply_display_kernel(self, average_frame, luts, display_frame):
+        additive_display_kernel(average_frame, luts, self.gamma_lut, display_frame)
                      
     @property
     def n_frame_average(self) -> int:

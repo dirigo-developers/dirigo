@@ -519,7 +519,7 @@ class SampleRateRange(RangeWithUnits):
 
 
 @dataclass
-class ValueRange:
+class IntRange:
     min: int
     max: int
 
@@ -559,3 +559,12 @@ class ValueRange:
                 return np.uint64
             else:
                 return np.uint128
+            
+@dataclass
+class FloatRange:
+    min: float
+    max: float
+
+    @property
+    def range(self) -> float:
+        return self.max - self.min

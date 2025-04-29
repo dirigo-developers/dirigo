@@ -564,69 +564,69 @@ class StackAcquisition(Acquisition):
     
 
 
-class BidiFrameCalibrationSpec(FrameAcquisitionSpec):
-    pass
+class BidiCalibrationSpec(FrameAcquisitionSpec):
+    def __init__(self, 
+                 min_ampl_frac: str | float = 0.1, 
+                 max_ampl_frac: str | float = 1.0, 
+                 n_ampls: str | int = 10,
+                 sacrificial_frames_per_ampl: int = 10,
+                 **kwargs):
+        super().__init__(**kwargs)
+        
+        self.ampl_frac_range = units.FloatRange(min_ampl_frac, max_ampl_frac)
+        self.n_ampls = n_ampls
+        self.sacrificial_frames_per_ampl = sacrificial_frames_per_ampl
 
 
-class BidiFrameCalibration(Acquisition):
+class BidiCalibration(Acquisition):
     REQUIRED_RESOURCES = [Digitizer, FastRasterScanner, SlowRasterScanner]
     SPEC_LOCATION = Path(user_config_dir("Dirigo")) / "acquisition/frame"
-    SPEC_OBJECT = BidiFrameCalibrationSpec
+    SPEC_OBJECT = BidiCalibrationSpec
 
 
-    def __init__(self, hw, spec: BidiFrameCalibrationSpec):
+    def __init__(self, hw, spec: BidiCalibrationSpec):
         super().__init__(hw, spec)
-        self.spec: BidiFrameCalibrationSpec
+        self.spec: BidiCalibrationSpec
 
-        # self._amplitudes = np.arange( # TODO
-        #     start=spec.lower_limit,
-        #     stop=spec.upper_limit,
-        #     step=spec.spacing
-        # )
-
-        # Need # blanks, # waits
+        ampl = self.hw.fast_raster_scanner.angle_limits.range
+        self._amplitudes = np.linspace(
+            start=spec.ampl_frac_range.min * ampl,
+            stop=spec.ampl_frac_range.max * ampl,
+            num=spec.n_ampls
+        )
 
         # Set up child FrameAcquisition & subscribe to it
         spec.buffers_per_acquisition = float('inf')
         self._frame_acquisition = FrameAcquisition(hw, spec)
         self._frame_acquisition.add_subscriber(self)
 
-        # Initialize hw
+        # Initialize any additional HW?
 
     def run(self):
-        """
-        """
-        # Preliminary movements
 
         try:
             # Start child FrameAcquisition
             self._frame_acquisition.start()
 
-            # Get sacrificial frames
-            for _ in range(self.spec._sacrificial_frames_per_step):
-                # pocket the sacrificial frames (don't pass them on to subscribers)
-                if self.inbox.get(block=True) is None:
-                    return # runs finally: block on its way out
+            for ampl in self._amplitudes:
+                # Get sacrificial frames
+                for _ in range(self.spec.sacrificial_frames_per_ampl):
+                    product = self.inbox.get()
+                    if product is None: 
+                        self.publish(None)
+                    with product: pass # just pocket this data, don't publish
+                
+                # Set amplitude
+                self.hw.fast_raster_scanner.amplitude = units.Angle(ampl)
 
-            for i in range(1, self.spec.amplitudes_per_acquisition+1):
-                for _ in range(self.spec._saved_frames_per_step):
-                    # Wait for frame data, and pass along
-                    buf: AcquisitionProduct = self.inbox.get(block=True)
-                    if buf is None:
-                        return # runs finally: block on its way out
-                    self.publish(buf)
+                # Get measurement frames
+                for _ in range(2):
+                    product = self.inbox.get()
+                    if product is None: return
+                    with product: 
+                        self.publish(product)
+                        
 
-                    # TOOD, blank laser beam for step time (sacrificial frames)
-
-                if i < self.spec.amplitudes_per_acquisition:
-                    # Adjust amplitude
-                    #z_scanner.move_relative(self._depths[i]-self._depths[i-1])
-
-                    # Wait for sacrificial frames
-                    for _ in range(self.spec._sacrificial_frames_per_step):
-                        # pocket the sacrificial frames (don't pass them on)
-                        if self.inbox.get(block=True) is None:
-                            return # runs finally: block on its way out
         finally:
             self._frame_acquisition.stop()
             self.publish(None) # publish the sentinel

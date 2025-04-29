@@ -5,7 +5,7 @@ from typing import Callable
 import numpy as np
 from numba import njit, types
 
-from dirigo.units import ValueRange
+from dirigo.units import IntRange
 from dirigo.sw_interfaces.worker import Worker, Product
 from dirigo.sw_interfaces import Acquisition, Processor
 
@@ -69,7 +69,7 @@ class DisplayPixelFormat(Enum):
 class DisplayChannel(): # should this be a ABC?
     """Represents an individual channel to be processed for display."""
     def __init__(self, lut_slice: np.ndarray, color_vector: ColorVector, 
-                 display_range: ValueRange, update_method: Callable[[], None],
+                 display_range: IntRange, update_method: Callable[[], None],
                  pixel_format: DisplayPixelFormat, gamma_lut_length: int):
 
         if not isinstance(lut_slice, np.ndarray) or (lut_slice.base is None):
@@ -210,7 +210,7 @@ class Display(Worker):
         return self._acquisition.spec.pixel_size
         
     @property
-    def data_range(self) -> ValueRange:
+    def data_range(self) -> IntRange:
         """ 
         The incoming data range from either the processor or the acquisition worker. 
         """

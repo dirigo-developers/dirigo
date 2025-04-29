@@ -141,7 +141,6 @@ class RasterFrameProcessor(Processor):
         bit precision, change the bits_precision argument.
         """
         super().__init__(upstream)
-        self._test = 0
         data_device = upstream.data_acquisition_device #brevity
 
         if (not isinstance(bits_precision, int)) or (bits_precision % 2) or not (8 <= bits_precision <= 16):
@@ -197,25 +196,24 @@ class RasterFrameProcessor(Processor):
         nsamples_to_sum = np.abs(np.diff(start_indices, axis=1))
         
         while True: # Loops until receives sentinel None
-            acq_prod: AcquisitionProduct = self.inbox.get(block=True) # we may want to add a timeout
+            acq_prod: AcquisitionProduct = self.inbox.get() 
 
             if acq_prod is None: # Check for sentinel None
                 self.publish(None) # pass along sentinel to indicate end
                 print('Exiting processing thread ')
                 return # concludes run() - this thread ends
 
-            t0 = time.perf_counter()
             proc_product = self.get_free_product() # Request a product object
             t0 = time.perf_counter()
 
-            # If timestamps are assigned (default is None)
+            # If array of timestamps are assigned (default is None)
             if isinstance(acq_prod.timestamps, np.ndarray):
                 # Estimate frequency from timestamps
                 self._fast_scanner_frequency = 1 / np.mean(np.diff(acq_prod.timestamps))
 
             # Measure phase from bidi data (in uni-directional, phase is not critical)
-            # if self._spec.bidirectional_scanning:
-            #     self._trigger_phase = self.measure_phase(buf.data)
+            if self._spec.bidirectional_scanning:
+                self._trigger_phase = self.measure_phase(acq_prod.data)
 
             # Update resampling start indices--these can change a bit if the scanner frequency drifts
             start_indices = self.calculate_start_indices(self._trigger_phase) - self._fixed_trigger_delay
@@ -239,7 +237,8 @@ class RasterFrameProcessor(Processor):
             print(f"RECALC: {1000*(t1-t0):.03f} | FRAME {1000*(t2-t1):.03f} ")
             
 
-    def calculate_start_indices(self, trigger_phase: int = 0):
+    @cached_property
+    def _temporal_edges(self):
         # Set up an array with the SPATIAL edges of pixels--we will bin samples into the pixel edges
         ff = self._spec.fill_fraction
 
@@ -272,13 +271,12 @@ class RasterFrameProcessor(Processor):
         else:
             temporal_edges = np.vstack([temporal_edges])
 
-        # TODO compute only once: Up to here is completely the same each iteration 
-        
-        starts_exact = temporal_edges * self.samples_per_period + trigger_phase
+        return temporal_edges
 
-        start_indices = np.ceil(starts_exact - 1e-6).astype(np.int32) 
-
-        return start_indices
+    def calculate_start_indices(self, trigger_phase: int = 0):
+        """Calculate the start position in digitizer recrods for each pixel."""
+        starts_exact = self._temporal_edges * self.samples_per_period + trigger_phase
+        return np.ceil(starts_exact - 1e-6).astype(np.int32) 
     
     def measure_phase(self, data: np.ndarray) -> units.Angle:
         """
@@ -286,7 +284,6 @@ class RasterFrameProcessor(Processor):
         (for bidirectional scanning).
         """
         UPSAMPLE = 2 # TODO move this somewhere else
-        self._test += 1
         
         data_window = crop_bidi_data(
             data=data, 
@@ -329,12 +326,12 @@ class RasterFrameProcessor(Processor):
         May be higher than the native bit depth of the data capture device.
         """
         if self._acq.data_acquisition_device.data_range.min < 0:
-            return units.ValueRange(
+            return units.IntRange(
                 min=-2**(self._bits_precision-1), 
                 max=2**(self._bits_precision-1) - 1
             )
         else: # unsigned data
-            return units.ValueRange(
+            return units.IntRange(
                 min=0, 
                 max=2**self._bits_precision - 1
             )
