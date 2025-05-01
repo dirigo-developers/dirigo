@@ -6,7 +6,7 @@ from numba import njit, prange, types
 from scipy import fft
 
 from dirigo import units
-from dirigo.sw_interfaces.processor import Processor, ProcessorProduct
+from dirigo.sw_interfaces.processor import Processor
 from dirigo.sw_interfaces.acquisition import Acquisition, AcquisitionProduct
 from dirigo.hw_interfaces.digitizer import Digitizer
 from dirigo.plugins.acquisitions import FrameAcquisitionSpec
@@ -214,6 +214,7 @@ class RasterFrameProcessor(Processor):
             # Measure phase from bidi data (in uni-directional, phase is not critical)
             if self._spec.bidirectional_scanning:
                 self._trigger_phase = self.measure_phase(acq_prod.data)
+            print("PHASE:", self._trigger_phase)
 
             # Update resampling start indices--these can change a bit if the scanner frequency drifts
             start_indices = self.calculate_start_indices(self._trigger_phase) - self._fixed_trigger_delay
@@ -230,6 +231,8 @@ class RasterFrameProcessor(Processor):
             )
             proc_product.timestamps = acq_prod.timestamps
             proc_product.positions = acq_prod.positions
+            proc_product.phase = self._trigger_phase
+
             self.publish(proc_product) # sends off to Logger and/or Display workers
             acq_prod._release() # TODO, context manager this
             t2 = time.perf_counter()

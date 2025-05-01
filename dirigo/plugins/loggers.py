@@ -4,12 +4,11 @@ import json
 
 import tifffile
 import numpy as np
-from platformdirs import user_documents_path
 
 from dirigo.sw_interfaces.processor import Processor, ProcessorProduct
 from dirigo.sw_interfaces import Logger
 from dirigo.sw_interfaces.acquisition import Acquisition, AcquisitionProduct
-from dirigo.plugins.acquisitions import FrameAcquisitionSpec
+from dirigo.plugins.acquisitions import FrameAcquisitionSpec, BidiCalibration
 
 
 
@@ -18,15 +17,11 @@ class TiffLogger(Logger):
     def __init__(self, 
                  upstream: Acquisition | Processor,
                  max_frames_per_file: int = 1,
-                 basename: str = "experiment"
-                 ):
-        super().__init__(upstream)
+                 **kwargs):
+        super().__init__(upstream, **kwargs)
 
         self.frames_per_file = max_frames_per_file # TODO add validation
-        self.basename = basename
-        self.save_path = user_documents_path() / "Dirigo"
-        self.save_path.mkdir(parents=True, exist_ok=True)
-
+        
         self._fn = None
         self._writer = None # generated upon attempt to save first frame
         self.frames_saved = 0
@@ -171,3 +166,30 @@ class TiffLogger(Logger):
         slow_axis =  acq.hw.slow_raster_scanner.axis
         return self._slow_axis_dpi if slow_axis == 'y' else self._fast_axis_dpi
 
+
+class BidiCalibrationLogger(Logger):
+    """Logs bidirecetional phase at amplitudes."""
+    def __init__(self, upstream: Processor):
+        super().__init__(upstream)
+
+        self._amplitudes = []
+        self._phases = []
+
+    def run(self):
+        try:
+            while True:
+                product: ProcessorProduct = self.inbox.get(block=True)
+                if product is None: return # Check for sentinel None
+
+                with product:
+                    self._amplitudes.append(
+                        self._acquisition.hw.fast_raster_scanner.amplitude
+                    )
+                    self._phases.append(product.phase)
+
+        finally:
+            self.publish(None) # pass sentinel
+            self.save_data()
+
+    def save_data(self):
+        print(self._phases)

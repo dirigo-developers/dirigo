@@ -2,6 +2,7 @@ from abc import abstractmethod
 from pathlib import Path
 
 import numpy as np
+from platformdirs import user_documents_path
 
 from dirigo.sw_interfaces.worker import Worker
 from dirigo.sw_interfaces import Acquisition, Processor
@@ -10,7 +11,9 @@ from dirigo.sw_interfaces import Acquisition, Processor
 
 class Logger(Worker):
     """Dirigo interface for data logging."""
-    def __init__(self, upstream: Acquisition | Processor):
+    def __init__(self, 
+                 upstream: Acquisition | Processor,
+                 basename: str = "experiment"):
         """Instantiate with either an upstream Acquisition or Processor"""
         super().__init__() # sets up the thread and the publisher-subcriber interface
         
@@ -23,8 +26,10 @@ class Logger(Worker):
         else:
             raise ValueError("Upstream Worker must be either an Acquisition or a Processor")
 
-        self.basename: str = None
-        self.save_path: Path = None # potentially this could be a kwarg
+        self.basename = basename
+        self.save_path = user_documents_path() / "Dirigo"
+        self.save_path.mkdir(parents=True, exist_ok=True)
+        
         self.frames_per_file: int = None
         # Track frames/buffers saved
 

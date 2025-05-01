@@ -1,4 +1,5 @@
 from pathlib import Path
+import threading
 import math
 import time
 from typing import Optional
@@ -143,6 +144,7 @@ class LineAcquisition(Acquisition):
         # Tip: since this method runs on main thread, limit to HW init tasks that will return fast, prepend slower tasks to run method
         super().__init__(hw, spec) # sets up thread, inbox, stores hw, checks resources
         self.spec: LineAcquisitionSpec # to refine type hints
+        self.active = threading.Event()
 
         self.hw.digitizer.load_profile(profile_name=self.spec.digitizer_profile)
         if self.hw.digitizer.sample_clock.rate is None:
@@ -215,6 +217,7 @@ class LineAcquisition(Acquisition):
             if hasattr(self.hw.fast_raster_scanner, 'response_time'):
                 time.sleep(self.hw.fast_raster_scanner.response_time)
             digi.acquire.start() # This includes the buffer allocation
+            self.active.set()
 
         elif isinstance(self.hw.fast_raster_scanner, GalvoScanner):
             if digi._mode == "analog":
@@ -236,7 +239,6 @@ class LineAcquisition(Acquisition):
                 )
 
         try:
-            print("Start", digi.acquire.buffers_acquired)
             while not self._stop_event.is_set() and \
                 digi.acquire.buffers_acquired < self.spec.buffers_per_acquisition:
                 print("Buffers acquired", digi.acquire.buffers_acquired)
@@ -566,23 +568,27 @@ class StackAcquisition(Acquisition):
 
 class BidiCalibrationSpec(FrameAcquisitionSpec):
     def __init__(self, 
-                 min_ampl_frac: str | float = 0.1, 
+                 min_ampl_frac: str | float = 0.2, 
                  max_ampl_frac: str | float = 1.0, 
                  n_ampls: str | int = 10,
-                 sacrificial_frames_per_ampl: int = 10,
+                 measurement_frames_per_ampl: str | int = 10,
+                 pause_time: str | units.Time = units.Time("5 s"),
                  **kwargs):
         super().__init__(**kwargs)
         
-        self.ampl_frac_range = units.FloatRange(min_ampl_frac, max_ampl_frac)
-        self.n_ampls = n_ampls
-        self.sacrificial_frames_per_ampl = sacrificial_frames_per_ampl
+        self.ampl_frac_range = units.FloatRange(
+            min=float(min_ampl_frac), 
+            max=float(max_ampl_frac)
+        )
+        self.n_ampls = int(n_ampls)
+        self.measurement_frames_per_ampl = int(measurement_frames_per_ampl)
+        self.pause_time = units.Time(pause_time)
 
 
 class BidiCalibration(Acquisition):
     REQUIRED_RESOURCES = [Digitizer, FastRasterScanner, SlowRasterScanner]
     SPEC_LOCATION = Path(user_config_dir("Dirigo")) / "acquisition/frame"
     SPEC_OBJECT = BidiCalibrationSpec
-
 
     def __init__(self, hw, spec: BidiCalibrationSpec):
         super().__init__(hw, spec)
@@ -594,39 +600,35 @@ class BidiCalibration(Acquisition):
             stop=spec.ampl_frac_range.max * ampl,
             num=spec.n_ampls
         )
-
-        # Set up child FrameAcquisition & subscribe to it
-        spec.buffers_per_acquisition = float('inf')
-        self._frame_acquisition = FrameAcquisition(hw, spec)
+        self.spec.buffers_per_acquisition = spec.measurement_frames_per_ampl
+        
+        self._frame_acquisition = FrameAcquisition(self.hw, self.spec)
         self._frame_acquisition.add_subscriber(self)
 
-        # Initialize any additional HW?
-
     def run(self):
-
         try:
-            # Start child FrameAcquisition
-            self._frame_acquisition.start()
-
             for ampl in self._amplitudes:
-                # Get sacrificial frames
-                for _ in range(self.spec.sacrificial_frames_per_ampl):
-                    product = self.inbox.get()
-                    if product is None: 
-                        self.publish(None)
-                    with product: pass # just pocket this data, don't publish
-                
-                # Set amplitude
+                self._frame_acquisition.start()
+
+                # Over-ride amplitude
                 self.hw.fast_raster_scanner.amplitude = units.Angle(ampl)
 
                 # Get measurement frames
-                for _ in range(2):
+                for _ in range(self.spec.measurement_frames_per_ampl):
                     product = self.inbox.get()
                     if product is None: return
                     with product: 
                         self.publish(product)
-                        
+                
+                if self.inbox.get() is not None: # receive final None
+                    return 
+                self._frame_acquisition.join(1)
+                self._frame_acquisition = None
+                time.sleep(self.spec.pause_time)
+
+                # Remake the acquisition object
+                self._frame_acquisition = FrameAcquisition(self.hw, self.spec)
+                self._frame_acquisition.add_subscriber(self)
 
         finally:
-            self._frame_acquisition.stop()
             self.publish(None) # publish the sentinel
