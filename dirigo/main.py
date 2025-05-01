@@ -73,17 +73,34 @@ class Dirigo:
     
     def processor_factory(self, 
                           upstream_worker: Acquisition | Processor, 
+                          type: str = "raster_frame",
                           auto_connect = True) -> Processor:
+        
         # Dynamically load plugin class
-        #entry_pts = importlib.metadata.entry_points(group="dirigo_processors")
-        #TODO finish entry point loading
+        entry_pts = importlib.metadata.entry_points(group="dirigo_processors")
 
-        processor = RasterFrameProcessor(upstream_worker)
+        # Look for the specified plugin by name
+        for entry_pt in entry_pts:
+            if entry_pt.name == type:
+                # Load and instantiate the plugin class
+                try:
+                    plugin_class: Logger = entry_pt.load()
 
-        if auto_connect:
-            upstream_worker.add_subscriber(processor)
+                    # Instantiate and return the acquisition worker
+                    processor = plugin_class(upstream_worker)  
+                
+                    if auto_connect:
+                        upstream_worker.add_subscriber(processor)
 
-        return processor
+                    return processor
+                
+                except Exception as e:
+                    raise RuntimeError(f"Failed to load Processor '{type}': {e}")
+                                
+        # If the plugin was not found, raise an error
+        raise ValueError(
+            f"Processor '{type}' not found in entry points."
+        )
     
     def display_factory(self, 
                         upstream_worker: Acquisition | Processor, 
@@ -100,13 +117,35 @@ class Dirigo:
     
     def logger_factory(self, 
                        upstream_worker: Acquisition | Processor,
+                       type: str = "tiff", 
                        auto_connect: bool = True) -> Logger:
-        logger = TiffLogger(upstream_worker)
+        
+        # Dynamically load plugin class
+        entry_pts = importlib.metadata.entry_points(group="dirigo_loggers")
 
-        if auto_connect:
-            upstream_worker.add_subscriber(logger)
+        # Look for the specified plugin by name
+        for entry_pt in entry_pts:
+            if entry_pt.name == type:
+                # Load and instantiate the plugin class
+                try:
+                    plugin_class: Logger = entry_pt.load()
 
-        return logger
+                    # Instantiate and return the acquisition worker
+                    logger = plugin_class(upstream_worker)  
+                
+                    if auto_connect:
+                        upstream_worker.add_subscriber(logger)
+
+                    return logger
+                
+                except Exception as e:
+                    raise RuntimeError(f"Failed to load Logger '{type}': {e}")
+                                
+        # If the plugin was not found, raise an error
+        raise ValueError(
+            f"Logger '{type}' not found in entry points."
+        )
+
     
     def acquisition_spec(self, acquisition_type: str, spec_name: str = "default"):
         # Dynamically load plugin class
@@ -137,15 +176,21 @@ if __name__ == "__main__":
     diri = Dirigo()
     
     #acquisition = diri.acquisition_factory('bidi_calibration', spec_name='bidi_calibration')
-    acquisition = diri.acquisition_factory('frame')
+    acquisition = diri.acquisition_factory('point_scan_strip')
     processor = diri.processor_factory(acquisition)
-    display = diri.display_factory(processor)
-    # logging = diri.logger_factory(processor)
-    # logging.frames_per_file = float('inf')    
+    strip_processor = diri.processor_factory(processor, 'point_scan_strip')
+    strip_stitcher = diri.processor_factory(strip_processor, 'strip_stitcher')
+    # display = diri.display_factory(processor)
+
+    logger = diri.logger_factory(strip_stitcher, 'pyramid')
+    # logger = diri.logger_factory(processor, 'bidi_calibration')
+    # logger.frames_per_file = float('inf')    
 
     processor.start() # TODO, autostart options?
-    display.start()
-    # logging.start()
+    strip_processor.start()
+    strip_stitcher.start()
+    # display.start()
+    logger.start()
     acquisition.start()
 
     acquisition.join(timeout=100.0)
