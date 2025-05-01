@@ -53,8 +53,6 @@ class LinearEncoderViaNI(LinearEncoder):
         self._samples_per_channel = samples_per_channel
         self._timestamp_trigger_events = timestamp_trigger_events
 
-        self._data = None # pre-allocate for use with StreamReaders
-
     def start_logging(self, initial_position: units.Position, expected_sample_rate: units.SampleRate):
         """Sets up the counter input task and starts it."""
         self._encoder_task = nidaqmx.Task() # TODO give it a name
@@ -86,11 +84,10 @@ class LinearEncoderViaNI(LinearEncoder):
         if n < 1:
             raise ValueError("Must read at least 1 sample.")
         
-        if self._data is None:
-            self._data = np.empty((n,), dtype=np.float64)
+        data = np.empty((n,), dtype=np.float64) # this sort of defeats the purpose of stream readers
         
-        self._reader.read_many_sample_double(self._data, n)
-        return self._data
+        self._reader.read_many_sample_double(data, n)
+        return data
     
     def read_timestamps(self, n: int):
         """Read n timestamp samples from the task."""
@@ -210,9 +207,13 @@ class MultiAxisLinearEncodersViaNI(MultiAxisLinearEncoder):
         query runtime hardware settings.
         """
         if self.x:
-            self.x.start_logging(hw.stage.x.position, hw.fast_raster_scanner.frequency)
+            initial_x = hw.stage.x.position
+            #print("initial x", initial_x, "moving", hw.stage.x.moving)
+            self.x.start_logging(initial_x, hw.fast_raster_scanner.frequency)
         if self.y:
-            self.y.start_logging(hw.stage.y.position, hw.fast_raster_scanner.frequency)
+            initial_y = hw.stage.y.position
+            #print("initial y", initial_y, "moving", hw.stage.y.moving)
+            self.y.start_logging(initial_y, hw.fast_raster_scanner.frequency)
         if self.z:
             self.z.start_logging(hw.stage.z.position, hw.fast_raster_scanner.frequency)
     
