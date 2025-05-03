@@ -8,9 +8,7 @@ from dirigo.components.hardware import Hardware
 from dirigo.sw_interfaces import Acquisition, Processor, Display, Logger
 from dirigo.sw_interfaces.acquisition import AcquisitionSpec
 from dirigo.sw_interfaces.display import DisplayPixelFormat
-from dirigo.plugins.processors import RasterFrameProcessor
 from dirigo.plugins.displays import FrameDisplay
-from dirigo.plugins.loggers import TiffLogger
 
 
 
@@ -177,22 +175,25 @@ if __name__ == "__main__":
     
     #acquisition = diri.acquisition_factory('bidi_calibration', spec_name='bidi_calibration')
     acquisition = diri.acquisition_factory('point_scan_strip')
+
     processor = diri.processor_factory(acquisition)
     strip_processor = diri.processor_factory(processor, 'point_scan_strip')
     strip_stitcher = diri.processor_factory(strip_processor, 'strip_stitcher')
-    # display = diri.display_factory(processor)
+    tile_builder = diri.processor_factory(strip_stitcher, 'tile_builder')
+    logger = diri.logger_factory(tile_builder, 'pyramid')
 
-    logger = diri.logger_factory(strip_stitcher, 'pyramid')
+    # display = diri.display_factory(processor)
     # logger = diri.logger_factory(processor, 'bidi_calibration')
     # logger.frames_per_file = float('inf')    
 
     processor.start() # TODO, autostart options?
     strip_processor.start()
     strip_stitcher.start()
+    tile_builder.start()
     # display.start()
     logger.start()
-    acquisition.start()
 
+    acquisition.start()
     acquisition.join(timeout=100.0)
 
     print("Acquisition complete")

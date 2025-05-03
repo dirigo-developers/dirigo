@@ -16,17 +16,19 @@ class Product:
         self._remaining: int = 0          # set automatically by Worker.publish
         self._lock = threading.Lock()
 
-    def _set_consumers(self, n: int):
+    def _add_consumers(self, n: int):
         """Called once by Worker.publish just before the publish (fan-out)."""
-        if n < 1:
-            self._release() # trigger return to pool
-        self._remaining = n
+        self._remaining += n
+        if self._remaining < 1:
+            self._pool.put(self)
+            self._remaining = 0
 
     def _release(self):
         with self._lock:
             self._remaining -= 1
             if self._remaining < 1:
                 self._pool.put(self)
+                self._remaining = 0
 
     def __enter__(self):
         return self
@@ -84,7 +86,7 @@ class Worker(threading.Thread, ABC):
             if not isinstance(obj, Product):
                 raise ValueError("Can only publish subclasses of RefCounted.")
             
-        obj._set_consumers(len(self._subscribers))
+        obj._add_consumers(len(self._subscribers))
 
         for subscriber in self._subscribers:
             subscriber.inbox.put(obj) # "Thrilled to share ..."
