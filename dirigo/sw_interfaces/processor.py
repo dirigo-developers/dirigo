@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from typing import Optional
 from abc import abstractmethod
 from typing import Self
 
@@ -29,7 +29,7 @@ class ProcessorProduct(Product):
         self.data = data
         self.timestamps = timestamps
         self.positions = positions
-        self.phase = phase
+        self.phase: Optional[float] = phase # should be in radians
 
 
 class Processor(Worker):

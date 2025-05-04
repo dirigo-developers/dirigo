@@ -72,7 +72,8 @@ class Dirigo:
     def processor_factory(self, 
                           upstream_worker: Acquisition | Processor, 
                           type: str = "raster_frame",
-                          auto_connect = True) -> Processor:
+                          auto_connect = True,
+                          auto_start = True) -> Processor:
         
         # Dynamically load plugin class
         entry_pts = importlib.metadata.entry_points(group="dirigo_processors")
@@ -85,10 +86,13 @@ class Dirigo:
                     plugin_class: Logger = entry_pt.load()
 
                     # Instantiate and return the acquisition worker
-                    processor = plugin_class(upstream_worker)  
+                    processor: Processor = plugin_class(upstream_worker)  
                 
                     if auto_connect:
                         upstream_worker.add_subscriber(processor)
+
+                    if auto_start:
+                        processor.start()
 
                     return processor
                 
@@ -116,7 +120,8 @@ class Dirigo:
     def logger_factory(self, 
                        upstream_worker: Acquisition | Processor,
                        type: str = "tiff", 
-                       auto_connect: bool = True) -> Logger:
+                       auto_connect: bool = True,
+                       auto_start: bool = True) -> Logger:
         
         # Dynamically load plugin class
         entry_pts = importlib.metadata.entry_points(group="dirigo_loggers")
@@ -129,10 +134,13 @@ class Dirigo:
                     plugin_class: Logger = entry_pt.load()
 
                     # Instantiate and return the acquisition worker
-                    logger = plugin_class(upstream_worker)  
+                    logger: Logger = plugin_class(upstream_worker)  
                 
                     if auto_connect:
                         upstream_worker.add_subscriber(logger)
+
+                    if auto_start:
+                        logger.start()
 
                     return logger
                 
@@ -174,24 +182,22 @@ if __name__ == "__main__":
     diri = Dirigo()
     
     #acquisition = diri.acquisition_factory('bidi_calibration', spec_name='bidi_calibration')
-    acquisition = diri.acquisition_factory('point_scan_strip')
-
+    acquisition = diri.acquisition_factory(
+        type='frame_size_calibration', 
+        spec_name='frame_size_calibration'
+    )
     processor = diri.processor_factory(acquisition)
-    strip_processor = diri.processor_factory(processor, 'point_scan_strip')
-    strip_stitcher = diri.processor_factory(strip_processor, 'strip_stitcher')
-    tile_builder = diri.processor_factory(strip_stitcher, 'tile_builder')
-    logger = diri.logger_factory(tile_builder, 'pyramid')
+    logger = diri.logger_factory(processor, 'frame_size_calibration')
+
+    # acquisition = diri.acquisition_factory('point_scan_strip')
+    # processor = diri.processor_factory(acquisition)
+    # strip_processor = diri.processor_factory(processor, 'point_scan_strip')
+    # strip_stitcher = diri.processor_factory(strip_processor, 'strip_stitcher')
+    # tile_builder = diri.processor_factory(strip_stitcher, 'tile_builder')
+    # logger = diri.logger_factory(tile_builder, 'pyramid')
 
     # display = diri.display_factory(processor)
-    # logger = diri.logger_factory(processor, 'bidi_calibration')
     # logger.frames_per_file = float('inf')    
-
-    processor.start() # TODO, autostart options?
-    strip_processor.start()
-    strip_stitcher.start()
-    tile_builder.start()
-    # display.start()
-    logger.start()
 
     acquisition.start()
     acquisition.join(timeout=100.0)

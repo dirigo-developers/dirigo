@@ -209,12 +209,12 @@ class RasterFrameProcessor(Processor):
             # If array of timestamps are assigned (default is None)
             if isinstance(acq_prod.timestamps, np.ndarray):
                 # Estimate frequency from timestamps
-                self._fast_scanner_frequency = 1 / np.mean(np.diff(acq_prod.timestamps))
+                avg_trig_period = np.mean(np.diff(acq_prod.timestamps))
+                self._fast_scanner_frequency = 1 / avg_trig_period
 
             # Measure phase from bidi data (in uni-directional, phase is not critical)
             if self._spec.bidirectional_scanning:
                 self._trigger_phase = self.measure_phase(acq_prod.data)
-            print("PHASE:", self._trigger_phase)
 
             # Update resampling start indices--these can change a bit if the scanner frequency drifts
             start_indices = self.calculate_start_indices(self._trigger_phase) - self._fixed_trigger_delay
@@ -231,7 +231,8 @@ class RasterFrameProcessor(Processor):
             )
             proc_product.timestamps = acq_prod.timestamps
             proc_product.positions = acq_prod.positions
-            proc_product.phase = self._trigger_phase
+            proc_product.phase = TWO_PI * self._trigger_phase \
+                / (self._acq.hw.digitizer.sample_clock.rate * avg_trig_period)
 
             self.publish(proc_product) # sends off to Logger and/or Display workers
             acq_prod._release() # TODO, context manager this
@@ -283,7 +284,7 @@ class RasterFrameProcessor(Processor):
     
     def measure_phase(self, data: np.ndarray) -> units.Angle:
         """
-        Measure the apparent fast raster scanner trigger phase 
+        Measure the apparent fast raster scanner trigger phase, in samples
         (for bidirectional scanning).
         """
         UPSAMPLE = 2 # TODO move this somewhere else
@@ -302,11 +303,8 @@ class RasterFrameProcessor(Processor):
         corr = np.abs(fft.irfft(xps, n))
 
         shift = np.argmax(corr)
-        #print("N", n, "SHIFT", shift)
         if shift > (n//2):  # Handle wrap-around for negative shifts
             shift -= n
-
-        #print(f"Estimated shift (samples): {shift / UPSAMPLE}")
 
         return shift / UPSAMPLE / 2 - 1
     

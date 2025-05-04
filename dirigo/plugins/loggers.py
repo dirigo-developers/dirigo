@@ -1,9 +1,12 @@
 from functools import cached_property
 from base64 import b64encode
 import json
+from pathlib import Path
 
 import tifffile
 import numpy as np
+from scipy import fft
+from platformdirs import user_config_dir
 
 from dirigo.sw_interfaces.processor import Processor, ProcessorProduct
 from dirigo.sw_interfaces import Logger
@@ -192,4 +195,82 @@ class BidiCalibrationLogger(Logger):
             self.save_data()
 
     def save_data(self):
-        print(self._phases)
+        amplitudes = np.unique(self._amplitudes)
+        phases = []
+        for ampl in amplitudes:
+            matching = []
+            for a, p in zip(self._amplitudes, self._phases):
+                if a == ampl:
+                    matching.append(p)
+            phases.append(np.median(matching))
+
+        # stack into a 2-column array
+        data = np.column_stack([amplitudes, phases])
+
+        # write with a header comment for units
+        np.savetxt(
+            Path(user_config_dir('Dirigo')) / "scanner/calibration.csv",
+            data,
+            delimiter=',',
+            header='amplitude (rad),phase (rad)',
+            comments=''    # prevent numpy from prefixing "#" on header lines
+        )
+
+
+
+
+class FrameSizeCalibrationLogger(Logger):
+    """Logs apparent translation."""
+    def __init__(self, upstream: Processor):
+        super().__init__(upstream)
+
+    def run(self):
+        try:
+            # Get reference frame
+            product: ProcessorProduct = self.inbox.get(block=True)
+            if product is None: return # Check for sentinel None
+            with product:
+                self._ref_frame = product.data.copy()
+
+            # Get translated frame
+            product: ProcessorProduct = self.inbox.get(block=True)
+            if product is None: return # Check for sentinel None
+            with product:
+                self._translated_frame = product.data.copy()
+
+        finally:
+            self.publish(None) # pass sentinel
+            self.save_data()
+
+    def save_data(self):
+        UPSAMPLE = 1
+        EPS = 1e-1  # Small constant
+
+        # calculate cross correlation
+        ref = self._ref_frame[:,:,0]
+        mov = self._translated_frame[:,:,0]
+
+        xps = fft.rfft2(ref) * np.conj(fft.rfft2(mov))
+
+        s = (ref.shape[0] * UPSAMPLE, ref.shape[1] * UPSAMPLE)
+        corr = fft.irfft2(xps / np.abs(xps), s)
+
+        arg_max = np.argmax(corr)
+        i = arg_max // corr.shape[1]
+        j = arg_max %  corr.shape[1]
+
+        if i > (s[0] // 2):  # Handle wrap-around for negative shifts
+            i -= s[0]
+        if j > (s[1] // 2): 
+            j -= s[1]
+
+        data = np.array([[0,i,j]])
+
+        # write with a header comment for units
+        np.savetxt(
+            Path(user_config_dir('Dirigo')) / "scanner/frame_calibration.csv",
+            data,
+            delimiter=',',
+            header='frame_size (m),i,j',
+            comments=''    # prevent numpy from prefixing "#" on header lines
+        )

@@ -602,12 +602,17 @@ class BidiCalibration(Acquisition):
         )
         self.spec.buffers_per_acquisition = spec.measurement_frames_per_ampl
         
+        # Frame acquisition needs to exist by the end of __init__ for other 
+        # Workers to instantiate correctly
         self._frame_acquisition = FrameAcquisition(self.hw, self.spec)
         self._frame_acquisition.add_subscriber(self)
 
     def run(self):
         try:
             for ampl in self._amplitudes:
+                # Remake the acquisition object and start it
+                self._frame_acquisition = FrameAcquisition(self.hw, self.spec)
+                self._frame_acquisition.add_subscriber(self)
                 self._frame_acquisition.start()
 
                 # Over-ride amplitude
@@ -626,9 +631,78 @@ class BidiCalibration(Acquisition):
                 self._frame_acquisition = None
                 time.sleep(self.spec.pause_time)
 
-                # Remake the acquisition object
-                self._frame_acquisition = FrameAcquisition(self.hw, self.spec)
-                self._frame_acquisition.add_subscriber(self)
-
         finally:
             self.publish(None) # publish the sentinel
+
+
+
+class FrameSizeCalibrationSpec(FrameAcquisitionSpec):
+    def __init__(self, 
+                 sacrificial_frames: int = 10, 
+                 move_fraction: float = 0.4,
+                 **kwargs):
+        super().__init__(**kwargs)
+        self.sacrificial_frames = sacrificial_frames
+        self.move_fraction = move_fraction
+
+
+class FrameSizeCalibration(Acquisition):
+    REQUIRED_RESOURCES = [Digitizer, FastRasterScanner, SlowRasterScanner]
+    SPEC_LOCATION = Path(user_config_dir("Dirigo")) / "acquisition/frame"
+    SPEC_OBJECT = FrameSizeCalibrationSpec
+    
+    def __init__(self, hw, spec: FrameSizeCalibrationSpec):
+        super().__init__(hw, spec)
+        self.spec: FrameSizeCalibrationSpec
+
+        self._frame_acquisition = FrameAcquisition(self.hw, self.spec)
+        self._frame_acquisition.add_subscriber(self)
+
+        fast_axis = self.hw.fast_raster_scanner.axis
+        if fast_axis == "x":
+            self._fast_stage = self.hw.stage.x
+        else:
+            self._fast_stage = self.hw.stage.y
+        self._current_position = self._fast_stage.position
+
+    def run(self):
+        try:
+            # Get sacrificial start frames
+            self._frame_acquisition.start()
+            for _ in range(self.spec.sacrificial_frames):
+                product = self.inbox.get()
+                if product is None: return
+                with product: 
+                    pass
+
+            # Get reference frame
+            product = self.inbox.get()
+            if product is None: return
+            with product: 
+                self.publish(product)
+
+            # Move % of field
+            self._fast_stage.move_to(
+                self._current_position + self.spec.move_fraction * self.spec.line_width
+            )
+
+            # Discard a frames in motion
+            for _ in range(2):
+                product = self.inbox.get()
+                if product is None: return
+                with product: 
+                    pass
+
+            # Get translated frame
+            product = self.inbox.get()
+            if product is None: return
+            with product: 
+                self.publish(product)
+
+            # Move back to original position
+            self._fast_stage.move_to(self._current_position)
+
+        finally:
+            self.publish(None)
+            self._frame_acquisition.stop()
+
