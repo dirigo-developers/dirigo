@@ -65,7 +65,7 @@ class SampleAcquisitionSpec(AcquisitionSpec):
 
 class SampleAcquisition(Acquisition):
     """
-    Fundamental Acquisition type for digitizer. Acquires a number of digitizer 
+    Fundamental Acquisition type for Digitizer. Acquires a number of digitizer 
     samples at some rate. Should be independent of any spatial semantics.
     """
     REQUIRED_RESOURCES = [Digitizer,]
@@ -99,7 +99,8 @@ class SampleAcquisition(Acquisition):
         acq.buffers_allocated = self.spec.buffers_allocated
 
     def run(self):
-        raise NotImplementedError # TODO
+        # TODO, should start and stop digitizer, set `active` event
+        raise NotImplementedError 
 
     @property
     def trigger_delay(self) -> int:

@@ -73,7 +73,7 @@ class Dirigo:
                           upstream_worker: Acquisition | Processor, 
                           type: str = "raster_frame",
                           auto_connect: bool = True,
-                          auto_start: bool = False) -> Processor:
+                          auto_start: bool = True) -> Processor:
         
         # Dynamically load plugin class
         entry_pts = importlib.metadata.entry_points(group="dirigo_processors")
@@ -108,7 +108,7 @@ class Dirigo:
                         upstream_worker: Acquisition | Processor, 
                         display_pixel_format: DisplayPixelFormat = DisplayPixelFormat.RGB24,
                         auto_connect: bool = True,
-                        auto_start: bool = False) -> Display:
+                        auto_start: bool = True) -> Display:
         
         display = FrameDisplay(upstream_worker, display_pixel_format)
 
@@ -124,7 +124,7 @@ class Dirigo:
                        upstream_worker: Acquisition | Processor,
                        type: str = "tiff", 
                        auto_connect: bool = True,
-                       auto_start: bool = False) -> Logger:
+                       auto_start: bool = True) -> Logger:
         
         # Dynamically load plugin class
         entry_pts = importlib.metadata.entry_points(group="dirigo_loggers")
@@ -186,13 +186,13 @@ if __name__ == "__main__":
 
     acquisition = diri.acquisition_factory('frame')
     
-    # acquisition = diri.acquisition_factory('bidi_calibration', spec_name='bidi_calibration')
+    #acquisition = diri.acquisition_factory('bidi_calibration', spec_name='bidi_calibration')
     # acquisition = diri.acquisition_factory(
     #     type='frame_size_calibration', 
     #     spec_name='frame_size_calibration'
     # )
-    # processor = diri.processor_factory(acquisition)
-    # logger = diri.logger_factory(processor, 'frame_size_calibration')
+    processor = diri.processor_factory(acquisition)
+    #logger = diri.logger_factory(processor, 'bidi_calibration')
 
     # acquisition = diri.acquisition_factory('point_scan_strip')
     # processor = diri.processor_factory(acquisition)

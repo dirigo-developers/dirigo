@@ -176,8 +176,9 @@ class BidiCalibrationLogger(Logger):
         super().__init__(upstream)
 
         self._amplitudes = []
+        self._frequencies = []
         self._phases = []
-
+        
     def run(self):
         try:
             while True:
@@ -188,31 +189,37 @@ class BidiCalibrationLogger(Logger):
                     self._amplitudes.append(
                         self._acquisition.hw.fast_raster_scanner.amplitude
                     )
+                    self._frequencies.append(product.frequency)
                     self._phases.append(product.phase)
-
+                    
         finally:
             self.publish(None) # pass sentinel
             self.save_data()
 
     def save_data(self):
         amplitudes = np.unique(self._amplitudes)
+        frequencies = []
         phases = []
         for ampl in amplitudes:
-            matching = []
-            for a, p in zip(self._amplitudes, self._phases):
+            matching_f = []
+            matching_p = []
+            for a, f, p in zip(self._amplitudes, self._frequencies, self._phases):
                 if a == ampl:
-                    matching.append(p)
-            phases.append(np.median(matching))
+                    matching_f.append(f)
+                    matching_p.append(p)
+
+            frequencies.append(np.median(matching_f))
+            phases.append(np.median(matching_p))
 
         # stack into a 2-column array
-        data = np.column_stack([amplitudes, phases])
+        data = np.column_stack([amplitudes, frequencies, phases])
 
         # write with a header comment for units
         np.savetxt(
             Path(user_config_dir('Dirigo')) / "scanner/calibration.csv",
             data,
             delimiter=',',
-            header='amplitude (rad),phase (rad)',
+            header='amplitude (rad),frequency(Hz),phase (rad)',
             comments=''    # prevent numpy from prefixing "#" on header lines
         )
 

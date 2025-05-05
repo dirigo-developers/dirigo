@@ -18,18 +18,20 @@ class ProcessorProduct(Product):
     Automatically returns itself to processor product pool when released by 
     all subscribing consumers (functionality of the Product base class).
     """
-    __slots__ = ("data", "timestamps", "positions", "phase")
+    __slots__ = ("data", "timestamps", "positions", "phase", "frequency")
     def __init__(self, 
                  pool, 
                  data: np.ndarray, 
                  timestamps = None, 
                  positions = None,
-                 phase = None):
+                 phase = None,
+                 frequency = None):
         super().__init__(pool)
         self.data = data
         self.timestamps = timestamps
         self.positions = positions
         self.phase: Optional[float] = phase # should be in radians
+        self.frequency: Optional[float] = frequency # should be in hertz
 
 
 class Processor(Worker):

@@ -1,6 +1,8 @@
 import time
 from functools import cached_property
+from pathlib import Path
 
+from platformdirs import user_config_dir
 import numpy as np
 from numba import njit, prange, types
 from scipy import fft
@@ -10,6 +12,7 @@ from dirigo.sw_interfaces.processor import Processor
 from dirigo.sw_interfaces.acquisition import Acquisition, AcquisitionProduct
 from dirigo.hw_interfaces.digitizer import Digitizer
 from dirigo.plugins.acquisitions import FrameAcquisitionSpec
+from dirigo.plugins.scanners import ResonantScanner
 
 
 TWO_PI = 2 * np.pi
@@ -141,23 +144,24 @@ class RasterFrameProcessor(Processor):
         bit precision, change the bits_precision argument.
         """
         super().__init__(upstream)
-        data_device = upstream.data_acquisition_device #brevity
+        digitizer = upstream.hw.digitizer # for brevity
+        fast_scanner = self._acq.hw.fast_raster_scanner
 
         if (not isinstance(bits_precision, int)) or (bits_precision % 2) or not (8 <= bits_precision <= 16):
             raise ValueError("Bits precision must be even integer between 8 and 16")
-        elif bits_precision < data_device.bit_depth:
+        elif bits_precision < digitizer.bit_depth:
             raise ValueError("Bit precision can't be less than the data acquisition device bit depth.")
         self._bits_precision = bits_precision
         
         self._spec: FrameAcquisitionSpec # to refine type hinting
-        if isinstance(data_device, Digitizer):
+        if isinstance(digitizer, Digitizer):
             n_channels = sum(
-                [c.enabled for c in data_device.channels]
+                [c.enabled for c in digitizer.channels]
             )
         else:
             raise NotImplementedError(
                 f"RasterFrameProcessor implemented for use with Digitizer, "
-                f"got type: {type(data_device)}"
+                f"got type: {type(digitizer)}"
             )
         
         if hasattr(self._spec, 'lines_per_frame'):
@@ -172,23 +176,40 @@ class RasterFrameProcessor(Processor):
             dtype=np.int16) + 1
        
         # Initialize with the nominal rate, will measure with data timestamps
-        self._fast_scanner_frequency = self._acq.hw.fast_raster_scanner.frequency
+        self._fast_scanner_frequency = fast_scanner.frequency
 
         # Pre-allocate array for processed image
         # If the data range min is negative, then we will need SIGNED integer data
-        dtype = np.int16 if data_device.data_range.min < 0 else np.uint16
+        dtype = np.int16 if digitizer.data_range.min < 0 else np.uint16
         self.init_product_pool(n=3, shape=self.processed_shape, dtype=dtype)
 
         # Trigger timing
-        self._fixed_trigger_delay = data_device.acquire.trigger_delay_samples
-        self._trigger_phase = 0 # This value can be adjusted
-        if hasattr(self._acq.hw.fast_raster_scanner, 'input_delay'):
-            self._trigger_phase = self._acq.hw.fast_raster_scanner.input_delay * self._sample_clock_rate
+        self._fixed_trigger_delay = digitizer.acquire.trigger_delay_samples
+        if hasattr(fast_scanner, 'input_delay'):
+            self._trigger_phase = fast_scanner.input_delay * self._sample_clock_rate
+        if isinstance(fast_scanner, ResonantScanner):
+            # use a calibration table
+            try:
+                amps, frequencies, phases = np.loadtxt(
+                    Path(user_config_dir('Dirigo')) / "scanner/calibration.csv",
+                    delimiter=',',
+                    unpack=True,
+                    skiprows=1
+                )
+                phase = np.interp(fast_scanner.amplitude, amps, phases)
+                frequency = np.interp(fast_scanner.amplitude, amps, frequencies)
+                self._initial_trigger_phase = \
+                    (phase / TWO_PI) * (digitizer.sample_clock.rate / frequency)
+                print("INITIAL TRIGGER PHASE", self._initial_trigger_phase)
+                self._trigger_phase = self._initial_trigger_phase
 
-        self._scaling_factor = 2**(self._bits_precision - data_device.bit_depth) # should we bit shift instead of scale with multiply?
+            except:
+                # Calibration could not be loaded, don't use
+                self._initial_trigger_phase = None
+                self._trigger_phase = 0
 
-        # for testing
-        #self.calculate_start_indices(self._trigger_phase)
+        self._scaling_factor = 2**(self._bits_precision - digitizer.bit_depth) # should we bit shift instead of scale with multiply?
+
         
     def run(self):
         # Calculate preliminary start indices
@@ -211,10 +232,17 @@ class RasterFrameProcessor(Processor):
                 # Estimate frequency from timestamps
                 avg_trig_period = np.mean(np.diff(acq_prod.timestamps))
                 self._fast_scanner_frequency = 1 / avg_trig_period
+                print("FAST SCANNER FREQ", self._fast_scanner_frequency)
 
             # Measure phase from bidi data (in uni-directional, phase is not critical)
             if self._spec.bidirectional_scanning:
-                self._trigger_phase = self.measure_phase(acq_prod.data)
+                trigger_phase = self.measure_phase(acq_prod.data)
+                # quality check
+                if (self._initial_trigger_phase is None 
+                    or abs(trigger_phase - self._initial_trigger_phase) < 10): 
+                        
+                    self._trigger_phase = trigger_phase
+                    print("TRIGGER PHASE", self._trigger_phase)
 
             # Update resampling start indices--these can change a bit if the scanner frequency drifts
             start_indices = self.calculate_start_indices(self._trigger_phase) - self._fixed_trigger_delay
@@ -233,6 +261,7 @@ class RasterFrameProcessor(Processor):
             proc_product.positions = acq_prod.positions
             proc_product.phase = TWO_PI * self._trigger_phase \
                 / (self._acq.hw.digitizer.sample_clock.rate * avg_trig_period)
+            proc_product.frequency = self._fast_scanner_frequency
 
             self.publish(proc_product) # sends off to Logger and/or Display workers
             acq_prod._release() # TODO, context manager this
@@ -328,11 +357,4 @@ class RasterFrameProcessor(Processor):
         """
         if self._acq.data_acquisition_device.data_range.min < 0:
             return units.IntRange(
-                min=-2**(self._bits_precision-1), 
-                max=2**(self._bits_precision-1) - 1
-            )
-        else: # unsigned data
-            return units.IntRange(
-                min=0, 
-                max=2**self._bits_precision - 1
-            )
+          
