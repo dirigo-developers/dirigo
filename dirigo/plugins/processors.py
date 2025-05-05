@@ -357,4 +357,11 @@ class RasterFrameProcessor(Processor):
         """
         if self._acq.data_acquisition_device.data_range.min < 0:
             return units.IntRange(
-          
+                min=-2**(self._bits_precision-1), 
+                max=2**(self._bits_precision-1) - 1
+            )
+        else: # unsigned data
+            return units.IntRange(
+                min=0, 
+                max=2**self._bits_precision - 1
+            )
