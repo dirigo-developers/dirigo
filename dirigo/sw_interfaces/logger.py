@@ -15,7 +15,7 @@ class Logger(Worker):
                  upstream: Acquisition | Processor,
                  basename: str = "experiment"):
         """Instantiate with either an upstream Acquisition or Processor"""
-        super().__init__() # sets up the thread and the publisher-subcriber interface
+        super().__init__("Logger") # sets up the thread and the publisher-subcriber interface
         
         if isinstance(upstream, Processor): # TODO refactor
             self._processor = upstream

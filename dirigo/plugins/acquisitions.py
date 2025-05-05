@@ -22,41 +22,116 @@ from dirigo.sw_interfaces.acquisition import (
 TWO_PI = 2 * math.pi 
 
 
-
 class SampleAcquisitionSpec(AcquisitionSpec):
-    pass
+    def __init__(
+            self,
+            digitizer_profile_name: str = "default",
+            timestamps_enabled: bool = True,
+            pre_trigger_samples: int = 0,
+            trigger_delay_samples: Optional[int] = None,
+            record_length: Optional[int] = None,
+            records_per_buffer: int = 8,
+            buffers_per_acquisition: int | float = float('inf'),
+            buffers_allocated: int = 4
+            ) -> None:
+        
+        self.digitizer_profile = digitizer_profile_name
+        self.pre_trigger_samples = pre_trigger_samples
+        self.timestamps_enabled = timestamps_enabled
+        self.trigger_delay_samples = trigger_delay_samples
+        self.record_length = record_length
+        try:
+            self.records_per_buffer = records_per_buffer
+        except AttributeError:
+            pass # if subclass implements a property for `records_per_buffer`
 
+        # Validate buffers per acquisition
+        if isinstance(buffers_per_acquisition, str):
+            if buffers_per_acquisition.lower() == "inf":
+                buffers_per_acquisition = float('inf')
+            else:
+                raise ValueError(f"`buffers_per_acquisition` must be a finite int or a string, 'inf'.")
+        elif isinstance(buffers_per_acquisition, float):
+            if not buffers_per_acquisition == float('inf'):
+                raise ValueError(f"`buffers_per_acquisition` must be integer or string 'inf'.")
+        elif not isinstance(buffers_per_acquisition, int):
+            raise ValueError(f"`buffers_per_acquisition` must be integer or string, 'inf'.")
+        elif buffers_per_acquisition < 1:
+            raise ValueError(f"`buffers_per_acquisition` must be > 0.")
+        self.buffers_per_acquisition = buffers_per_acquisition
+
+        self.buffers_allocated = buffers_allocated
+    
 
 class SampleAcquisition(Acquisition):
     """
     Fundamental Acquisition type for digitizer. Acquires a number of digitizer 
-    samples at a rate. Should be independent of any spatial semantics.
+    samples at some rate. Should be independent of any spatial semantics.
     """
     REQUIRED_RESOURCES = [Digitizer,]
     SPEC_LOCATION = Path(user_config_dir("Dirigo")) / "acquisition/sample"
     SPEC_OBJECT = SampleAcquisitionSpec
 
-    def __init__(self):
-        pass # TODO
-    # This is essential for adding support for such things as SS-OCT, direct-
-    # sampling fluorescence lifetime, pump-probe microscopy, and others...
+    def __init__(self, hw, spec):
+        super().__init__(hw, spec) # sets up thread, inbox, stores hw, checks resources
+        self.spec: SampleAcquisitionSpec # to refine type hints    
+        self.active = threading.Event()
+
+        self.hw.digitizer.load_profile(profile_name=self.spec.digitizer_profile)
+    
+    def configure_digitizer(self):
+        """
+        Sets record and buffer settings.
+
+        Record and buffer settings, such as record length, number of records per
+        buffer, etc. are automatically calculated for the profile, acquisition
+        specificiaton, and other system properties.
+        """
+        acq = self.hw.digitizer.acquire # for brevity
+
+        # Configure acquisition timing and sizes
+        acq.pre_trigger_samples = self.spec.pre_trigger_samples
+        acq.timestamps_enabled = self.spec.timestamps_enabled
+        acq.trigger_delay_samples = self.trigger_delay
+        acq.record_length = self.record_length
+        acq.records_per_buffer = self.spec.records_per_buffer
+        acq.buffers_per_acquisition = self.spec.buffers_per_acquisition
+        acq.buffers_allocated = self.spec.buffers_allocated
+
+    def run(self):
+        raise NotImplementedError # TODO
+
+    @property
+    def trigger_delay(self) -> int:
+        """
+        Acquisition start delay, in sample periods.
+        
+        Subclassses can override this to synchronize with other hardware.
+        """
+        return self.spec.trigger_delay_samples
+    
+    @property
+    def record_length(self) -> int:
+        """
+        Acquisition record length, in sample periods.
+        
+        Subclassses can override this to synchronize with other hardware.
+        """
+        return self.spec.record_length
 
 
-class LineAcquisitionSpec(AcquisitionSpec): 
+class LineAcquisitionSpec(SampleAcquisitionSpec): 
     """Specification for a point-scanned line acquisition"""
     MAX_PIXEL_SIZE_ADJUSTMENT = 0.01
     def __init__(
-            self,
-            line_width: str,
-            pixel_size: str,
-            buffers_per_acquisition: int | float = float('inf'),
-            bidirectional_scanning: bool = False,
-            pixel_time: str = None, # e.g. "1 μs"
-            fill_fraction: float = 1.0,
-            digitizer_profile: Optional[str] = None,
-            buffers_allocated: Optional[int] = None,
-            lines_per_buffer: int = None,
-            **kwargs
+        self,
+        line_width: str,
+        pixel_size: str,
+        bidirectional_scanning: bool = False,
+        pixel_time: str = None, # e.g. "1 μs"
+        fill_fraction: float = 1.0,
+        lines_per_buffer: int = None,
+        **kwargs
     ):
         super().__init__(**kwargs)
         self.bidirectional_scanning = bidirectional_scanning 
@@ -79,33 +154,14 @@ class LineAcquisitionSpec(AcquisitionSpec):
             raise ValueError(f"Invalid fill fraction, got {fill_fraction}. "
                              "Must be between 0.0 and 1.0 (upper bound incl.)")
         self.fill_fraction = fill_fraction
-        # TODO validate lines per buffer [What is this for?]
         self.lines_per_buffer = lines_per_buffer
-
-        # Validate buffers per acquisition
-        if isinstance(buffers_per_acquisition, str):
-            if buffers_per_acquisition.lower() == "inf":
-                buffers_per_acquisition = float('inf')
-            else:
-                raise ValueError(f"`buffers_per_acquisition` must be a finite int or a string, 'inf'.")
-        elif isinstance(buffers_per_acquisition, float):
-            if not buffers_per_acquisition == float('inf'):
-                raise ValueError(f"`buffers_per_acquisition` must be integer or string 'inf'.")
-        elif not isinstance(buffers_per_acquisition, int):
-            raise ValueError(f"`buffers_per_acquisition` must be integer or string, 'inf'.")
-        elif buffers_per_acquisition < 1:
-            raise ValueError(f"`buffers_per_acquisition` must be > 0.")
-        self.buffers_per_acquisition = buffers_per_acquisition
-
-        self.buffers_allocated = buffers_allocated
-        self.digitizer_profile = digitizer_profile    
 
     # Convenience properties
     @property
     def extended_scan_width(self) -> units.Position: # TODO remove this b/c this calculation should be done explicitly where its needed for transparency
         """
         Returns the desired line width divided by the fill fraction. For sinusoidal
-        scanpaths this is the full scan amplitude required to cover the line
+        scan paths this is the full scan amplitude required to cover the line
         width given a certain fill fraction.
         """
         return units.Position(self.line_width / self.fill_fraction)
@@ -134,7 +190,7 @@ class LineAcquisitionSpec(AcquisitionSpec):
         return round(self.line_width / self.pixel_size)
 
 
-class LineAcquisition(Acquisition):
+class LineAcquisition(SampleAcquisition):
     REQUIRED_RESOURCES = [Digitizer, DetectorSet, FastRasterScanner]
     SPEC_LOCATION = Path(user_config_dir("Dirigo")) / "acquisition/line"
     SPEC_OBJECT = LineAcquisitionSpec
@@ -143,54 +199,39 @@ class LineAcquisition(Acquisition):
         """Initialize a line acquisition worker."""
         # Tip: since this method runs on main thread, limit to HW init tasks that will return fast, prepend slower tasks to run method
         super().__init__(hw, spec) # sets up thread, inbox, stores hw, checks resources
-        self.spec: LineAcquisitionSpec # to refine type hints
-        self.active = threading.Event()
+        self.spec: LineAcquisitionSpec # to refine type hints        
 
-        self.hw.digitizer.load_profile(profile_name=self.spec.digitizer_profile)
-        if self.hw.digitizer.sample_clock.rate is None:
-            self.hw.digitizer.sample_clock.rate = units.SampleRate(1 / self.spec.pixel_time)
+        # for brevity
+        scanner = self.hw.fast_raster_scanner
+        optics = self.hw.laser_scanning_optics
+        digi = self.hw.digitizer
+       
+        if digi.sample_clock.rate is None:
+            # if sample rate is not set, set it based on pixel dwell time
+            digi.sample_clock.rate = units.SampleRate(1 / spec.pixel_time)
 
         # If using galvo scanner, then set it up based on acquisition spec parameters
-        if isinstance(self.hw.fast_raster_scanner, GalvoScanner):
-            self.hw.fast_raster_scanner.amplitude = \
-                self.hw.laser_scanning_optics.object_position_to_scan_angle(spec.line_width)
+        if isinstance(scanner, GalvoScanner):
+            scanner.amplitude = optics.object_position_to_scan_angle(spec.line_width)
 
             # Fast axis period should be multiple of digitizer sample resolution
-            T_exact = self.spec.pixel_time * self.spec.pixels_per_line / self.spec.fill_fraction
+            T_exact = spec.pixel_time * spec.pixels_per_line / spec.fill_fraction
             dt = units.Time(
-                self.hw.digitizer.acquire.record_length_resolution / self.hw.digitizer.sample_clock.rate
+                digi.acquire.record_length_resolution / digi.sample_clock.rate
             )
             T_rounded = round(T_exact / dt) * dt
-            self.hw.fast_raster_scanner.frequency = 1 / T_rounded 
-
-            self.hw.fast_raster_scanner.waveform = "asymmetric triangle"
-            self.hw.fast_raster_scanner.duty_cycle = self.spec.fill_fraction
+            scanner.frequency = 1 / T_rounded 
+            scanner.waveform = "asymmetric triangle"
+            scanner.duty_cycle = spec.fill_fraction # TODO set duty cycle to 50% if doing bidi
         
-        else:
-            self.hw.fast_raster_scanner.amplitude = \
-                self.hw.laser_scanning_optics.object_position_to_scan_angle(self.spec.extended_scan_width)
-            # for res scanner: frequency fixed, waveform fixed, duty cycle fixed
-        
+        elif isinstance(scanner, ResonantScanner):
+            # for res scanner: fixed: frequency, waveform, duty cycle; 
+            # adjustable: amplitude
+            scanner.amplitude = \
+                optics.object_position_to_scan_angle(spec.extended_scan_width)
+            
+        # Scanner settings implemented, configure digitizer acquisition params
         self.configure_digitizer()
-
-    def configure_digitizer(self):
-        """
-        Sets record and buffer settings.
-
-        Record and buffer settings, such as record length, number of records per
-        buffer, etc. are automatically calculated for the profile, acquisition
-        specificiaton, and other system properties.
-        """
-        acq = self.hw.digitizer.acquire # for brevity
-
-        # Configure acquisition timing and sizes
-        acq.pre_trigger_samples = 0 # TODO, maybe allow this to be adjustable?
-        acq.timestamps_enabled = True # testing
-        acq.trigger_delay_samples = self._calculate_trigger_delay()
-        acq.record_length = self._calculate_record_length()
-        acq.records_per_buffer = self.spec.records_per_buffer
-        acq.buffers_per_acquisition = self.spec.buffers_per_acquisition
-        acq.buffers_allocated = self.spec.buffers_allocated
 
     def run(self):
         digi = self.hw.digitizer # for brevity
@@ -205,8 +246,8 @@ class LineAcquisition(Acquisition):
         # Set up acquisition buffer pool
         shape = (
             self.spec.records_per_buffer, 
-            self.hw.digitizer.acquire.record_length,
-            self.hw.digitizer.acquire.n_channels_enabled
+            digi.acquire.record_length,
+            digi.acquire.n_channels_enabled
         )
         self.init_product_pool(n=3, shape=shape, dtype=np.int16)
 
@@ -292,10 +333,10 @@ class LineAcquisition(Acquisition):
         
         return tuple(positions) if len(positions) else None
 
-    def _calculate_trigger_delay(self, round_down: bool = True) -> int | float:
-        """Compute the number of samples to delay
-        
-        Set round_down to True (default value), to automatically round to
+    @property
+    def trigger_delay(self) -> int:
+        """
+        Acquisition start delay, in sample periods. Rounds down to the nearest
         digitizer-compatible increment.
         """
         scan_period = units.Time(1.0 / self.hw.fast_raster_scanner.frequency)
@@ -311,13 +352,18 @@ class LineAcquisition(Acquisition):
 
         start_index = start_time * self.hw.digitizer.sample_clock.rate
 
-        if round_down:
-            tdr = self.hw.digitizer.acquire.trigger_delay_sample_resolution
-            start_index = tdr * int(start_index / tdr)
+        # Round down
+        tdr = self.hw.digitizer.acquire.trigger_delay_sample_resolution
+        start_index = tdr * int(start_index / tdr)
 
         return start_index
 
-    def _calculate_record_length(self, round_up: bool = True) -> int | float:
+    @property
+    def record_length(self) -> int:
+        """
+        Acquisition record length, in sample periods. Rounds up to the nearest
+        digitizer-compatible increment.
+        """
         ff = self.spec.fill_fraction
         rate = self.hw.digitizer.sample_clock.rate
         f = self.hw.fast_raster_scanner.frequency
@@ -338,18 +384,14 @@ class LineAcquisition(Acquisition):
         elif isinstance(self.hw.fast_raster_scanner, GalvoScanner):
             # For galvo-galvo scanning, we record 100% of time including flyback
             record_len = round(rate / f)
-        # OLD:
-        # else: #TODO make elif and refine logic with above
-        #     record_len = round(self.spec.pixels_per_line / ff)
         
-        if round_up:
-            # Round record length up to the next allowable size (or the min)
-            rlr = self.hw.digitizer.acquire.record_length_resolution
-            record_len = rlr * math.ceil(record_len / rlr) 
+        # Round record length up to the next allowable size (or the min)
+        rlr = self.hw.digitizer.acquire.record_length_resolution
+        record_len = rlr * math.ceil(record_len / rlr) 
 
-            # Also set enforce the min record length requirement
-            if record_len < self.hw.digitizer.acquire.record_length_minimum:
-                record_len = self.hw.digitizer.acquire.record_length_minimum
+        # Also set enforce the min record length requirement
+        if record_len < self.hw.digitizer.acquire.record_length_minimum:
+            record_len = self.hw.digitizer.acquire.record_length_minimum
         
         return record_len
 

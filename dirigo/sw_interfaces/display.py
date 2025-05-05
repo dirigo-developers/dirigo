@@ -166,7 +166,7 @@ class Display(Worker):
                  monitor_bit_depth: int = 8,
                  gamma: float = 1/2.2):
         """Instantiate with either an Acquisition or Processor"""
-        super().__init__()
+        super().__init__("Display Worker")
 
         if not isinstance(monitor_bit_depth, int) or not (8 <= monitor_bit_depth <= 12):
             raise ValueError("Unsupported monitor bit depth")

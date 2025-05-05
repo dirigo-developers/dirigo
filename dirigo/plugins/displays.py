@@ -247,7 +247,7 @@ class FrameDisplay(Display):
             return
         
         disp_product = self.get_free_product()
-        disp_product.frame[...] = self._apply_display_kernel(self._prev_data, self._luts)
+        self._apply_display_kernel(self._prev_data, self._luts, disp_product.frame)
         self.publish(disp_product)
 
 

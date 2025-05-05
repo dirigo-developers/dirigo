@@ -38,7 +38,7 @@ class Processor(Worker):
     """
     def __init__(self, upstream: Acquisition | Self):
         """Stores the acquisition and spec in private attributes"""
-        super().__init__()
+        super().__init__("Processor")
         if isinstance(upstream, Acquisition):
             self._acq = upstream
             self._spec = upstream.spec

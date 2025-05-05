@@ -38,7 +38,7 @@ class Product:
 
 
 class Worker(threading.Thread, ABC):
-    def __init__(self):
+    def __init__(self, name: str = None):
         """
         Sets up a worker Thread object with internal publisher-subscriber model.
 
@@ -46,7 +46,7 @@ class Worker(threading.Thread, ABC):
         obtain incoming data. Each worker can send out data using the `publish`
         method to any subscribers 
         """
-        super().__init__() # Sets up Thread
+        super().__init__(name=name) # Sets up Thread
         self._stop_event = threading.Event()  # Event to signal thread termination
 
         # Publisher-subscriber objects

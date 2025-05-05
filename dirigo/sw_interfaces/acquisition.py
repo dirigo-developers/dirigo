@@ -44,7 +44,7 @@ class Acquisition(Worker):
     SPEC_OBJECT: AcquisitionSpec
     
     def __init__(self, hw: 'Hardware', spec: AcquisitionSpec):
-        super().__init__()
+        super().__init__("Acquisition")
         self.hw = hw
         self.check_resources()
         self.spec = spec
