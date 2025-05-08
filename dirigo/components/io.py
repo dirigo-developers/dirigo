@@ -3,6 +3,8 @@ from pathlib import Path
 import tomllib
 from typing import Optional
 
+import numpy as np
+from platformdirs import user_config_dir
 
 
 def load_toml(file_name: Path | str) -> dict:
@@ -14,6 +16,19 @@ def load_toml(file_name: Path | str) -> dict:
     with open(file_name, mode="rb") as toml_file:
         toml_contents = tomllib.load(toml_file)
     return toml_contents
+
+
+def load_scanner_calibration(
+        path: Path = Path(user_config_dir('Dirigo')) / "scanner/calibration.csv"
+        ) -> tuple:
+    
+    ampls, freqs, phases = np.loadtxt(
+        path,
+        delimiter=',',
+        unpack=True,
+        skiprows=1
+    )
+    return ampls, freqs, phases
 
 
 @dataclass

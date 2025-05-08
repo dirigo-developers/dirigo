@@ -3,6 +3,7 @@ import threading
 import math
 import time
 from typing import Optional
+from functools import cached_property
 
 from platformdirs import user_config_dir
 import numpy as np
@@ -213,7 +214,10 @@ class LineAcquisition(SampleAcquisition):
 
         # If using galvo scanner, then set it up based on acquisition spec parameters
         if isinstance(scanner, GalvoScanner):
-            scanner.amplitude = optics.object_position_to_scan_angle(spec.line_width)
+            scanner.amplitude = optics.object_position_to_scan_angle(
+                spec.line_width,
+                axis="fast"
+            )
 
             # Fast axis period should be multiple of digitizer sample resolution
             T_exact = spec.pixel_time * spec.pixels_per_line / spec.fill_fraction
@@ -228,8 +232,10 @@ class LineAcquisition(SampleAcquisition):
         elif isinstance(scanner, ResonantScanner):
             # for res scanner: fixed: frequency, waveform, duty cycle; 
             # adjustable: amplitude
-            scanner.amplitude = \
-                optics.object_position_to_scan_angle(spec.extended_scan_width)
+            scanner.amplitude = optics.object_position_to_scan_angle(
+                spec.extended_scan_width,
+                axis="fast"
+            )
             
         # Scanner settings implemented, configure digitizer acquisition params
         self.configure_digitizer()
@@ -283,7 +289,7 @@ class LineAcquisition(SampleAcquisition):
         try:
             while not self._stop_event.is_set() and \
                 digi.acquire.buffers_acquired < self.spec.buffers_per_acquisition:
-                print("Buffers acquired", digi.acquire.buffers_acquired)
+                #print("Buffers acquired", digi.acquire.buffers_acquired)
                 acq_product = self.get_free_product()
                 digi.acquire.get_next_completed_buffer(acq_product)
 
@@ -334,22 +340,23 @@ class LineAcquisition(SampleAcquisition):
         
         return tuple(positions) if len(positions) else None
 
-    @property
+    @cached_property
     def trigger_delay(self) -> int:
         """
         Acquisition start delay, in sample periods. Rounds down to the nearest
         digitizer-compatible increment.
         """
-        scan_period = units.Time(1.0 / self.hw.fast_raster_scanner.frequency)
+        fast_scanner = self.hw.fast_raster_scanner
+        nominal_period = units.Time(1.0 / fast_scanner.frequency)
 
-        if isinstance(self.hw.fast_raster_scanner, ResonantScanner):
-            start_time = scan_period * math.acos(self.spec.fill_fraction) / (2 * math.pi)
+        if isinstance(fast_scanner, ResonantScanner):
+            start_time = nominal_period * math.acos(self.spec.fill_fraction) / TWO_PI
         else:
-            start_time = 0
+            start_time = 0  
 
         # For tolerance to sync signal phase error and/or initial scanner 
-        # frequency error, make sure to start earlier than absolutely required
-        start_time *= 0.995
+        # frequency error, make sure to start earlier than required
+        start_time -= units.Time("1 us") # TODO make this a setting
 
         start_index = start_time * self.hw.digitizer.sample_clock.rate
 
@@ -377,11 +384,11 @@ class LineAcquisition(SampleAcquisition):
             else:
                 end = math.acos(-ff) / TWO_PI
 
-            record_len = (end - start) * rate / f
+            # For tolerance to error in initial frequency, extend record duration
+            record_duration = units.Time((end - start) / f) + 2 * units.Time("1 us") # TODO make this a setting
             
-            # For tolerance to error in initial frequency, extend record length
-            record_len *= 1.01
-
+            record_len = record_duration * rate
+            
         elif isinstance(self.hw.fast_raster_scanner, GalvoScanner):
             # For galvo-galvo scanning, we record 100% of time including flyback
             record_len = round(rate / f)
@@ -681,12 +688,15 @@ class BidiCalibration(Acquisition):
 
 class FrameSizeCalibrationSpec(FrameAcquisitionSpec):
     def __init__(self, 
-                 sacrificial_frames: int = 10, 
-                 move_fraction: float = 0.4,
+                 translation_per_step: str | units.Position,
+                 n_steps: int,
+                 sacrificial_frames: int = 5, 
+                 n_positions: int = 8,
                  **kwargs):
         super().__init__(**kwargs)
+        self.translation_per_step = units.Position(translation_per_step)
+        self.n_steps = n_steps
         self.sacrificial_frames = sacrificial_frames
-        self.move_fraction = move_fraction
 
 
 class FrameSizeCalibration(Acquisition):
@@ -706,44 +716,40 @@ class FrameSizeCalibration(Acquisition):
             self._fast_stage = self.hw.stage.x
         else:
             self._fast_stage = self.hw.stage.y
-        self._current_position = self._fast_stage.position
+        self._original_position = self._fast_stage.position
+
 
     def run(self):
         try:
             # Get sacrificial start frames
             self._frame_acquisition.start()
-            for _ in range(self.spec.sacrificial_frames):
+            for _ in range(2 * self.spec.sacrificial_frames):
                 product = self.inbox.get()
                 if product is None: return
                 with product: 
                     pass
+            
+            for _ in range(self.spec.n_steps):
+                # Move 
+                self._fast_stage.move_to(
+                    self._fast_stage.position + self.spec.translation_per_step
+                )
 
-            # Get reference frame
-            product = self.inbox.get()
-            if product is None: return
-            with product: 
-                self.publish(product)
-
-            # Move % of field
-            self._fast_stage.move_to(
-                self._current_position + self.spec.move_fraction * self.spec.line_width
-            )
-
-            # Discard a frames in motion
-            for _ in range(2):
+                # Discard frames in motion
+                for _ in range(self.spec.sacrificial_frames):
+                    product = self.inbox.get()
+                    if product is None: return
+                    with product: 
+                        pass
+                
+                # Gather measurement frame
                 product = self.inbox.get()
                 if product is None: return
                 with product: 
-                    pass
-
-            # Get translated frame
-            product = self.inbox.get()
-            if product is None: return
-            with product: 
-                self.publish(product)
+                    self.publish(product)
 
             # Move back to original position
-            self._fast_stage.move_to(self._current_position)
+            self._fast_stage.move_to(units.Position(self._original_position))
 
         finally:
             self.publish(None)

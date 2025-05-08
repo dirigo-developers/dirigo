@@ -1,13 +1,12 @@
 import time
 from functools import cached_property
-from pathlib import Path
 
-from platformdirs import user_config_dir
 import numpy as np
 from numba import njit, prange, types
 from scipy import fft
 
 from dirigo import units
+from dirigo.components.io import load_scanner_calibration
 from dirigo.sw_interfaces.processor import Processor
 from dirigo.sw_interfaces.acquisition import Acquisition, AcquisitionProduct
 from dirigo.hw_interfaces.digitizer import Digitizer
@@ -78,17 +77,16 @@ sigs = [
     types.float32[:,:](types.int16[:,:,:],  types.int64, types.int64, types.float64)
 ]
 @njit(sigs, nogil=True, parallel=True, fastmath=True, cache=True)
-def crop_bidi_data(data: np.ndarray, lines_per_frame: int, trigger_delay:int, samples_per_period: float):
+def crop_bidi_data(data: np.ndarray, lines_per_frame: int, trigger_delay: int, samples_per_period: float):
     """
     Select ranages, flips the reverse scan, and converts to float32 for phase
     correlation.
 
     Note: operates on channel 0 only.
     """
-    Nrec, Ns, Nc = data.shape # records, samples, channels
 
     # Largest power of two window
-    n = 2**int(np.log2(Ns / 2 - trigger_delay))
+    n = 2**int(np.log2(samples_per_period/2 - 2*trigger_delay))
 
     # Find the nominal midpoints and endpoints of fwd and rvs scans
     mid_fwd = samples_per_period/4
@@ -186,34 +184,29 @@ class RasterFrameProcessor(Processor):
         # Trigger timing
         self._fixed_trigger_delay = digitizer.acquire.trigger_delay_samples
         if hasattr(fast_scanner, 'input_delay'):
-            self._trigger_phase = fast_scanner.input_delay * self._sample_clock_rate
+            self._trigger_error = fast_scanner.input_delay * self._sample_clock_rate
         if isinstance(fast_scanner, ResonantScanner):
             # use a calibration table
             try:
-                amps, frequencies, phases = np.loadtxt(
-                    Path(user_config_dir('Dirigo')) / "scanner/calibration.csv",
-                    delimiter=',',
-                    unpack=True,
-                    skiprows=1
-                )
-                phase = np.interp(fast_scanner.amplitude, amps, phases)
-                frequency = np.interp(fast_scanner.amplitude, amps, frequencies)
+                ampls, freqs, phases = load_scanner_calibration()
+                phase = np.interp(fast_scanner.amplitude, ampls, phases)
+                frequency = np.interp(fast_scanner.amplitude, ampls, freqs)
                 self._initial_trigger_phase = \
                     (phase / TWO_PI) * (digitizer.sample_clock.rate / frequency)
                 print("INITIAL TRIGGER PHASE", self._initial_trigger_phase)
-                self._trigger_phase = self._initial_trigger_phase
+                self._trigger_error = self._initial_trigger_phase
 
             except:
                 # Calibration could not be loaded, don't use
                 self._initial_trigger_phase = None
-                self._trigger_phase = 0
+                self._trigger_error = 0
 
         self._scaling_factor = 2**(self._bits_precision - digitizer.bit_depth) # should we bit shift instead of scale with multiply?
 
         
     def run(self):
         # Calculate preliminary start indices
-        start_indices = self.calculate_start_indices(self._trigger_phase) - self._fixed_trigger_delay
+        start_indices = self.calculate_start_indices(self._trigger_error) - self._fixed_trigger_delay 
         nsamples_to_sum = np.abs(np.diff(start_indices, axis=1))
         
         while True: # Loops until receives sentinel None
@@ -237,15 +230,15 @@ class RasterFrameProcessor(Processor):
             # Measure phase from bidi data (in uni-directional, phase is not critical)
             if self._spec.bidirectional_scanning:
                 trigger_phase = self.measure_phase(acq_prod.data)
+                print("TRIGGER SAMP", trigger_phase)
                 # quality check
                 if (self._initial_trigger_phase is None 
                     or abs(trigger_phase - self._initial_trigger_phase) < 10): 
                         
-                    self._trigger_phase = trigger_phase
-                    print("TRIGGER PHASE", self._trigger_phase)
-
+                    self._trigger_error = trigger_phase
+                    
             # Update resampling start indices--these can change a bit if the scanner frequency drifts
-            start_indices = self.calculate_start_indices(self._trigger_phase) - self._fixed_trigger_delay
+            start_indices = self.calculate_start_indices(self._trigger_error) - self._fixed_trigger_delay
             nsamples_to_sum = np.abs(np.diff(start_indices, axis=1))
             t1 = time.perf_counter()
 
@@ -259,7 +252,7 @@ class RasterFrameProcessor(Processor):
             )
             proc_product.timestamps = acq_prod.timestamps
             proc_product.positions = acq_prod.positions
-            proc_product.phase = TWO_PI * self._trigger_phase \
+            proc_product.phase = TWO_PI * self._trigger_error \
                 / (self._acq.hw.digitizer.sample_clock.rate * avg_trig_period)
             proc_product.frequency = self._fast_scanner_frequency
 
@@ -267,8 +260,7 @@ class RasterFrameProcessor(Processor):
             acq_prod._release() # TODO, context manager this
             t2 = time.perf_counter()
 
-            print(f"RECALC: {1000*(t1-t0):.03f} | FRAME {1000*(t2-t1):.03f} ")
-            
+            #print(f"RECALC: {1000*(t1-t0):.03f} | FRAME {1000*(t2-t1):.03f} ")
 
     @cached_property
     def _temporal_edges(self):
@@ -346,7 +338,7 @@ class RasterFrameProcessor(Processor):
         """
         The exact number of digitizer samples per fast raster scanner period.
         """
-        return self._sample_clock_rate / self._fast_scanner_frequency 
+        return float(self._sample_clock_rate / self._fast_scanner_frequency)
     
     @property
     def data_range(self):

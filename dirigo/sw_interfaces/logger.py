@@ -19,10 +19,10 @@ class Logger(Worker):
         
         if isinstance(upstream, Processor): # TODO refactor
             self._processor = upstream
-            self._acquisition = upstream._acq
+            self._acq = upstream._acq
         elif isinstance(upstream, Acquisition):
             self._processor = None
-            self._acquisition = upstream
+            self._acq = upstream
         else:
             raise ValueError("Upstream Worker must be either an Acquisition or a Processor")
 

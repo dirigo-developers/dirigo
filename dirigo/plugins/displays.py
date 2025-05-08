@@ -192,7 +192,7 @@ class FrameDisplay(Display):
 
             t1 = time.perf_counter()
             self._i += 1
-            print(f"Channel display processing: {1000*(t1-t0):.3f}ms.")
+            #print(f"Channel display processing: {1000*(t1-t0):.3f}ms.")
 
     def _apply_display_kernel(self, average_frame, luts, display_frame):
         additive_display_kernel(average_frame, luts, self.gamma_lut, display_frame)

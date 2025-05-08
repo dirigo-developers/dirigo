@@ -184,22 +184,26 @@ if __name__ == "__main__":
 
     diri = Dirigo()
 
-    acquisition = diri.acquisition_factory('frame')
+    # acquisition = diri.acquisition_factory('frame')
     
-    #acquisition = diri.acquisition_factory('bidi_calibration', spec_name='bidi_calibration')
+    # acquisition = diri.acquisition_factory('bidi_calibration', spec_name='bidi_calibration')
     # acquisition = diri.acquisition_factory(
     #     type='frame_size_calibration', 
     #     spec_name='frame_size_calibration'
     # )
-    processor = diri.processor_factory(acquisition)
-    #logger = diri.logger_factory(processor, 'bidi_calibration')
-
-    # acquisition = diri.acquisition_factory('point_scan_strip')
     # processor = diri.processor_factory(acquisition)
-    # strip_processor = diri.processor_factory(processor, 'point_scan_strip')
-    # strip_stitcher = diri.processor_factory(strip_processor, 'strip_stitcher')
-    # tile_builder = diri.processor_factory(strip_stitcher, 'tile_builder')
-    # logger = diri.logger_factory(tile_builder, 'pyramid')
+    # logger = diri.logger_factory(processor)
+    # logger.frames_per_file = float('inf')   
+    # distortion_logger = diri.logger_factory(processor, 'frame_size_calibration')
+
+    # logger = diri.logger_factory(processor, 'bidi_calibration')
+
+    acquisition = diri.acquisition_factory('point_scan_strip')
+    processor = diri.processor_factory(acquisition)
+    strip_processor = diri.processor_factory(processor, 'point_scan_strip')
+    strip_stitcher = diri.processor_factory(strip_processor, 'strip_stitcher')
+    tile_builder = diri.processor_factory(strip_stitcher, 'tile_builder')
+    logger = diri.logger_factory(tile_builder, 'pyramid')
 
     # display = diri.display_factory(processor)
     # logger.frames_per_file = float('inf')    

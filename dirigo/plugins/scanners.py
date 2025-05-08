@@ -242,7 +242,7 @@ class GalvoScannerViaNI(GalvoScanner):
         self._active = False
 
     def park(self):
-        """Positions the scanner the angle limit minimum."""
+        """Positions the scanner at the angle limit minimum."""
         analog_value = self.angle_limits.min * self._volts_per_radian
         try:
             with nidaqmx.Task() as task: 
@@ -250,6 +250,16 @@ class GalvoScannerViaNI(GalvoScanner):
                 task.write(analog_value, auto_start=True)
         except nidaqmx.DaqError as e:
             raise RuntimeError(f"Failed to park scanner: {e}") from e
+        
+    def center(self):
+        """Positions the scanner at zero angle."""
+        analog_value = 0
+        try:
+            with nidaqmx.Task() as task: 
+                task.ao_channels.add_ao_voltage_chan(self._analog_control_channel)
+                task.write(analog_value, auto_start=True)
+        except nidaqmx.DaqError as e:
+            raise RuntimeError(f"Failed to center scanner: {e}") from e
     
     @cached_property
     def _volts_per_radian(self) -> float:

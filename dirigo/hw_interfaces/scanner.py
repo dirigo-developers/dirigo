@@ -118,8 +118,17 @@ class RasterScanner(ABC):
 
     @abstractmethod
     def park(self):
-        """Positions the scanner at the angle limit minimum.
+        """Positions the scanner at minimum angle.
         
+        Scanners that can not be positioned arbitrarily should raise a 
+        NotImplementedError.
+        """
+
+    @abstractmethod
+    def center(self) -> None:
+        """
+        Positions the scanner at zero angle.
+
         Scanners that can not be positioned arbitrarily should raise a 
         NotImplementedError.
         """
@@ -216,6 +225,10 @@ class ResonantScanner(RasterScanner):
     
     def park(self):
         raise NotImplementedError("Resonant scanners can not be parked.")
+    
+    def center(self):
+        """Sets resonant amplitude to 0."""
+        self.amplitude = 0 # or turn off?
 
 
 class PolygonScanner(RasterScanner):
@@ -266,6 +279,9 @@ class PolygonScanner(RasterScanner):
     
     def park(self):
         raise NotImplemented("Polygon scanners can not be parked.")
+    
+    def center(self):
+        raise NotImplemented("Polygon scanners can not be centered.")
 
 
 class GalvoScanner(RasterScanner):

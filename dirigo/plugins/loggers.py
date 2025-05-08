@@ -2,6 +2,7 @@ from functools import cached_property
 from base64 import b64encode
 import json
 from pathlib import Path
+import time
 
 import tifffile
 import numpy as np
@@ -11,7 +12,7 @@ from platformdirs import user_config_dir
 from dirigo.sw_interfaces.processor import Processor, ProcessorProduct
 from dirigo.sw_interfaces import Logger
 from dirigo.sw_interfaces.acquisition import Acquisition, AcquisitionProduct
-from dirigo.plugins.acquisitions import FrameAcquisitionSpec, BidiCalibration
+from dirigo.plugins.acquisitions import FrameAcquisitionSpec, FrameSizeCalibration
 
 
 
@@ -138,7 +139,7 @@ class TiffLogger(Logger):
     # An alternative would be to pass resolution (and other metadata) in the queue
     @property
     def _fast_axis_dpi(self) -> float:
-        acq = self._acquisition if self._acquisition else self._processor._acq
+        acq = self._acq 
         spec: FrameAcquisitionSpec = acq.spec
         
         pixel_width_inches = ((spec.pixel_size * 1000) / 25.4)
@@ -146,7 +147,7 @@ class TiffLogger(Logger):
         
     @property
     def _slow_axis_dpi(self) -> float:
-        acq = self._acquisition if self._acquisition else self._processor._acq
+        acq = self._acq
         spec: FrameAcquisitionSpec = acq.spec
 
         if hasattr(spec, 'pixel_height'):
@@ -159,13 +160,13 @@ class TiffLogger(Logger):
     
     @cached_property
     def _x_dpi(self) -> float:
-        acq = self._acquisition if self._acquisition else self._processor._acq
+        acq = self._acq 
         fast_axis =  acq.hw.fast_raster_scanner.axis
         return self._fast_axis_dpi if fast_axis == 'x' else self._slow_axis_dpi
     
     @cached_property
     def _y_dpi(self) -> float:
-        acq = self._acquisition if self._acquisition else self._processor._acq
+        acq = self._acq
         slow_axis =  acq.hw.slow_raster_scanner.axis
         return self._slow_axis_dpi if slow_axis == 'y' else self._fast_axis_dpi
 
@@ -187,7 +188,7 @@ class BidiCalibrationLogger(Logger):
 
                 with product:
                     self._amplitudes.append(
-                        self._acquisition.hw.fast_raster_scanner.amplitude
+                        self._acq.hw.fast_raster_scanner.amplitude
                     )
                     self._frequencies.append(product.frequency)
                     self._phases.append(product.phase)
@@ -219,7 +220,7 @@ class BidiCalibrationLogger(Logger):
             Path(user_config_dir('Dirigo')) / "scanner/calibration.csv",
             data,
             delimiter=',',
-            header='amplitude (rad),frequency(Hz),phase (rad)',
+            header='amplitude (rad),frequency (Hz),phase (rad)',
             comments=''    # prevent numpy from prefixing "#" on header lines
         )
 
@@ -228,40 +229,86 @@ class BidiCalibrationLogger(Logger):
 
 class FrameSizeCalibrationLogger(Logger):
     """Logs apparent translation."""
+    UPSAMPLE       = 10          # global phase‑corr up‑sampling
+    EPS            = 1e-1
+    
     def __init__(self, upstream: Processor):
         super().__init__(upstream)
+        self._acq: FrameSizeCalibration
 
     def run(self):
+        self._frames, self._positions = [], [] # collect measurement frames/pos
         try:
-            # Get reference frame
-            product: ProcessorProduct = self.inbox.get(block=True)
-            if product is None: return # Check for sentinel None
-            with product:
-                self._ref_frame = product.data.copy()
-
-            # Get translated frame
-            product: ProcessorProduct = self.inbox.get(block=True)
-            if product is None: return # Check for sentinel None
-            with product:
-                self._translated_frame = product.data.copy()
+            while True:
+                # Get reference frame
+                product: ProcessorProduct = self.inbox.get()
+                if product is None: # Check for sentinel None
+                    break 
+                with product:
+                    self._frames.append(product.data[:,:,0].copy())
+                    self._positions.append(product.positions)
 
         finally:
             self.publish(None) # pass sentinel
             self.save_data()
 
     def save_data(self):
-        UPSAMPLE = 1
-        EPS = 1e-1  # Small constant
+        time.sleep(1)
+        print("Analyzing displacement field")
+        PATCH          = 64 
+        H              = 512 
 
-        # calculate cross correlation
-        ref = self._ref_frame[:,:,0]
-        mov = self._translated_frame[:,:,0]
+        # Initial global estimation
+        ii, jj = [], []
+        ref_frame, ref_pos = self._frames[0], self._positions[0]
+        n_y, n_x = ref_frame.shape
+        for frame, pos in zip(self._frames[1:], self._positions[1:]):
+            i, j = self.x_corr(
+                ref_frame[n_y//4:3*n_y//4, n_x//4:3*n_x//4,], 
+                frame[n_y//4:3*n_y//4, n_x//4:3*n_x//4,])
+            ii.append(i)
+            jj.append(j)
+            print(i,j)
 
-        xps = fft.rfft2(ref) * np.conj(fft.rfft2(mov))
+            ref_frame, ref_pos = frame, pos
 
-        s = (ref.shape[0] * UPSAMPLE, ref.shape[1] * UPSAMPLE)
-        corr = fft.irfft2(xps / np.abs(xps), s)
+        dy, dx = np.mean(ii), np.mean(jj)
 
+        # Patches
+        data = np.zeros((len(self._frames)-1, int(ref_frame.shape[1]/PATCH) -1))
+        ref_frame, ref_pos = self._frames[0], self._positions[0]
+
+        s, p = 0, 0
+        for frame, pos in zip(self._frames[1:], self._positions[1:]):
+            for patch_start in range(PATCH, ref_frame.shape[1], PATCH):
+                ref_patch = ref_frame[:, patch_start:(patch_start+PATCH)]
+                
+                m = patch_start - dx
+                m_rounded = (round(m))
+                mov_patch = frame[:, m_rounded:(m_rounded+PATCH)]
+                i, j = self.x_corr(ref_patch, mov_patch)
+                print(i,j)
+                data[s, p] = j + (m - m_rounded)
+                p += 1
+
+            s += 1
+            p = 0
+            ref_frame, ref_pos = frame, pos
+
+        # write with a header comment for units
+        np.savetxt(
+            Path(user_config_dir('Dirigo')) / "scanner/frame_calibration.csv",
+            data,
+            delimiter=',',
+        )
+
+    @classmethod
+    def x_corr(cls, ref_frame, moving_frame):
+        n_y, n_x = ref_frame.shape
+
+        xps = fft.rfft2(ref_frame) * np.conj(fft.rfft2(moving_frame))
+        s = (n_y * cls.UPSAMPLE, n_x * cls.UPSAMPLE)
+        corr = fft.irfft2(xps / (np.abs(xps) + cls.EPS), s)
         arg_max = np.argmax(corr)
         i = arg_max // corr.shape[1]
         j = arg_max %  corr.shape[1]
@@ -271,13 +318,4 @@ class FrameSizeCalibrationLogger(Logger):
         if j > (s[1] // 2): 
             j -= s[1]
 
-        data = np.array([[0,i,j]])
-
-        # write with a header comment for units
-        np.savetxt(
-            Path(user_config_dir('Dirigo')) / "scanner/frame_calibration.csv",
-            data,
-            delimiter=',',
-            header='frame_size (m),i,j',
-            comments=''    # prevent numpy from prefixing "#" on header lines
-        )
+        return i / cls.UPSAMPLE, j / cls.UPSAMPLE
