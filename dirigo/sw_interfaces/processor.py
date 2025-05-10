@@ -6,7 +6,7 @@ import numpy as np
 
 from dirigo import units 
 from dirigo.sw_interfaces.worker import Worker, Product
-from dirigo.sw_interfaces.acquisition import Acquisition
+from dirigo.sw_interfaces.acquisition import Acquisition, Loader
 
 
 
@@ -41,7 +41,7 @@ class Processor(Worker):
     def __init__(self, upstream: Acquisition | Self):
         """Stores the acquisition and spec in private attributes"""
         super().__init__("Processor")
-        if isinstance(upstream, Acquisition):
+        if isinstance(upstream, (Acquisition, Loader)):
             self._acq = upstream
             self._spec = upstream.spec
         elif isinstance(upstream, Processor):

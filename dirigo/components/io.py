@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, asdict
 from pathlib import Path
 import tomllib
 from typing import Optional
@@ -68,3 +68,7 @@ class SystemConfig:
             line_scan_camera=toml_data.get("line_scan_camera"),
             illuminator=toml_data.get("illuminator")
         )
+    
+    def to_dict(self):
+        return asdict(self)
+    

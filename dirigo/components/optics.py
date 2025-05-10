@@ -68,7 +68,7 @@ class LaserScanningOptics:
         if axis and axis.lower() == "fast":
             correction = self._fast_axis_correction
         elif axis and axis.lower() == "slow":
-            correction = self._fast_axis_correction
+            correction = self._slow_axis_correction
         return correction
     
 

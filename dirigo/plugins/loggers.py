@@ -1,8 +1,9 @@
 from functools import cached_property
 from base64 import b64encode
-import json
+import json, zlib, struct
 from pathlib import Path
 import time
+from typing import Sequence
 
 import tifffile
 import numpy as np
@@ -16,7 +17,50 @@ from dirigo.plugins.acquisitions import FrameAcquisitionSpec, FrameSizeCalibrati
 
 
 
+def serialize_float64_list(arrays: Sequence[np.ndarray]) -> bytes:
+    """
+    Pack a sequence of float64 NumPy arrays (all same shape) into one
+    compressed bytes object.
+
+    Header layout (little-endian):
+        ndims : uint64                        # number of dims per frame
+        shape : uint64[ndims]                 # size of each dim
+
+    After the header comes the raw little-endian float64 data for *all*
+    frames, laid out as `stack.ravel()` (C-order).
+    """
+    if not arrays:
+        raise ValueError("Empty list")
+
+    ref = arrays[0]
+    if ref.dtype != np.float64:
+        raise TypeError("dtype must be float64")
+    if any((a.shape != ref.shape) or (a.dtype != np.float64) for a in arrays):
+        raise ValueError("All arrays must share the same shape and dtype=float64")
+
+    stack = np.stack(arrays, axis=0)                 # shape = (n_frames, *ref.shape)
+
+    ndims  = ref.ndim
+    fmt    = f"<Q{ndims}Q"                           # e.g. "<Q2Q" for 2‑D frames
+    header = struct.pack(fmt, ndims, *ref.shape)     # bytes
+
+    payload = header + stack.ravel().tobytes()
+    return zlib.compress(payload, level=9)
+
+
 class TiffLogger(Logger):
+    """
+    Saves image stream and metadata to tiff file.
+
+    Private fields: (65000-65535 available as re-usable)
+
+    """
+    SYSTEM_CONFIG_TAG      = 65000
+    ACQUISITION_SPEC_TAG   = 65001
+    DIGITIZER_PROFILE_TAG  = 65100
+    CAMERA_PROFILE_TAG     = 65101
+    TIMESTAMPS_TAG         = 65200
+    POSITIONS_TAG          = 65201
 
     def __init__(self, 
                  upstream: Acquisition | Processor,
@@ -24,29 +68,28 @@ class TiffLogger(Logger):
                  **kwargs):
         super().__init__(upstream, **kwargs)
 
-        self.frames_per_file = max_frames_per_file # TODO add validation
+        self.frames_per_file = int(max_frames_per_file) 
         
         self._fn = None
         self._writer = None # generated upon attempt to save first frame
         self.frames_saved = 0
         self.files_saved = 0
 
-        self.timestamps = []
-        self.positions = []
-        self.metadata = None
+        self._timestamps = [] # accumulate as frames arrive from acquistion or processor
+        self._positions = []
          
     def run(self):
         try:
             while True:
-                prod: AcquisitionProduct | ProcessorProduct = self.inbox.get(block=True)
+                product = self.inbox.get(block=True)
+                product: AcquisitionProduct | ProcessorProduct 
 
-                if prod is None: # Check for sentinel None
+                if product is None: # Check for sentinel None
                     self.publish(None) # pass sentinel
-                    print('Exiting TiffLogger thread')
                     return # thread ends
                 
-                self.save_data(prod)
-                prod._release()
+                with product:
+                    self.save_data(product)
 
         finally:
             self._close_and_write_metadata()
@@ -56,43 +99,37 @@ class TiffLogger(Logger):
 
         # Create the writer object if necessary
         if self._writer is None:
-            self.metadata = {}
+
             if self.frames_per_file == float('inf'):
-                # if we are writing an indeterminately long file, defer saving metadata
-                pass
+                self._fn = self.save_path / f"{self.basename}_temp.tif"
             else:
-                # Otherwise, if we can predict the metadata size a priori, 
-                # generate some blank (serialized) metadata to overwrite later
-                if frame.timestamps is not None:
-                    # For multi-line timestamps
-                    timestamps_shape = (self.frames_per_file,) + frame.timestamps.shape
-                    timestamps = np.zeros(timestamps_shape, dtype=np.float64)
-                    self.metadata['timestamps'] = b64encode(timestamps.tobytes()).decode('ascii')
+                self._fn = self.save_path / f"{self.basename}_{self.files_saved}.tif"
 
-                if frame.positions is not None:
-                    if isinstance(frame.positions, np.ndarray):
-                        positions_shape = (self.frames_per_file,) + frame.positions.shape
-                    else:
-                        positions_shape = (self.frames_per_file, len(frame.positions))
-                    positions = np.zeros(positions_shape, dtype=np.float64)
-                    self.metadata['positions'] = b64encode(positions.tobytes()).decode('ascii')
-
-            self._fn = self.save_path / f"{self.basename}_{self.files_saved}.tif"
             self._writer = tifffile.TiffWriter(self._fn, bigtiff=self._use_big_tiff)
 
-        # Accumulate metadata
-        self.timestamps.append(frame.timestamps)
-        self.positions.append(frame.positions)
+            options = {
+                'photometric': 'minisblack',
+                'planarconfig': 'contig', # TODO, need to switch planarconfig for single channel images
+                'resolution': (self._x_dpi, self._y_dpi),
+                'extratags': self._extra_tags
+            }
+        else:
+            options = {
+                'photometric': 'minisblack',
+                'planarconfig': 'contig',
+                'resolution': (self._x_dpi, self._y_dpi),
+                'contiguous': True
+            }
 
-        self._writer.write(
+        self._writer.write( 
                 frame.data, 
-                photometric='minisblack',
-                planarconfig='contig',
-                resolution=(self._x_dpi, self._y_dpi),
-                metadata=self.metadata,
-                contiguous=True # The dataset size must not change
+                **options
             )
         self.frames_saved += 1
+
+        # Accumulate timestamps & positions
+        self._timestamps.append(frame.timestamps)
+        self._positions.append(frame.positions)
 
         # when number of frames per file reached, close writer & write metadata
         if self.frames_saved % self.frames_per_file == 0:
@@ -100,28 +137,27 @@ class TiffLogger(Logger):
            
     def _close_and_write_metadata(self):
         if self._writer:
+
             self._writer.close()
             self._writer = None
             self.files_saved += 1
 
-            metadata = {}
-            if self.frames_per_file == float('inf'):
-                # If the total metadata size is not known a priori, skip
-                # TODO, re-write the file
-                pass
-            else:
-                # Re-open and overwite blank metadata
-                if self.timestamps[0] is not None:
-                    metadata['timestamps'] = b64encode(np.array(self.timestamps).tobytes()).decode('ascii')
-                if self.positions[0] is not None:
-                    metadata['positions'] = b64encode(np.array(self.positions).tobytes()).decode('ascii')
+            # write metadata by overwrite (appends data to end of file and
+            # 'patches' the offset to point at this new location, tifffile does
+            # all of this automatically)
+            with tifffile.TiffFile(self._fn, mode='r+b') as tif:
 
-                with tifffile.TiffFile(self._fn, mode="r+b") as tif:
-                    tif.pages[0].tags['ImageDescription'].overwrite(json.dumps(metadata))
+                if len(self._timestamps) > 0:
+                    data = serialize_float64_list(self._timestamps)
+                    tif.pages[0].tags[self.TIMESTAMPS_TAG].overwrite(data)
+
+                if len(self._positions) > 0:
+                    data = serialize_float64_list(self._positions)
+                    tif.pages[0].tags[self.POSITIONS_TAG].overwrite(data)
 
             # Clear accumulants
-            self.timestamps = []
-            self.positions = []
+            self._timestamps = []
+            self._positions = []
 
     @cached_property
     def _use_big_tiff(self) -> bool:
@@ -170,6 +206,26 @@ class TiffLogger(Logger):
         slow_axis =  acq.hw.slow_raster_scanner.axis
         return self._slow_axis_dpi if slow_axis == 'y' else self._fast_axis_dpi
 
+    @cached_property
+    def _extra_tags(self) -> list:
+        
+        config_json = json.dumps(self._system_config.to_dict())
+        config_compressed = zlib.compress(config_json.encode("utf-8"), level=9)
+
+        spec_json = json.dumps(self._acq.spec.to_dict())
+        spec_compressed = zlib.compress(spec_json.encode("utf-8"), level=9)
+
+        digitizer_profile_json = json.dumps(self._acq.hw.digitizer.profile.to_dict())
+        digi_compressed = zlib.compress(digitizer_profile_json.encode("utf-8"), level=9)
+
+        temp_entry = b' \x00' # Will be patched after this metadata is collected
+        return [
+            (self.SYSTEM_CONFIG_TAG,    'B', len(config_compressed), config_compressed, True),
+            (self.ACQUISITION_SPEC_TAG, 'B', len(spec_compressed),   spec_compressed,   True),
+            (self.DIGITIZER_PROFILE_TAG,'B', len(digi_compressed),   digi_compressed,   True),
+            (self.TIMESTAMPS_TAG,       'B', 1,                      temp_entry,        True),
+            (self.POSITIONS_TAG,        'B', 1,                      temp_entry,        True)
+        ]
 
 class BidiCalibrationLogger(Logger):
     """Logs bidirecetional phase at amplitudes."""
@@ -253,49 +309,43 @@ class FrameSizeCalibrationLogger(Logger):
             self.save_data()
 
     def save_data(self):
-        time.sleep(1)
+        spec = self._acq.spec
+        time.sleep(0.5)
         print("Analyzing displacement field")
         PATCH          = 64 
-        H              = 512 
+        STRIDE         = 32 
 
         # Initial global estimation
-        ii, jj = [], []
         ref_frame, ref_pos = self._frames[0], self._positions[0]
+        n_f = len(self._frames)
         n_y, n_x = ref_frame.shape
-        for frame, pos in zip(self._frames[1:], self._positions[1:]):
-            i, j = self.x_corr(
-                ref_frame[n_y//4:3*n_y//4, n_x//4:3*n_x//4,], 
-                frame[n_y//4:3*n_y//4, n_x//4:3*n_x//4,])
-            ii.append(i)
-            jj.append(j)
-            print(i,j)
 
-            ref_frame, ref_pos = frame, pos
+        dx = int(spec.translation_per_step / spec.pixel_size)
 
-        dy, dx = np.mean(ii), np.mean(jj)
+        data = np.zeros(
+            shape=(n_x // STRIDE, n_f)
+        )
 
-        # Patches
-        data = np.zeros((len(self._frames)-1, int(ref_frame.shape[1]/PATCH) -1))
-        ref_frame, ref_pos = self._frames[0], self._positions[0]
+        for f_idx, frame in enumerate(self._frames):
+            if f_idx == 0: continue # first column will be field position
+            for p_idx in range(n_x // STRIDE):
+                p0 = (p_idx * STRIDE)
+                ref_patch = ref_frame[:, p0:(p0 + PATCH)]
 
-        s, p = 0, 0
-        for frame, pos in zip(self._frames[1:], self._positions[1:]):
-            for patch_start in range(PATCH, ref_frame.shape[1], PATCH):
-                ref_patch = ref_frame[:, patch_start:(patch_start+PATCH)]
-                
-                m = patch_start - dx
-                m_rounded = (round(m))
-                mov_patch = frame[:, m_rounded:(m_rounded+PATCH)]
+                m0 = p0 - dx
+                if (m0 < 0) or (p0+PATCH >= n_x) or (m0 + PATCH) >= n_x: 
+                    data[p_idx, f_idx] = np.nan
+                    continue
+                mov_patch = frame[:, m0:(m0 + PATCH)]
+
                 i, j = self.x_corr(ref_patch, mov_patch)
                 print(i,j)
-                data[s, p] = j + (m - m_rounded)
-                p += 1
 
-            s += 1
-            p = 0
-            ref_frame, ref_pos = frame, pos
+                data[p_idx, f_idx] = j / dx
+                data[p_idx, 0] = ((p0+m0)/2 + PATCH//2 - n_x/2)/n_x
 
-        # write with a header comment for units
+            ref_frame = frame
+
         np.savetxt(
             Path(user_config_dir('Dirigo')) / "scanner/frame_calibration.csv",
             data,

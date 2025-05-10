@@ -464,6 +464,9 @@ class RangeWithUnits:
     
     def __hash__(self):
         return hash((self.min, self.max))
+    
+    def to_dict(self) -> dict:
+        return {"min": self.min, "max": self.max}
 
 
 class AngleRange(RangeWithUnits):

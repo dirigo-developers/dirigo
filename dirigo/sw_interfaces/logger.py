@@ -1,19 +1,21 @@
 from abc import abstractmethod
-from pathlib import Path
+from typing import Optional
 
 import numpy as np
 from platformdirs import user_documents_path
 
 from dirigo.sw_interfaces.worker import Worker
 from dirigo.sw_interfaces import Acquisition, Processor
-
+from dirigo.components.io import SystemConfig
 
 
 class Logger(Worker):
     """Dirigo interface for data logging."""
     def __init__(self, 
                  upstream: Acquisition | Processor,
-                 basename: str = "experiment"):
+                 basename: str = "experiment",
+                 system_config: Optional[SystemConfig] = None
+                 ) -> None:
         """Instantiate with either an upstream Acquisition or Processor"""
         super().__init__("Logger") # sets up the thread and the publisher-subcriber interface
         
@@ -29,6 +31,13 @@ class Logger(Worker):
         self.basename = basename
         self.save_path = user_documents_path() / "Dirigo"
         self.save_path.mkdir(parents=True, exist_ok=True)
+
+        if isinstance(system_config, SystemConfig):
+            self._system_config = system_config
+        elif system_config is None:
+            self._system_config = None
+        else:
+            raise ValueError(f"Expecting SystemConfig class, got {type(system_config)}")
         
         self.frames_per_file: int = None
         # Track frames/buffers saved

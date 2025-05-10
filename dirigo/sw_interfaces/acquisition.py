@@ -1,10 +1,12 @@
 from typing import TYPE_CHECKING
-from queue import Queue
+from collections.abc import Mapping, Sequence
+from pathlib import Path
 
 import numpy as np
 
 from dirigo.sw_interfaces.worker import Worker, Product
 from dirigo.components.io import load_toml
+from dirigo.units import RangeWithUnits
 
 if TYPE_CHECKING:
     from dirigo.components.hardware import Hardware 
@@ -12,8 +14,28 @@ if TYPE_CHECKING:
 
 
 class AcquisitionSpec:
-    """Marker class for an acquisition specification."""
-    pass
+    """Base class for an acquisition specification ('spec')."""
+    def to_dict(self) -> dict:
+        """Return a JSON‑ready dict containing *public* instance fields."""
+        def make_jsonable(obj):
+            if obj is None or isinstance(obj, (bool, int, float, str)):
+                return obj
+            if isinstance(obj, RangeWithUnits):
+                return {
+                    "min": make_jsonable(obj.min),
+                    "max": make_jsonable(obj.max),
+                }
+            if isinstance(obj, Mapping):
+                return {k: make_jsonable(v) for k, v in obj.items()}
+            if isinstance(obj, Sequence) and not isinstance(obj, (str, bytes)):
+                return [make_jsonable(v) for v in obj]
+            return str(obj)                 # fallback
+
+        return {
+            name: make_jsonable(val)
+            for name, val in self.__dict__.items()
+            if not name.startswith("_")
+        }
 
 
 class AcquisitionProduct(Product):
@@ -35,7 +57,20 @@ class AcquisitionProduct(Product):
         self.positions = positions
 
 
-class Acquisition(Worker):
+class AcquisitionMixIn(Worker): # Not sure this is really a mixin
+    def init_product_pool(self, n, shape, dtype):
+        for _ in range(n):
+            aq_buf = AcquisitionProduct(
+                pool=self._product_pool,
+                data=np.empty(shape, dtype) # pre-allocates for large buffers
+            )
+            self._product_pool.put(aq_buf)
+
+    def get_free_product(self) -> AcquisitionProduct:
+        return self._product_pool.get()
+
+
+class Acquisition(AcquisitionMixIn):
     """
     Dirigo interface for data acquisition worker thread.
     """
@@ -43,8 +78,8 @@ class Acquisition(Worker):
     SPEC_LOCATION: str = None
     SPEC_OBJECT: AcquisitionSpec
     
-    def __init__(self, hw: 'Hardware', spec: AcquisitionSpec):
-        super().__init__("Acquisition")
+    def __init__(self, hw: 'Hardware', spec: AcquisitionSpec, thread_name: str = "Acquisition"):
+        super().__init__(thread_name)
         self.hw = hw
         self.check_resources()
         self.spec = spec
@@ -90,13 +125,17 @@ class Acquisition(Worker):
         else:
             raise RuntimeError(f"Invalid data capture device: {acq_device}")
     
-    def init_product_pool(self, n, shape, dtype):
-        for _ in range(n):
-            aq_buf = AcquisitionProduct(
-                pool=self._product_pool,
-                data=np.empty(shape, dtype) # pre-allocates for large buffers
-            )
-            self._product_pool.put(aq_buf)
 
-    def get_free_product(self) -> AcquisitionProduct:
-        return self._product_pool.get()
+
+class Loader(AcquisitionMixIn):
+    """
+    Loads and makes available saved data for post-hoc analyses. Mimics the 
+    publishing behavior of Acquisition.
+    """
+    def __init__(self, file_path: str | Path, thread_name: str = "Loader"):
+        super().__init__(thread_name)
+
+        file_path = Path(file_path)
+        if not file_path.exists():
+            raise FileExistsError(f"Could not find file: {file_path}")
+        self._file_path = file_path

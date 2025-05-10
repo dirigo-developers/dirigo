@@ -1,12 +1,14 @@
 from abc import ABC, abstractmethod
 from functools import cached_property
+from dataclasses import dataclass, asdict
 from pathlib import Path
 import math
+from typing import Literal, List, Optional
+import tomllib
 
 from platformdirs import user_config_dir
 
 from dirigo import units
-from dirigo.components.io import load_toml
 from dirigo.sw_interfaces.acquisition import AcquisitionProduct
 
 """
@@ -35,6 +37,97 @@ alazar = "dirigo_alazar:AlazarDigitizer"
 # Currently uses strings (and sets of strings)
 # Argument against: too many possibilities if we consider multiple vendors but 
 # certain concepts like AC/DC, external/internal may be OK
+
+
+@dataclass(frozen=True, slots=True)
+class SampleClockProfile:
+    source: str
+    rate: Optional[units.SampleRate] = None
+    edge: Literal["Rising", "Falling"] = "Rising"
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "SampleClockProfile":
+        return cls(
+            source = d["source"],
+            rate = units.SampleRate(d["rate"]),
+            edge = d["edge"]
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class ChannelProfile:
+    enabled: bool
+    inverted: bool
+    coupling: Literal["AC", "DC"]
+    impedance: units.Resistance
+    range: units.VoltageRange
+
+    @classmethod
+    def list_from_dict(cls, d: dict) -> List["ChannelProfile"]:
+        channel_list = []
+        for ena, inv, cou, imp, ran in zip(d["enabled"], d["inverted"], d["coupling"], d["impedance"], d["range"]):
+            channel = cls(
+                enabled=ena, 
+                inverted=inv,
+                coupling=cou, 
+                impedance=units.Resistance(imp), 
+                range=units.VoltageRange(ran)
+            )
+            channel_list.append(channel)
+        return channel_list
+
+
+@dataclass(frozen=True, slots=True)
+class TriggerProfile:
+    source: str
+    slope: str
+    level: int
+    external_range: str
+    external_coupling: Literal["AC", "DC"]
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "TriggerProfile":
+        return cls(
+            source = d["source"],
+            slope = d["slope"],
+            level = d["level"],
+            external_range = d["external_range"],
+            external_coupling = d["external_coupling"]
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class DigitizerProfile:
+    """Describes static parameters of the Digitizer."""
+    sample_clock: SampleClockProfile
+    channels: List[ChannelProfile]
+    trigger: TriggerProfile
+    
+    def to_dict(self):
+        d = asdict(self)
+        # replace VoltageRange objects with simple dictionary for serialization
+        for channel in d["channels"]:
+            channel["range"] = channel["range"].to_dict()
+        return d
+     
+    @classmethod
+    def from_dict(cls, d: dict):
+        return cls(
+            sample_clock = SampleClockProfile.from_dict(d["sample_clock"]),
+            channels     = ChannelProfile.list_from_dict(d["channels"]),
+            trigger      = TriggerProfile.from_dict(d["trigger"]),
+        )
+    
+    @classmethod
+    def from_toml(cls, path: str | Path):
+        path = Path(path)
+        if not path.exists():
+            raise FileNotFoundError(f"Could not find Digitizer profile at: {path}")
+        
+        with open(path, "rb") as fh:
+            data = tomllib.load(fh)
+
+        return cls.from_dict(data)
 
 
 class Channel(ABC):
@@ -550,6 +643,7 @@ class Digitizer(ABC):
 
     @abstractmethod
     def __init__(self):
+        self.profile: DigitizerProfile
         self.sample_clock: SampleClock
         self.channels: list[Channel]
         self.trigger: Trigger
@@ -562,38 +656,25 @@ class Digitizer(ABC):
         Args:
             profile_name (str): Name of the profile to load (without file extension).
         """
-        profile_fn = profile_name + ".toml"
-        profile = load_toml(self.PROFILE_LOCATION / profile_fn)
+        profile_path = self.PROFILE_LOCATION / (profile_name + ".toml")
+        self.profile = DigitizerProfile.from_toml(profile_path)
         
-        self.sample_clock.source = profile["sample_clock"]["source"]
-        if "rate" in profile["sample_clock"]:
-            # rate setter method should handle converting string representation into units.SampleRate
-            self.sample_clock.rate = profile["sample_clock"]["rate"] 
-        else:
-            self.sample_clock.rate = None
-        self.sample_clock.edge = profile["sample_clock"]["edge"]
+        self.sample_clock.source = self.profile.sample_clock.source
+        self.sample_clock.rate = self.profile.sample_clock.rate
+        self.sample_clock.edge = self.profile.sample_clock.edge
 
-        for i, channel in enumerate(self.channels):
-            channel.enabled = profile["channels"]["enabled"][i]
-            # coupling, impedance, range may not be settable (for instance if using digital edge counting)
-            if "coupling" in profile["channels"]:
-                channel.coupling = profile["channels"]["coupling"][i]
-            if "impedance" in profile["channels"]:
-                channel.impedance = profile["channels"]["impedance"][i]
-            if "range" in profile["channels"]:
-                channel.range = units.VoltageRange(profile["channels"]["range"][i])
-            if "inverted" in profile["channels"]:
-                channel.inverted = profile["channels"]["inverted"][i]
+        for channel, channel_profile in zip(self.channels, self.profile.channels):
+            channel.enabled = channel_profile.enabled
+            # Digitizer doesn't need to know whether a channel is inverted
+            channel.coupling = channel_profile.coupling
+            channel.impedance = channel_profile.impedance
+            channel.range = channel_profile.range
 
-        if "external_range" in profile["trigger"]:
-            self.trigger.external_range = profile["trigger"]["external_range"]
-        if "external_coupling" in profile["trigger"]:
-            self.trigger.external_coupling = profile["trigger"]["external_coupling"]
-        if "source" in profile["trigger"]:
-            self.trigger.source = profile["trigger"]["source"]
-        self.trigger.slope = profile["trigger"]["slope"]
-        if "level" in profile["trigger"]:
-            self.trigger.level = 0
+        self.trigger.external_range = self.profile.trigger.external_range
+        self.trigger.external_coupling = self.profile.trigger.external_coupling
+        self.trigger.source = self.profile.trigger.source
+        self.trigger.slope = self.profile.trigger.slope
+        self.trigger.level = self.profile.trigger.level
 
     @property
     @abstractmethod

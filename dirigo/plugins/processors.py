@@ -10,7 +10,7 @@ from dirigo.components.io import load_scanner_calibration
 from dirigo.sw_interfaces.processor import Processor
 from dirigo.sw_interfaces.acquisition import Acquisition, AcquisitionProduct
 from dirigo.hw_interfaces.digitizer import Digitizer
-from dirigo.plugins.acquisitions import FrameAcquisitionSpec
+from dirigo.plugins.acquisitions import LineAcquisitionSpec, FrameAcquisitionSpec
 from dirigo.plugins.scanners import ResonantScanner
 
 
@@ -151,7 +151,7 @@ class RasterFrameProcessor(Processor):
             raise ValueError("Bit precision can't be less than the data acquisition device bit depth.")
         self._bits_precision = bits_precision
         
-        self._spec: FrameAcquisitionSpec # to refine type hinting
+        self._spec: LineAcquisitionSpec | FrameAcquisitionSpec # to refine type hinting
         if isinstance(digitizer, Digitizer):
             n_channels = sum(
                 [c.enabled for c in digitizer.channels]
@@ -191,14 +191,14 @@ class RasterFrameProcessor(Processor):
                 ampls, freqs, phases = load_scanner_calibration()
                 phase = np.interp(fast_scanner.amplitude, ampls, phases)
                 frequency = np.interp(fast_scanner.amplitude, ampls, freqs)
-                self._initial_trigger_phase = \
+                self._initial_trigger_error = \
                     (phase / TWO_PI) * (digitizer.sample_clock.rate / frequency)
-                print("INITIAL TRIGGER PHASE", self._initial_trigger_phase)
-                self._trigger_error = self._initial_trigger_phase
+                print("INITIAL TRIGGER PHASE", self._initial_trigger_error)
+                self._trigger_error = self._initial_trigger_error
 
             except:
                 # Calibration could not be loaded, don't use
-                self._initial_trigger_phase = None
+                self._initial_trigger_error = None
                 self._trigger_error = 0
 
         self._scaling_factor = 2**(self._bits_precision - digitizer.bit_depth) # should we bit shift instead of scale with multiply?
@@ -232,8 +232,8 @@ class RasterFrameProcessor(Processor):
                 trigger_phase = self.measure_phase(acq_prod.data)
                 print("TRIGGER SAMP", trigger_phase)
                 # quality check
-                if (self._initial_trigger_phase is None 
-                    or abs(trigger_phase - self._initial_trigger_phase) < 10): 
+                if (self._initial_trigger_error is None 
+                    or abs(trigger_phase - self._initial_trigger_error) < 10): 
                         
                     self._trigger_error = trigger_phase
                     

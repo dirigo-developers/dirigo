@@ -26,17 +26,18 @@ TWO_PI = 2 * math.pi
 class SampleAcquisitionSpec(AcquisitionSpec):
     def __init__(
             self,
-            digitizer_profile_name: str = "default",
+            digitizer_profile: str = "default",
             timestamps_enabled: bool = True,
             pre_trigger_samples: int = 0,
             trigger_delay_samples: Optional[int] = None,
             record_length: Optional[int] = None,
             records_per_buffer: int = 8,
             buffers_per_acquisition: int | float = float('inf'),
-            buffers_allocated: int = 4
+            buffers_allocated: int = 4,
+            **kwargs
             ) -> None:
         
-        self.digitizer_profile = digitizer_profile_name
+        self.digitizer_profile = digitizer_profile
         self.pre_trigger_samples = pre_trigger_samples
         self.timestamps_enabled = timestamps_enabled
         self.trigger_delay_samples = trigger_delay_samples
@@ -721,9 +722,9 @@ class FrameSizeCalibration(Acquisition):
 
     def run(self):
         try:
-            # Get sacrificial start frames
+            # Get 10x sacrificial start frames to allow warm up
             self._frame_acquisition.start()
-            for _ in range(2 * self.spec.sacrificial_frames):
+            for _ in range(10 * self.spec.sacrificial_frames):
                 product = self.inbox.get()
                 if product is None: return
                 with product: 

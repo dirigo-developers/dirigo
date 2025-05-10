@@ -137,7 +137,7 @@ class Dirigo:
                     plugin_class: Logger = entry_pt.load()
 
                     # Instantiate and return the acquisition worker
-                    logger: Logger = plugin_class(upstream_worker)  
+                    logger: Logger = plugin_class(upstream_worker, system_config=self.sys_config)  
                 
                     if auto_connect:
                         upstream_worker.add_subscriber(logger)
@@ -187,23 +187,23 @@ if __name__ == "__main__":
     # acquisition = diri.acquisition_factory('frame')
     
     # acquisition = diri.acquisition_factory('bidi_calibration', spec_name='bidi_calibration')
+    # logger = diri.logger_factory(processor, 'bidi_calibration')
+
     # acquisition = diri.acquisition_factory(
     #     type='frame_size_calibration', 
     #     spec_name='frame_size_calibration'
     # )
     # processor = diri.processor_factory(acquisition)
-    # logger = diri.logger_factory(processor)
-    # logger.frames_per_file = float('inf')   
     # distortion_logger = diri.logger_factory(processor, 'frame_size_calibration')
 
-    # logger = diri.logger_factory(processor, 'bidi_calibration')
-
     acquisition = diri.acquisition_factory('point_scan_strip')
-    processor = diri.processor_factory(acquisition)
-    strip_processor = diri.processor_factory(processor, 'point_scan_strip')
-    strip_stitcher = diri.processor_factory(strip_processor, 'strip_stitcher')
-    tile_builder = diri.processor_factory(strip_stitcher, 'tile_builder')
-    logger = diri.logger_factory(tile_builder, 'pyramid')
+    # processor = diri.processor_factory(acquisition)
+    # strip_processor = diri.processor_factory(processor, 'point_scan_strip')
+    # strip_stitcher = diri.processor_factory(strip_processor, 'strip_stitcher')
+    # tile_builder = diri.processor_factory(strip_stitcher, 'tile_builder')
+    # logger = diri.logger_factory(tile_builder, 'pyramid')
+    raw_logger = diri.logger_factory(acquisition)
+    raw_logger.frames_per_file = float('inf') 
 
     # display = diri.display_factory(processor)
     # logger.frames_per_file = float('inf')    
