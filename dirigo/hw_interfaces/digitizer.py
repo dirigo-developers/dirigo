@@ -63,15 +63,22 @@ class ChannelProfile:
     range: units.VoltageRange
 
     @classmethod
-    def list_from_dict(cls, d: dict) -> List["ChannelProfile"]:
+    def from_dict(cls, channel_profile_list: List[dict]) -> List["ChannelProfile"]:
         channel_list = []
-        for ena, inv, cou, imp, ran in zip(d["enabled"], d["inverted"], d["coupling"], d["impedance"], d["range"]):
+        for channel_profile in channel_profile_list:
+            input_range = channel_profile["range"]
+            if isinstance(input_range, dict):
+                # if dictionary with min, max keys
+                input_range = units.VoltageRange(**input_range)
+            else:
+                # if coming from toml file and using plus/minus, eg "±2 V"
+                input_range = units.VoltageRange(input_range)
             channel = cls(
-                enabled=ena, 
-                inverted=inv,
-                coupling=cou, 
-                impedance=units.Resistance(imp), 
-                range=units.VoltageRange(ran)
+                enabled=channel_profile["enabled"], 
+                inverted=channel_profile["inverted"],
+                coupling=channel_profile["coupling"], 
+                impedance=units.Resistance(channel_profile["impedance"]), 
+                range=input_range
             )
             channel_list.append(channel)
         return channel_list
@@ -114,7 +121,7 @@ class DigitizerProfile:
     def from_dict(cls, d: dict):
         return cls(
             sample_clock = SampleClockProfile.from_dict(d["sample_clock"]),
-            channels     = ChannelProfile.list_from_dict(d["channels"]),
+            channels     = ChannelProfile.from_dict(d["channels"]),
             trigger      = TriggerProfile.from_dict(d["trigger"]),
         )
     

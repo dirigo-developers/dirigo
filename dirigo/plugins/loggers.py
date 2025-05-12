@@ -1,6 +1,5 @@
 from functools import cached_property
-from base64 import b64encode
-import json, zlib, struct
+import json, struct
 from pathlib import Path
 import time
 from typing import Sequence
@@ -13,7 +12,9 @@ from platformdirs import user_config_dir
 from dirigo.sw_interfaces.processor import Processor, ProcessorProduct
 from dirigo.sw_interfaces import Logger
 from dirigo.sw_interfaces.acquisition import Acquisition, AcquisitionProduct
-from dirigo.plugins.acquisitions import FrameAcquisitionSpec, FrameSizeCalibration
+from dirigo.plugins.acquisitions import (
+    FrameAcquisitionSpec, FrameSizeCalibration, LineAcquisition
+)
 
 
 
@@ -44,8 +45,7 @@ def serialize_float64_list(arrays: Sequence[np.ndarray]) -> bytes:
     fmt    = f"<Q{ndims}Q"                           # e.g. "<Q2Q" for 2‑D frames
     header = struct.pack(fmt, ndims, *ref.shape)     # bytes
 
-    payload = header + stack.ravel().tobytes()
-    return zlib.compress(payload, level=9)
+    return header + stack.ravel().tobytes()
 
 
 class TiffLogger(Logger):
@@ -55,12 +55,13 @@ class TiffLogger(Logger):
     Private fields: (65000-65535 available as re-usable)
 
     """
-    SYSTEM_CONFIG_TAG      = 65000
-    ACQUISITION_SPEC_TAG   = 65001
-    DIGITIZER_PROFILE_TAG  = 65100
-    CAMERA_PROFILE_TAG     = 65101
-    TIMESTAMPS_TAG         = 65200
-    POSITIONS_TAG          = 65201
+    SYSTEM_CONFIG_TAG      = 65000  # Static info
+    RUNTIME_INFO_TAG       = 65001  # Dynamic runtime/driver provided info
+    ACQUISITION_SPEC_TAG   = 65100  # General specification for acquisition type
+    DIGITIZER_PROFILE_TAG  = 65200  # Rarely changed settings
+    CAMERA_PROFILE_TAG     = 65201
+    TIMESTAMPS_TAG         = 65400  # Per-frame metadata
+    POSITIONS_TAG          = 65401
 
     def __init__(self, 
                  upstream: Acquisition | Processor,
@@ -98,28 +99,24 @@ class TiffLogger(Logger):
         """Save data and metadata to a TIFF file"""
 
         # Create the writer object if necessary
+        options = {
+                'photometric': 'minisblack',
+                'planarconfig': 'contig', # switch for single channel
+                'resolution': (self._x_dpi, self._y_dpi),
+                'contiguous': True
+            }
         if self._writer is None:
 
             if self.frames_per_file == float('inf'):
-                self._fn = self.save_path / f"{self.basename}_temp.tif"
+                self._fn = self.save_path / f"{self.basename}.tif"
             else:
                 self._fn = self.save_path / f"{self.basename}_{self.files_saved}.tif"
 
             self._writer = tifffile.TiffWriter(self._fn, bigtiff=self._use_big_tiff)
 
-            options = {
-                'photometric': 'minisblack',
-                'planarconfig': 'contig', # TODO, need to switch planarconfig for single channel images
-                'resolution': (self._x_dpi, self._y_dpi),
-                'extratags': self._extra_tags
-            }
+            options['extratags'] = self._extra_tags
         else:
-            options = {
-                'photometric': 'minisblack',
-                'planarconfig': 'contig',
-                'resolution': (self._x_dpi, self._y_dpi),
-                'contiguous': True
-            }
+            options['contiguous'] = True 
 
         self._writer.write( 
                 frame.data, 
@@ -208,23 +205,21 @@ class TiffLogger(Logger):
 
     @cached_property
     def _extra_tags(self) -> list:
+        self._acq: LineAcquisition
         
-        config_json = json.dumps(self._system_config.to_dict())
-        config_compressed = zlib.compress(config_json.encode("utf-8"), level=9)
+        system_json = json.dumps(self._acq.system_config.to_dict())
+        runtime_json = json.dumps(self._acq.runtime_info.to_dict())
+        spec_json = json.dumps(self._acq.spec.to_dict())      
+        digi_json = json.dumps(self._acq.digitizer_profile.to_dict())
 
-        spec_json = json.dumps(self._acq.spec.to_dict())
-        spec_compressed = zlib.compress(spec_json.encode("utf-8"), level=9)
-
-        digitizer_profile_json = json.dumps(self._acq.hw.digitizer.profile.to_dict())
-        digi_compressed = zlib.compress(digitizer_profile_json.encode("utf-8"), level=9)
-
-        temp_entry = b' \x00' # Will be patched after this metadata is collected
+        temp_entry = b' \x00' # Will be patched after metadata is collected
         return [
-            (self.SYSTEM_CONFIG_TAG,    'B', len(config_compressed), config_compressed, True),
-            (self.ACQUISITION_SPEC_TAG, 'B', len(spec_compressed),   spec_compressed,   True),
-            (self.DIGITIZER_PROFILE_TAG,'B', len(digi_compressed),   digi_compressed,   True),
-            (self.TIMESTAMPS_TAG,       'B', 1,                      temp_entry,        True),
-            (self.POSITIONS_TAG,        'B', 1,                      temp_entry,        True)
+            (self.SYSTEM_CONFIG_TAG,     's',  0,  system_json,   True),
+            (self.RUNTIME_INFO_TAG,      's',  0,  runtime_json,  True),
+            (self.ACQUISITION_SPEC_TAG,  's',  0,  spec_json,     True),
+            (self.DIGITIZER_PROFILE_TAG, 's',  0,  digi_json,     True),
+            (self.TIMESTAMPS_TAG,        'B',  1,  temp_entry,    True),
+            (self.POSITIONS_TAG,         'B',  1,  temp_entry,    True)
         ]
 
 class BidiCalibrationLogger(Logger):

@@ -4,13 +4,14 @@ import math
 import time
 from typing import Optional
 from functools import cached_property
+from dataclasses import dataclass, asdict
 
 from platformdirs import user_config_dir
 import numpy as np
 
 from dirigo import units
 from dirigo.hw_interfaces.detector import DetectorSet, Detector
-from dirigo.hw_interfaces.digitizer import Digitizer
+from dirigo.hw_interfaces.digitizer import Digitizer, DigitizerProfile
 from dirigo.hw_interfaces.scanner import (
     FastRasterScanner, SlowRasterScanner, GalvoScanner, ResonantScanner,
     ObjectiveZScanner
@@ -74,8 +75,8 @@ class SampleAcquisition(Acquisition):
     SPEC_LOCATION = Path(user_config_dir("Dirigo")) / "acquisition/sample"
     SPEC_OBJECT = SampleAcquisitionSpec
 
-    def __init__(self, hw, spec):
-        super().__init__(hw, spec) # sets up thread, inbox, stores hw, checks resources
+    def __init__(self, hw, system_config, spec):
+        super().__init__(hw, system_config, spec) # sets up thread, inbox, stores hw, checks resources
         self.spec: SampleAcquisitionSpec # to refine type hints    
         self.active = threading.Event()
 
@@ -121,6 +122,10 @@ class SampleAcquisition(Acquisition):
         Subclassses can override this to synchronize with other hardware.
         """
         return self.spec.record_length
+    
+    @property
+    def digitizer_profile(self) -> DigitizerProfile:
+        return self.hw.digitizer.profile
 
 
 class LineAcquisitionSpec(SampleAcquisitionSpec): 
@@ -192,16 +197,46 @@ class LineAcquisitionSpec(SampleAcquisitionSpec):
         """
         return round(self.line_width / self.pixel_size)
 
+@dataclass
+class LineAcquisitionRuntimeInfo:
+    """
+    Makes runtime LineAcquisition info and parameters available.
+    (Experimental) 
+    """
+    scanner_amplitude: units.Angle
+    digitizer_bit_depth: int
+    digitizer_trigger_delay: int
+
+    @classmethod
+    def from_acquisition(cls, acquisition: "LineAcquisition"):
+        return cls(
+            scanner_amplitude=acquisition.hw.fast_raster_scanner.amplitude,
+            digitizer_bit_depth=acquisition.hw.digitizer.bit_depth,
+            digitizer_trigger_delay=acquisition.hw.digitizer.acquire.trigger_delay_samples
+        )
+    
+    @classmethod
+    def from_dict(cls, d: dict):
+        return cls(
+            scanner_amplitude=units.Angle(d['scanner_amplitude']),
+            digitizer_bit_depth=int(d['digitizer_bit_depth']),
+            digitizer_trigger_delay=int(d['digitizer_trigger_delay'])
+        )
+    
+    def to_dict(self) -> dict:
+        """Make dictionary for serialization."""
+        return asdict(self)
+
 
 class LineAcquisition(SampleAcquisition):
     REQUIRED_RESOURCES = [Digitizer, DetectorSet, FastRasterScanner]
     SPEC_LOCATION = Path(user_config_dir("Dirigo")) / "acquisition/line"
     SPEC_OBJECT = LineAcquisitionSpec
     
-    def __init__(self, hw, spec: LineAcquisitionSpec):
+    def __init__(self, hw, system_config, spec: LineAcquisitionSpec):
         """Initialize a line acquisition worker."""
         # Tip: since this method runs on main thread, limit to HW init tasks that will return fast, prepend slower tasks to run method
-        super().__init__(hw, spec) # sets up thread, inbox, stores hw, checks resources
+        super().__init__(hw, system_config, spec) # sets up thread, inbox, stores hw, checks resources
         self.spec: LineAcquisitionSpec # to refine type hints        
 
         # for brevity
@@ -240,6 +275,9 @@ class LineAcquisition(SampleAcquisition):
             
         # Scanner settings implemented, configure digitizer acquisition params
         self.configure_digitizer()
+
+        # Capture runtime info
+        self.runtime_info = LineAcquisitionRuntimeInfo.from_acquisition(self)
 
     def run(self):
         digi = self.hw.digitizer # for brevity
@@ -459,8 +497,8 @@ class FrameAcquisition(LineAcquisition):
     SPEC_LOCATION = Path(user_config_dir("Dirigo")) / "acquisition/frame"
     SPEC_OBJECT = FrameAcquisitionSpec
 
-    def __init__(self, hw, spec: FrameAcquisitionSpec):
-        super().__init__(hw, spec)
+    def __init__(self, hw, system_config, spec: FrameAcquisitionSpec):
+        super().__init__(hw, system_config, spec)
         self.spec: FrameAcquisitionSpec
 
         # Set up slow scanner, fast scanner is already set up in super().__init__()
@@ -541,8 +579,8 @@ class StackAcquisition(Acquisition):
     SPEC_LOCATION = Path(user_config_dir("Dirigo")) / "acquisition/stack"
     SPEC_OBJECT = StackAcquisitionSpec
 
-    def __init__(self, hw, spec: StackAcquisitionSpec):
-        super().__init__(hw, spec)
+    def __init__(self, hw, system_config, spec: StackAcquisitionSpec):
+        super().__init__(hw, system_config, spec)
         self.spec: StackAcquisitionSpec
 
         self._depths = np.arange(
@@ -641,8 +679,8 @@ class BidiCalibration(Acquisition):
     SPEC_LOCATION = Path(user_config_dir("Dirigo")) / "acquisition/frame"
     SPEC_OBJECT = BidiCalibrationSpec
 
-    def __init__(self, hw, spec: BidiCalibrationSpec):
-        super().__init__(hw, spec)
+    def __init__(self, hw, system_config, spec: BidiCalibrationSpec):
+        super().__init__(hw, system_config, spec)
         self.spec: BidiCalibrationSpec
 
         ampl = self.hw.fast_raster_scanner.angle_limits.range
@@ -705,8 +743,8 @@ class FrameSizeCalibration(Acquisition):
     SPEC_LOCATION = Path(user_config_dir("Dirigo")) / "acquisition/frame"
     SPEC_OBJECT = FrameSizeCalibrationSpec
     
-    def __init__(self, hw, spec: FrameSizeCalibrationSpec):
-        super().__init__(hw, spec)
+    def __init__(self, hw, system_config, spec: FrameSizeCalibrationSpec):
+        super().__init__(hw, system_config, spec)
         self.spec: FrameSizeCalibrationSpec
 
         self._frame_acquisition = FrameAcquisition(self.hw, self.spec)

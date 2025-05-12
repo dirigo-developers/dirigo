@@ -5,7 +5,7 @@ from pathlib import Path
 import numpy as np
 
 from dirigo.sw_interfaces.worker import Worker, Product
-from dirigo.components.io import load_toml
+from dirigo.components.io import load_toml, SystemConfig
 from dirigo.units import RangeWithUnits
 
 if TYPE_CHECKING:
@@ -57,20 +57,20 @@ class AcquisitionProduct(Product):
         self.positions = positions
 
 
-class AcquisitionMixIn(Worker): # Not sure this is really a mixin
+class AcquisitionWorker(Worker):
     def init_product_pool(self, n, shape, dtype):
         for _ in range(n):
-            aq_buf = AcquisitionProduct(
+            acquisition_product = AcquisitionProduct(
                 pool=self._product_pool,
                 data=np.empty(shape, dtype) # pre-allocates for large buffers
             )
-            self._product_pool.put(aq_buf)
+            self._product_pool.put(acquisition_product)
 
     def get_free_product(self) -> AcquisitionProduct:
         return self._product_pool.get()
 
 
-class Acquisition(AcquisitionMixIn):
+class Acquisition(AcquisitionWorker):
     """
     Dirigo interface for data acquisition worker thread.
     """
@@ -78,9 +78,14 @@ class Acquisition(AcquisitionMixIn):
     SPEC_LOCATION: str = None
     SPEC_OBJECT: AcquisitionSpec
     
-    def __init__(self, hw: 'Hardware', spec: AcquisitionSpec, thread_name: str = "Acquisition"):
+    def __init__(self, 
+                 hw: 'Hardware', 
+                 system_config: SystemConfig, 
+                 spec: AcquisitionSpec, 
+                 thread_name: str = "Acquisition"):
         super().__init__(thread_name)
         self.hw = hw
+        self.system_config = system_config
         self.check_resources()
         self.spec = spec
     
@@ -111,8 +116,7 @@ class Acquisition(AcquisitionMixIn):
         spec = load_toml(cls.SPEC_LOCATION / spec_fn)
         return cls.SPEC_OBJECT(**spec)
     
-    # Note that there is an abstractmethod, run() in the parent class. 
-    # Acquisition subclasses must implement it.
+    # ! Acquisition subclasses must implement a run() method.
 
     @property
     def data_acquisition_device(self):
@@ -126,8 +130,7 @@ class Acquisition(AcquisitionMixIn):
             raise RuntimeError(f"Invalid data capture device: {acq_device}")
     
 
-
-class Loader(AcquisitionMixIn):
+class Loader(AcquisitionWorker):
     """
     Loads and makes available saved data for post-hoc analyses. Mimics the 
     publishing behavior of Acquisition.

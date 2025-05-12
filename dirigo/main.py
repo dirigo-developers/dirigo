@@ -26,9 +26,9 @@ class Dirigo:
                 f"Could not find system configuration file. "
                 f"Expected to find directory: {config_dir}"
             )
-        self.sys_config = SystemConfig.from_toml(config_dir / "system_config.toml")
+        self.system_config = SystemConfig.from_toml(config_dir / "system_config.toml")
 
-        self.hw = Hardware(self.sys_config) 
+        self.hw = Hardware(self.system_config) 
 
     @property
     def acquisition_types(self) -> set[str]:
@@ -59,7 +59,7 @@ class Dirigo:
                         spec = plugin_class.get_specification(spec_name)
 
                     # Instantiate and return the acquisition worker
-                    return plugin_class(self.hw, spec)  
+                    return plugin_class(self.hw, self.system_config, spec)  
                 
                 except Exception as e:
                     raise RuntimeError(f"Failed to load Acquisition '{type}': {e}")
@@ -137,7 +137,7 @@ class Dirigo:
                     plugin_class: Logger = entry_pt.load()
 
                     # Instantiate and return the acquisition worker
-                    logger: Logger = plugin_class(upstream_worker, system_config=self.sys_config)  
+                    logger: Logger = plugin_class(upstream_worker)  
                 
                     if auto_connect:
                         upstream_worker.add_subscriber(logger)
