@@ -6,7 +6,7 @@ import numpy as np
 
 from dirigo.sw_interfaces.worker import Worker, Product
 from dirigo.components.io import load_toml, SystemConfig
-from dirigo.units import RangeWithUnits
+from dirigo.components.units import RangeWithUnits
 
 if TYPE_CHECKING:
     from dirigo.components.hardware import Hardware 

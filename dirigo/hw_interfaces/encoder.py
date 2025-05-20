@@ -2,7 +2,7 @@ from abc import ABC, abstractmethod
 
 import numpy as np
 
-from dirigo import units
+from dirigo.components import units
 
 
 class LinearEncoder(ABC):

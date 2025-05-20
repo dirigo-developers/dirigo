@@ -184,7 +184,8 @@ if __name__ == "__main__":
 
     diri = Dirigo()
 
-    # acquisition = diri.acquisition_factory('frame')
+    acquisition = diri.acquisition_factory('frame')
+    processor = diri.processor_factory(acquisition)
     
     # acquisition = diri.acquisition_factory('bidi_calibration', spec_name='bidi_calibration')
     # logger = diri.logger_factory(processor, 'bidi_calibration')
@@ -194,16 +195,20 @@ if __name__ == "__main__":
     #     spec_name='frame_size_calibration'
     # )
     # processor = diri.processor_factory(acquisition)
-    # distortion_logger = diri.logger_factory(processor, 'frame_size_calibration')
+    # # processor._initial_trigger_error = None # disables trigger phase calibration
+    # # logger = diri.logger_factory(processor)
+    # # logger.frames_per_file = float('inf') 
+    # size_logger = diri.logger_factory(processor, 'frame_size_calibration')
 
-    acquisition = diri.acquisition_factory('point_scan_strip')
+
+    # acquisition = diri.acquisition_factory('point_scan_strip')
     # processor = diri.processor_factory(acquisition)
     # strip_processor = diri.processor_factory(processor, 'point_scan_strip')
     # strip_stitcher = diri.processor_factory(strip_processor, 'strip_stitcher')
     # tile_builder = diri.processor_factory(strip_stitcher, 'tile_builder')
     # logger = diri.logger_factory(tile_builder, 'pyramid')
-    raw_logger = diri.logger_factory(acquisition)
-    raw_logger.frames_per_file = float('inf') 
+    # raw_logger = diri.logger_factory(acquisition)
+    # raw_logger.frames_per_file = float('inf') 
 
     # display = diri.display_factory(processor)
     # logger.frames_per_file = float('inf')    

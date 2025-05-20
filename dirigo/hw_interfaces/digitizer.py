@@ -8,7 +8,7 @@ import tomllib
 
 from platformdirs import user_config_dir
 
-from dirigo import units
+from dirigo.components import units
 from dirigo.sw_interfaces.acquisition import AcquisitionProduct
 
 """

@@ -5,7 +5,7 @@ from typing import Callable
 import numpy as np
 from numba import njit, types
 
-from dirigo.units import IntRange
+from dirigo.components.units import IntRange
 from dirigo.sw_interfaces.worker import Worker, Product
 from dirigo.sw_interfaces import Acquisition, Processor
 

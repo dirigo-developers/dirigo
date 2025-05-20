@@ -2,7 +2,7 @@ from abc import ABC, abstractmethod
 from collections.abc import MutableSequence
 from typing import Optional, List, TypeVar, Generic, Any
 
-from dirigo import units
+from dirigo.components import units
 
 
 

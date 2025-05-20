@@ -2,7 +2,7 @@ from enum import Enum
 from abc import ABC, abstractmethod
 from typing import Optional
 
-from dirigo import units
+from dirigo.components import units
 
 
 class CameraConnectionType(Enum):

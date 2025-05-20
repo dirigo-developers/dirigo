@@ -2,11 +2,12 @@ import time
 from functools import cached_property
 
 import numpy as np
-from numba import njit, prange, types
+from numpy.polynomial.polynomial import Polynomial
+from numba import njit, prange, int16, uint16, int32, int64, float32, complex64
 from scipy import fft
 
-from dirigo import units
-from dirigo.components.io import load_scanner_calibration
+from dirigo.components import units
+from dirigo.components import io
 from dirigo.sw_interfaces.processor import Processor
 from dirigo.sw_interfaces.acquisition import AcquisitionProduct
 from dirigo.plugins.acquisitions import (
@@ -20,14 +21,16 @@ TWO_PI = 2 * np.pi
 # issues:
 # need to support uint16 and uint8 (rarer)
 sigs = [
-    #buffer_data          invert_mask,     scaling_factor  resampled            start_indices     nsamples_to_sum
-    (types.int16[:,:,:],  types.int16[:],  types.int32,    types.int16[:,:,:],  types.int32[:,:], types.int32[:,:]),
-    (types.uint16[:,:,:], types.int16[:],  types.int32,    types.uint16[:,:,:], types.int32[:,:], types.int32[:,:])
+    #buffer_data    invert_mask  offset    bit_shift  gradient     resampled (out)  start_indices  nsamples_to_sum
+    (int16[:,:,:],  int16[:],    int16[:], int32,     float32[:],  int16[:,:,:],    int32[:,:],    int32[:,:]),
+    (uint16[:,:,:], int16[:],    int16[:], int32,     float32[:],  uint16[:,:,:],   int32[:,:],    int32[:,:])
 ]
 @njit(sigs, parallel=True, fastmath=True, nogil=True, cache=True)
 def resample_kernel(raw_data: np.ndarray, 
-                    invert_mask: list[bool],
-                    scaling_factor: int, # faster/better to bit shift than multiply (scale)
+                    invert_mask: np.ndarray,
+                    offset: np.ndarray,
+                    bit_shift: int,
+                    gradient: np.ndarray, # should this have seperate rows for fwd and rvs?
                     resampled: np.ndarray, 
                     start_indices: np.ndarray, 
                     nsamples_to_sum: np.ndarray):
@@ -42,11 +45,14 @@ def resample_kernel(raw_data: np.ndarray,
     Nrecords, Nsamples, Nchannels = raw_data.shape
     Ns, Nf, Nc = resampled.shape # Acquisition must be in channel-minor order (interleaved)
     Ndirections = start_indices.shape[0]
+    
 
-    # Clamp start_indices so they don't go out of [0, Nsamples)    
+    # Clamp start_indices to [0, Nsamples); calculate final scaling factor
+    scaling_factor = np.zeros_like(start_indices, np.float32)
     for d in prange(Ndirections):
         for fi in prange(Nf):
             start_indices[d, fi] = min(max(start_indices[d, fi], 0), Nsamples-1)
+            scaling_factor[d, fi] = bit_shift * gradient[fi] / nsamples_to_sum[d, fi]
     
     # Main loop over slow-axis pixels
     for si in prange(Ns): 
@@ -57,6 +63,7 @@ def resample_kernel(raw_data: np.ndarray,
         # Loop over fast-axis pixels
         for fi in range(Nf): 
             Nsum = nsamples_to_sum[fwd_rvs, fi]
+            sf = scaling_factor[fwd_rvs, fi]
             start = start_indices[fwd_rvs, fi]
 
             tmp_values = np.zeros(Nchannels, dtype=np.int32)
@@ -65,17 +72,16 @@ def resample_kernel(raw_data: np.ndarray,
             end = start + (Nsum * stride)
             for sample in range(start, end, stride):
                 for c in range(Nchannels):
-                    tmp_values[c] += raw_data[ri, sample, c]
+                    tmp_values[c] += raw_data[ri, sample, c] - offset[c]
 
             # Store the average back into resampled
             for c in range(Nchannels):
-                # TODO, test whether if and bitwise math faster for inversion
-                resampled[si, fi, c] = invert_mask[c] * (scaling_factor * tmp_values[c]) // Nsum
+                resampled[si, fi, c] = invert_mask[c] * (sf * tmp_values[c]) 
 
 
 sigs = [
-    types.float32[:,:](types.uint16[:,:,:], types.int64, types.int64, types.float64),
-    types.float32[:,:](types.int16[:,:,:],  types.int64, types.int64, types.float64)
+    float32[:,:](uint16[:,:,:], int64, int64, float32),
+    float32[:,:](int16[:,:,:],  int64, int64, float32)
 ]
 @njit(sigs, nogil=True, parallel=True, fastmath=True, cache=True)
 def crop_bidi_data(data: np.ndarray, lines_per_frame: int, trigger_delay: int, samples_per_period: float):
@@ -109,7 +115,7 @@ def crop_bidi_data(data: np.ndarray, lines_per_frame: int, trigger_delay: int, s
         
 
 @njit(
-    types.complex64[:](types.complex64[:,:]),
+    complex64[:](complex64[:,:]),
     nogil=True, parallel=True, fastmath=True, cache=True
 )
 def compute_cross_power_spectrum(F: np.ndarray):
@@ -171,12 +177,13 @@ class RasterFrameProcessor(Processor):
             [c.inverted for c in digitizer_profile.channels], dtype=dt
         ) + 1
 
+        self.signal_offset = np.zeros_like(self._invert_mask)
+
         # Pre-allocate array for processed image
         self.init_product_pool(n=4, shape=self.processed_shape, dtype=dt)
 
         # Trigger timing
         self._fixed_trigger_delay = runtime_info.digitizer_trigger_delay
-        # self._fixed_trigger_delay = digitizer.acquire.trigger_delay_samples
 
         if "galvo" in system_config.fast_raster_scanner['type'].lower():
             delay = units.Time(system_config.fast_raster_scanner['input_delay'])
@@ -185,7 +192,7 @@ class RasterFrameProcessor(Processor):
             # use a calibration table
             try:
                 scanner_amplitude = runtime_info.scanner_amplitude
-                ampls, freqs, phases = load_scanner_calibration()
+                ampls, freqs, phases = io.load_scanner_calibration()
                 phase = np.interp(scanner_amplitude, ampls, phases)
                 frequency = np.interp(scanner_amplitude, ampls, freqs)
                 self._initial_trigger_error = \
@@ -197,10 +204,25 @@ class RasterFrameProcessor(Processor):
                 # Calibration could not be loaded, don't use
                 self._initial_trigger_error = None
                 self._trigger_error = 0
+        
+        try:
+            ampl = runtime_info.scanner_amplitude
+            self._distortion_polynomial = io.load_distortion_calibration(ampl)
+        except:
+            self._distortion_polynomial = Polynomial([1])
 
         self._scaling_factor = 2 ** (
             self._bits_precision - runtime_info.digitizer_bit_depth
         )                   # should we bit shift instead of scale by multiply?
+
+        # Try loading gradient calibration
+        try:
+            self._gradient = io.load_gradient_calibration()
+        except:
+            self._gradient = np.ones((self._spec.pixels_per_line,), np.float32)
+
+        self._frames_processed = 0
+
 
     def run(self):
         
@@ -211,51 +233,54 @@ class RasterFrameProcessor(Processor):
                 self.publish(None) # pass along sentinel to indicate end
                 print('Exiting processing thread ')
                 return # concludes run() - this thread ends
+            
+            with acq_prod:
+                proc_product = self.get_free_product() # Request a product object
+                t0 = time.perf_counter()
 
-            proc_product = self.get_free_product() # Request a product object
-            t0 = time.perf_counter()
+                # If array of timestamps are assigned (default is None)
+                if isinstance(acq_prod.timestamps, np.ndarray):
+                    # Estimate scanner frequency from timestamps
+                    avg_trig_period = np.mean(np.diff(acq_prod.timestamps))
+                    self._fast_scanner_frequency = 1 / avg_trig_period
+                    #print("FAST SCANNER FREQ", self._fast_scanner_frequency)
 
-            # If array of timestamps are assigned (default is None)
-            if isinstance(acq_prod.timestamps, np.ndarray):
-                # Estimate frequency from timestamps
-                avg_trig_period = np.mean(np.diff(acq_prod.timestamps))
-                self._fast_scanner_frequency = 1 / avg_trig_period
-                #print("FAST SCANNER FREQ", self._fast_scanner_frequency)
+                # Measure phase from bidi data (in uni-directional, phase is not critical)
+                if self._spec.bidirectional_scanning:
+                    trigger_phase = self.measure_phase(acq_prod.data)
+                    #print("TRIGGER SAMP", trigger_phase)
 
-            # Measure phase from bidi data (in uni-directional, phase is not critical)
-            if self._spec.bidirectional_scanning:
-                trigger_phase = self.measure_phase(acq_prod.data)
-                #print("TRIGGER SAMP", trigger_phase)
-                # quality check
-                if (self._initial_trigger_error is None 
-                    or abs(trigger_phase - self._initial_trigger_error) < 10): 
+                    # quality check
+                    if (self._initial_trigger_error is None 
+                        or abs(trigger_phase - self._initial_trigger_error) < 10): 
+                        self._trigger_error = trigger_phase
                         
-                    self._trigger_error = trigger_phase
-                    
-            # Update resampling start indices--these can change a bit if the scanner frequency drifts
-            start_indices = self.calculate_start_indices(self._trigger_error) - self._fixed_trigger_delay
-            nsamples_to_sum = np.abs(np.diff(start_indices, axis=1))
-            t1 = time.perf_counter()
+                # Update resampling start indices--these can change a bit if the scanner frequency drifts
+                start_indices = self.calculate_start_indices(self._trigger_error) - self._fixed_trigger_delay
+                nsamples_to_sum = np.abs(np.diff(start_indices, axis=1))
+                t1 = time.perf_counter()
 
-            resample_kernel(
-                raw_data=acq_prod.data, 
-                invert_mask=self._invert_mask,
-                scaling_factor=self._scaling_factor, 
-                resampled=proc_product.data, 
-                start_indices=start_indices, 
-                nsamples_to_sum=nsamples_to_sum
-            )
-            proc_product.timestamps = acq_prod.timestamps
-            proc_product.positions = acq_prod.positions
-            proc_product.phase = TWO_PI * self._trigger_error \
-                / (self._acq.digitizer_profile.sample_clock.rate * avg_trig_period)
-            proc_product.frequency = self._fast_scanner_frequency
+                resample_kernel(
+                    raw_data=acq_prod.data, 
+                    invert_mask=self._invert_mask,
+                    offset=self.signal_offset,
+                    bit_shift=self._scaling_factor,
+                    gradient=self._gradient,
+                    resampled=proc_product.data,
+                    start_indices=start_indices, 
+                    nsamples_to_sum=nsamples_to_sum
+                )
+                proc_product.timestamps = acq_prod.timestamps
+                proc_product.positions = acq_prod.positions
+                proc_product.phase = TWO_PI * self._trigger_error \
+                    / (self._acq.digitizer_profile.sample_clock.rate * avg_trig_period)
+                proc_product.frequency = self._fast_scanner_frequency
 
-            self.publish(proc_product) # sends off to Logger and/or Display workers
-            acq_prod._release() # TODO, context manager this
-            t2 = time.perf_counter()
+                self.publish(proc_product) # sends off to Logger and/or Display workers
+                self._frames_processed += 1
+                t2 = time.perf_counter()
 
-            #print(f"RECALC: {1000*(t1-t0):.03f} | FRAME {1000*(t2-t1):.03f} ")
+                #print(f"RECALC: {1000*(t1-t0):.03f} | FRAME {1000*(t2-t1):.03f} ")
 
     @cached_property
     def _temporal_edges(self):
@@ -265,10 +290,16 @@ class RasterFrameProcessor(Processor):
         # Create a resampling function based on fast axis waveform type
         if 'resonant' in self._acq.system_config.fast_raster_scanner['type'].lower():
             # image line should be taken from center of sinusoid sweep
-            pixel_edges = np.linspace(ff, -ff, self._spec.pixels_per_line + 1)
+            pixel_edges = np.linspace(ff, -ff, self._spec.pixels_per_line + 1) 
+
+            # Use distortion polynomial to correct spatial edges
+            int_p = self._distortion_polynomial.integ()
+            x = np.linspace(-1, 1, 1_000_000)
+            y = int_p(x)
+            modified_pixel_edges = np.interp(pixel_edges, y, x)
 
             # arccos inverts the cosinusoidal path, normalize scan period to 0.0 to 1.0
-            temporal_edges = np.arccos(pixel_edges) / TWO_PI
+            temporal_edges = np.arccos(modified_pixel_edges) / TWO_PI
 
         else: #TODO, rename to smooth triangle or something
             # Fill fraction needs to be slightly adjusted to reflect pixel period rounding 

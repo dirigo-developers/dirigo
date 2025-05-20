@@ -9,7 +9,7 @@ from dataclasses import dataclass, asdict
 from platformdirs import user_config_dir
 import numpy as np
 
-from dirigo import units
+from dirigo.components import units
 from dirigo.hw_interfaces.detector import DetectorSet, Detector
 from dirigo.hw_interfaces.digitizer import Digitizer, DigitizerProfile
 from dirigo.hw_interfaces.scanner import (
@@ -270,7 +270,7 @@ class LineAcquisition(SampleAcquisition):
             # adjustable: amplitude
             scanner.amplitude = optics.object_position_to_scan_angle(
                 spec.extended_scan_width,
-                axis="fast"
+                #axis="fast"
             )
             
         # Scanner settings implemented, configure digitizer acquisition params
@@ -382,26 +382,18 @@ class LineAcquisition(SampleAcquisition):
     @cached_property
     def trigger_delay(self) -> int:
         """
-        Acquisition start delay, in sample periods. Rounds down to the nearest
+        Acquisition start delay, in sample periods. Rounds to the nearest
         digitizer-compatible increment.
         """
-        fast_scanner = self.hw.fast_raster_scanner
-        nominal_period = units.Time(1.0 / fast_scanner.frequency)
 
-        if isinstance(fast_scanner, ResonantScanner):
-            start_time = nominal_period * math.acos(self.spec.fill_fraction) / TWO_PI
+        if self.spec.bidirectional_scanning:
+            start_index = 128 # should be half the trigger re-arm time TODO, get actual rearm time
         else:
-            start_time = 0  
+            start_index = 0  
 
-        # For tolerance to sync signal phase error and/or initial scanner 
-        # frequency error, make sure to start earlier than required
-        start_time -= units.Time("1 us") # TODO make this a setting
-
-        start_index = start_time * self.hw.digitizer.sample_clock.rate
-
-        # Round down
+        # Round 
         tdr = self.hw.digitizer.acquire.trigger_delay_sample_resolution
-        start_index = tdr * int(start_index / tdr)
+        start_index = tdr * round(start_index / tdr)
 
         return start_index
 
@@ -411,36 +403,33 @@ class LineAcquisition(SampleAcquisition):
         Acquisition record length, in sample periods. Rounds up to the nearest
         digitizer-compatible increment.
         """
-        ff = self.spec.fill_fraction
-        rate = self.hw.digitizer.sample_clock.rate
-        f = self.hw.fast_raster_scanner.frequency
+        scanner_info = self.system_config.fast_raster_scanner
+        digitizer_rate = self.digitizer_profile.sample_clock.rate
 
-        if isinstance(self.hw.fast_raster_scanner, ResonantScanner): #TODO consider scanner types and logic here
-            start = math.acos(ff) / TWO_PI
+        nominal_period = units.Time(1 / units.Frequency(scanner_info['frequency']))
+        if 'resonant' in scanner_info['type']:
+            shortest_period = nominal_period / 1.005 # TODO set max frequency error
 
             if self.spec.bidirectional_scanning:
-                end = 1.0 - start
+                record_duration = shortest_period
+                record_length = record_duration * digitizer_rate - 256 # TODO, get actual rearm time
             else:
-                end = math.acos(-ff) / TWO_PI
+                record_duration = shortest_period / 2
+                record_length = record_duration * digitizer_rate
 
-            # For tolerance to error in initial frequency, extend record duration
-            record_duration = units.Time((end - start) / f) + 2 * units.Time("1 us") # TODO make this a setting
-            
-            record_len = record_duration * rate
-            
         elif isinstance(self.hw.fast_raster_scanner, GalvoScanner):
             # For galvo-galvo scanning, we record 100% of time including flyback
-            record_len = round(rate / f)
+            record_length = nominal_period * digitizer_rate
         
-        # Round record length up to the next allowable size (or the min)
+        # Round record length up to the nearest allowable size (or the min)
         rlr = self.hw.digitizer.acquire.record_length_resolution
-        record_len = rlr * math.ceil(record_len / rlr) 
+        record_length = rlr * round(record_length / rlr) 
 
         # Also set enforce the min record length requirement
-        if record_len < self.hw.digitizer.acquire.record_length_minimum:
-            record_len = self.hw.digitizer.acquire.record_length_minimum
+        if record_length < self.hw.digitizer.acquire.record_length_minimum:
+            record_length = self.hw.digitizer.acquire.record_length_minimum
         
-        return record_len
+        return record_length
 
 
 class FrameAcquisitionSpec(LineAcquisitionSpec):
@@ -655,87 +644,25 @@ class StackAcquisition(Acquisition):
     
 
 
-class BidiCalibrationSpec(FrameAcquisitionSpec):
-    def __init__(self, 
-                 min_ampl_frac: str | float = 0.2, 
-                 max_ampl_frac: str | float = 1.0, 
-                 n_ampls: str | int = 10,
-                 measurement_frames_per_ampl: str | int = 10,
-                 pause_time: str | units.Time = units.Time("5 s"),
-                 **kwargs):
-        super().__init__(**kwargs)
-        
-        self.ampl_frac_range = units.FloatRange(
-            min=float(min_ampl_frac), 
-            max=float(max_ampl_frac)
-        )
-        self.n_ampls = int(n_ampls)
-        self.measurement_frames_per_ampl = int(measurement_frames_per_ampl)
-        self.pause_time = units.Time(pause_time)
-
-
-class BidiCalibration(Acquisition):
-    REQUIRED_RESOURCES = [Digitizer, FastRasterScanner, SlowRasterScanner]
-    SPEC_LOCATION = Path(user_config_dir("Dirigo")) / "acquisition/frame"
-    SPEC_OBJECT = BidiCalibrationSpec
-
-    def __init__(self, hw, system_config, spec: BidiCalibrationSpec):
-        super().__init__(hw, system_config, spec)
-        self.spec: BidiCalibrationSpec
-
-        ampl = self.hw.fast_raster_scanner.angle_limits.range
-        self._amplitudes = np.linspace(
-            start=spec.ampl_frac_range.min * ampl,
-            stop=spec.ampl_frac_range.max * ampl,
-            num=spec.n_ampls
-        )
-        self.spec.buffers_per_acquisition = spec.measurement_frames_per_ampl
-        
-        # Frame acquisition needs to exist by the end of __init__ for other 
-        # Workers to instantiate correctly
-        self._frame_acquisition = FrameAcquisition(self.hw, self.spec)
-        self._frame_acquisition.add_subscriber(self)
-
-    def run(self):
-        try:
-            for ampl in self._amplitudes:
-                # Remake the acquisition object and start it
-                self._frame_acquisition = FrameAcquisition(self.hw, self.spec)
-                self._frame_acquisition.add_subscriber(self)
-                self._frame_acquisition.start()
-
-                # Over-ride amplitude
-                self.hw.fast_raster_scanner.amplitude = units.Angle(ampl)
-
-                # Get measurement frames
-                for _ in range(self.spec.measurement_frames_per_ampl):
-                    product = self.inbox.get()
-                    if product is None: return
-                    with product: 
-                        self.publish(product)
-                
-                if self.inbox.get() is not None: # receive final None
-                    return 
-                self._frame_acquisition.join(1)
-                self._frame_acquisition = None
-                time.sleep(self.spec.pause_time)
-
-        finally:
-            self.publish(None) # publish the sentinel
-
 
 
 class FrameSizeCalibrationSpec(FrameAcquisitionSpec):
     def __init__(self, 
-                 translation_per_step: str | units.Position,
-                 n_steps: int,
-                 sacrificial_frames: int = 5, 
-                 n_positions: int = 8,
+                 min_ampl_frac: str | float = 0.2, 
+                 max_ampl_frac: str | float = 1.0, 
+                 n_amplitudes: int = 5,
+                 sacrificial_frames: int = 4, 
+                 translation_fraction: float = 0.2,
                  **kwargs):
         super().__init__(**kwargs)
-        self.translation_per_step = units.Position(translation_per_step)
-        self.n_steps = n_steps
+
+        self.ampl_frac_range = units.FloatRange(
+            min=float(min_ampl_frac), 
+            max=float(max_ampl_frac)
+        )
+        self.n_amplitudes = n_amplitudes
         self.sacrificial_frames = sacrificial_frames
+        self.translation_fraction = translation_fraction
 
 
 class FrameSizeCalibration(Acquisition):
@@ -746,32 +673,55 @@ class FrameSizeCalibration(Acquisition):
     def __init__(self, hw, system_config, spec: FrameSizeCalibrationSpec):
         super().__init__(hw, system_config, spec)
         self.spec: FrameSizeCalibrationSpec
-
-        self._frame_acquisition = FrameAcquisition(self.hw, self.spec)
+        
+        self._frame_acquisition = FrameAcquisition(self.hw, system_config, self.spec)
         self._frame_acquisition.add_subscriber(self)
 
-        fast_axis = self.hw.fast_raster_scanner.axis
+        self.digitizer_profile = self._frame_acquisition.digitizer_profile
+        self.runtime_info = self._frame_acquisition.runtime_info
+
+        fast_axis = self.system_config.fast_raster_scanner['axis']
         if fast_axis == "x":
             self._fast_stage = self.hw.stage.x
         else:
             self._fast_stage = self.hw.stage.y
         self._original_position = self._fast_stage.position
 
+        ampl = self.hw.fast_raster_scanner.angle_limits.range
+        self._amplitudes = np.linspace(
+            start=spec.ampl_frac_range.min * ampl,
+            stop=spec.ampl_frac_range.max * ampl,
+            num=spec.n_amplitudes
+        )
 
     def run(self):
+        optics = self.hw.laser_scanning_optics
         try:
             # Get 10x sacrificial start frames to allow warm up
             self._frame_acquisition.start()
-            for _ in range(10 * self.spec.sacrificial_frames):
+            
+            for ampl in self._amplitudes:
+                # set amplitude
+                self.hw.fast_raster_scanner.amplitude = units.Angle(ampl)
+
+                # collect some sacrificial frames
+                for _ in range(4 * self.spec.sacrificial_frames):
+                    product = self.inbox.get()
+                    if product is None: return
+                    with product: 
+                        pass
+
+                # Gather measurement frame
                 product = self.inbox.get()
                 if product is None: return
                 with product: 
-                    pass
-            
-            for _ in range(self.spec.n_steps):
+                    self.publish(product)
+
                 # Move 
-                self._fast_stage.move_to(
-                    self._fast_stage.position + self.spec.translation_per_step
+                line_width = self.spec.fill_fraction \
+                    * optics.scan_angle_to_object_position(ampl)
+                self._fast_stage.move_to(self._fast_stage.position
+                    + line_width * self.spec.translation_fraction
                 )
 
                 # Discard frames in motion
@@ -787,10 +737,82 @@ class FrameSizeCalibration(Acquisition):
                 with product: 
                     self.publish(product)
 
-            # Move back to original position
-            self._fast_stage.move_to(units.Position(self._original_position))
+                # Move back to original position
+                self._fast_stage.move_to(units.Position(self._original_position))
 
         finally:
             self.publish(None)
             self._frame_acquisition.stop()
 
+
+class FrameDistortionCalibrationSpec(FrameAcquisitionSpec):
+    def __init__(self, 
+                 translation: str | units.Position,
+                 sacrificial_frames: int = 5, 
+                 n_steps: int = 4,
+                 **kwargs):
+        super().__init__(**kwargs)
+
+        self.sacrificial_frames = sacrificial_frames
+        self.translation = units.Position(translation)
+        self.n_steps = n_steps
+
+
+class FrameDistortionCalibration(Acquisition):
+    REQUIRED_RESOURCES = [Digitizer, FastRasterScanner, SlowRasterScanner]
+    SPEC_LOCATION = Path(user_config_dir("Dirigo")) / "acquisition/frame"
+    SPEC_OBJECT = FrameDistortionCalibrationSpec
+
+    def __init__(self, hw, system_config, spec):
+        super().__init__(hw, system_config, spec)
+
+        self.spec: FrameDistortionCalibrationSpec
+        
+        self._frame_acquisition = FrameAcquisition(self.hw, system_config, self.spec)
+        self._frame_acquisition.add_subscriber(self)
+
+        self.digitizer_profile = self._frame_acquisition.digitizer_profile
+        self.runtime_info = self._frame_acquisition.runtime_info
+
+        fast_axis = self.system_config.fast_raster_scanner['axis']
+        if fast_axis == "x":
+            self._fast_stage = self.hw.stage.x
+        else:
+            self._fast_stage = self.hw.stage.y
+        self._original_position = self._fast_stage.position
+
+
+    def run(self):
+        try:
+            self._frame_acquisition.start()
+
+            # collect some sacrificial frames
+            for _ in range(10 * self.spec.sacrificial_frames):
+                product = self.inbox.get()
+                if product is None: return
+                with product: 
+                    pass
+            
+            for _ in range(self.spec.n_steps):
+                # Gather frame
+                product = self.inbox.get()
+                if product is None: return
+                with product: 
+                    self.publish(product)
+
+                # Move 
+                self._fast_stage.move_to(self._fast_stage.position + self.spec.translation)
+
+                # Discard frames in motion
+                for _ in range(self.spec.sacrificial_frames):
+                    product = self.inbox.get()
+                    if product is None: return
+                    with product: 
+                        pass
+
+            # Move back to original position
+            self._fast_stage.move_to(self._original_position)
+
+        finally:
+            self.publish(None)
+            self._frame_acquisition.stop()

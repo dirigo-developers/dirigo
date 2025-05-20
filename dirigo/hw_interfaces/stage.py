@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from abc import ABC, abstractmethod
 import time
 
-from dirigo import units
+from dirigo.components import units
 
 
 

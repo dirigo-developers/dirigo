@@ -1,7 +1,7 @@
 import tkinter as tk
 from tkinter import ttk
 
-from dirigo import units
+from dirigo.components import units
 from dirigo.main import Dirigo
 from dirigo.hw_interfaces.digitizer import SampleClock, Channel, Trigger
 from dirigo.hw_interfaces.scanner import FastRasterScanner

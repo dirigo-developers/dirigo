@@ -4,7 +4,7 @@ from typing import Self
 
 import numpy as np
 
-from dirigo import units 
+from dirigo.components import units 
 from dirigo.sw_interfaces.worker import Worker, Product
 from dirigo.sw_interfaces.acquisition import Acquisition, Loader
 

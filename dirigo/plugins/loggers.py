@@ -1,19 +1,20 @@
 from functools import cached_property
 import json, struct
 from pathlib import Path
-import time
 from typing import Sequence
 
 import tifffile
 import numpy as np
+from numpy.polynomial.polynomial import Polynomial
 from scipy import fft
 from platformdirs import user_config_dir
 
+from dirigo.components import units
 from dirigo.sw_interfaces.processor import Processor, ProcessorProduct
 from dirigo.sw_interfaces import Logger
 from dirigo.sw_interfaces.acquisition import Acquisition, AcquisitionProduct
 from dirigo.plugins.acquisitions import (
-    FrameAcquisitionSpec, FrameSizeCalibration, LineAcquisition
+    FrameAcquisitionSpec, FrameSizeCalibration, FrameDistortionCalibration, LineAcquisition
 )
 
 
@@ -33,9 +34,13 @@ def serialize_float64_list(arrays: Sequence[np.ndarray]) -> bytes:
     if not arrays:
         raise ValueError("Empty list")
 
+    
+    if isinstance(arrays[0], tuple):
+        # try converting to numpy array
+        arrays = [np.array(arr) for arr in arrays]
+    
     ref = arrays[0]
-    if ref.dtype != np.float64:
-        raise TypeError("dtype must be float64")
+
     if any((a.shape != ref.shape) or (a.dtype != np.float64) for a in arrays):
         raise ValueError("All arrays must share the same shape and dtype=float64")
 
@@ -212,7 +217,7 @@ class TiffLogger(Logger):
         spec_json = json.dumps(self._acq.spec.to_dict())      
         digi_json = json.dumps(self._acq.digitizer_profile.to_dict())
 
-        temp_entry = b' \x00' # Will be patched after metadata is collected
+        temp_entry = b' \x00' # temp will be patched (overwrite) later
         return [
             (self.SYSTEM_CONFIG_TAG,     's',  0,  system_json,   True),
             (self.RUNTIME_INFO_TAG,      's',  0,  runtime_json,  True),
@@ -221,6 +226,7 @@ class TiffLogger(Logger):
             (self.TIMESTAMPS_TAG,        'B',  1,  temp_entry,    True),
             (self.POSITIONS_TAG,         'B',  1,  temp_entry,    True)
         ]
+
 
 class BidiCalibrationLogger(Logger):
     """Logs bidirecetional phase at amplitudes."""
@@ -276,11 +282,9 @@ class BidiCalibrationLogger(Logger):
         )
 
 
-
-
 class FrameSizeCalibrationLogger(Logger):
     """Logs apparent translation."""
-    UPSAMPLE       = 10          # global phase‑corr up‑sampling
+    UPSAMPLE       = 5          # global phase‑corr up‑sampling
     EPS            = 1e-1
     
     def __init__(self, upstream: Processor):
@@ -304,56 +308,160 @@ class FrameSizeCalibrationLogger(Logger):
             self.save_data()
 
     def save_data(self):
-        spec = self._acq.spec
-        time.sleep(0.5)
-        print("Analyzing displacement field")
-        PATCH          = 64 
-        STRIDE         = 32 
+        spec =self._acq.spec
 
-        # Initial global estimation
-        ref_frame, ref_pos = self._frames[0], self._positions[0]
-        n_f = len(self._frames)
+        n_y, n_x = self._frames[0].shape
+        yc = n_y//2
+        xc = n_x//2
+        data = np.zeros((len(self._acq._amplitudes), 2))
+        for idx, ampl in enumerate(self._acq._amplitudes):
+            ref_frame, ref_pos = self._frames[2*idx], self._positions[2*idx]
+            mov_frame, mov_pos = self._frames[2*idx+1], self._positions[2*idx+1]
+
+            ref_patch = ref_frame[(yc-yc//2):(yc+yc//2),(xc-xc//2):(xc+xc//2)]
+            mov_patch = mov_frame[(yc-yc//2):(yc+yc//2),(xc-xc//2):(xc+xc//2)]
+
+            i, j = self.x_corr(ref_patch, mov_patch)
+            print(i,j)
+
+            dx = mov_pos[0] - ref_pos[0]
+            dy = mov_pos[1] - ref_pos[1]
+
+            data[idx, 0] = ampl
+            data[idx, 1] = spec.pixels_per_line * (dx / j) / spec.fill_fraction
+
+        np.savetxt(
+            Path(user_config_dir('Dirigo')) / "scanner/line_width_calibration.csv",
+            data,
+            delimiter=',',
+            header='amplitude (rad),line width (m)',
+        )
+        
+
+    @classmethod
+    def x_corr(cls, ref_frame: np.ndarray, moving_frame: np.ndarray):
         n_y, n_x = ref_frame.shape
 
-        dx = int(spec.translation_per_step / spec.pixel_size)
+        xps = fft.rfft2(ref_frame, workers=-1) * np.conj(fft.rfft2(moving_frame, workers=-1))
+        s = (n_y * cls.UPSAMPLE, n_x * cls.UPSAMPLE)
+        corr = fft.irfft2(xps / (np.abs(xps) + cls.EPS), s, workers=-1)
+        arg_max = np.argmax(corr)
+        i = arg_max // corr.shape[1]
+        j = arg_max %  corr.shape[1]
 
-        data = np.zeros(
-            shape=(n_x // STRIDE, n_f)
-        )
+        if i > (s[0] // 2):  # Handle wrap-around for negative shifts
+            i -= s[0]
+        if j > (s[1] // 2): 
+            j -= s[1]
 
-        for f_idx, frame in enumerate(self._frames):
-            if f_idx == 0: continue # first column will be field position
-            for p_idx in range(n_x // STRIDE):
-                p0 = (p_idx * STRIDE)
-                ref_patch = ref_frame[:, p0:(p0 + PATCH)]
+        return i / cls.UPSAMPLE, j / cls.UPSAMPLE
+    
 
-                m0 = p0 - dx
-                if (m0 < 0) or (p0+PATCH >= n_x) or (m0 + PATCH) >= n_x: 
-                    data[p_idx, f_idx] = np.nan
+
+class FrameDistortionCalibrationLogger(Logger):
+    """Logs apparent translation."""
+    UPSAMPLE       = 50          # global phase‑corr up‑sampling
+    EPS            = 1e-1
+    PATCH          = 64
+    STRIDE         = 8
+
+    def __init__(self, upstream: Processor):
+        super().__init__(upstream)
+        self._acq: FrameDistortionCalibration
+        self._fn = Path(user_config_dir('Dirigo')) / "scanner/distortion_calibration_data.csv"
+
+    def run(self):
+        self._frames, self._positions = [], [] # collect measurement frames/pos
+        try:
+            while True:
+                product: ProcessorProduct = self.inbox.get()
+                if product is None: # Check for sentinel None
+                    break 
+                with product:
+                    self._frames.append(product.data[:,:,0].copy())
+                    self._positions.append(product.positions)
+
+        finally:
+            self.publish(None) # pass sentinel
+            self.save_data()
+
+    def save_data(self):
+        spec = self._acq.spec
+
+        n_f = len(self._frames)
+        n_comparisons = n_f - 1
+        ref_frame = self._frames[0]
+        n_y, n_x = ref_frame.shape
+        yc = n_y//2
+        yr = n_y//8
+
+        # Create error function: dx_true/dx_observed
+        dx_true = round(spec.translation / spec.pixel_size)
+        dx_observed = np.zeros(shape=(n_x // self.STRIDE, n_comparisons))
+        field_position = np.zeros(n_x // self.STRIDE)
+        
+        ref_frame = self._frames[0]
+        for f_idx, frame in enumerate(self._frames[1:]):
+
+            for p_idx in range(n_x // self.STRIDE):
+                p0 = (p_idx * self.STRIDE) # ref patch start pixel index
+                ref_patch = ref_frame[(yc-yr):(yc+yr), p0:(p0 + self.PATCH)]
+
+                m0 = p0 - dx_true # mov patch start pixel index
+                if (m0 < 0) or (p0+self.PATCH >= n_x) or (m0+self.PATCH) >= n_x: 
+                    dx_observed[p_idx, f_idx] = np.nan
+                    field_position[p_idx] = np.nan
                     continue
-                mov_patch = frame[:, m0:(m0 + PATCH)]
+                mov_patch = frame[(yc-yr):(yc+yr), m0:(m0 + self.PATCH)]
 
-                i, j = self.x_corr(ref_patch, mov_patch)
-                print(i,j)
+                _, j = self.x_corr(ref_patch, mov_patch)
+                print(units.Position(j*spec.pixel_size))
 
-                data[p_idx, f_idx] = j / dx
-                data[p_idx, 0] = ((p0+m0)/2 + PATCH//2 - n_x/2)/n_x
+                dx_observed[p_idx, f_idx] = j + dx_true
+                ref_patch_center = p0 + self.PATCH//2
+                mov_patch_center = m0 + self.PATCH//2
+                comp_center = (ref_patch_center + mov_patch_center)/2
+                field_position[p_idx] = -(comp_center - n_x/2) / n_x * 2 * spec.fill_fraction
 
             ref_frame = frame
 
-        np.savetxt(
-            Path(user_config_dir('Dirigo')) / "scanner/frame_calibration.csv",
-            data,
-            delimiter=',',
+        # Fit error
+        field_positions = np.tile(field_position[:,np.newaxis], (1, n_comparisons)) 
+
+        nan_mask = np.isnan(dx_observed)
+        pfit: Polynomial = Polynomial.fit(
+            x=field_positions[~nan_mask].ravel(),
+            y=(dx_true/dx_observed)[~nan_mask].ravel(),
+            deg=2
         )
+        c0, c1, c2 = pfit.convert().coef
+
+        # Save errors
+        data = np.concatenate(
+            (field_position[:,np.newaxis], dx_true/dx_observed),
+            axis=1
+        )
+        np.savetxt(self._fn, data, delimiter=',',header="field position,dx_true/dx_observed")
+
+        # If not calibrated (would have trivial Polynomial(1)), save distortion polynomial
+        if self._processor._distortion_polynomial == Polynomial([1]):
+            fn = Path(user_config_dir('Dirigo')) / "optics/distortion_calibration.csv"
+            calib_data = np.array([[self._acq.runtime_info.scanner_amplitude, c0, c1, c2]])
+            if fn.exists(): # add to existing calibration
+                data = np.loadtxt(fn, delimiter=',', dtype=np.float64, skiprows=1, ndmin=2)
+                data = np.concatenate((data, calib_data), axis=0)
+            else:
+                data = calib_data
+
+            np.savetxt(fn, data, delimiter=',',header="scanner amplitude (rad),coefficients (in ascending order)")
 
     @classmethod
-    def x_corr(cls, ref_frame, moving_frame):
+    def x_corr(cls, ref_frame: np.ndarray, moving_frame: np.ndarray):
         n_y, n_x = ref_frame.shape
 
-        xps = fft.rfft2(ref_frame) * np.conj(fft.rfft2(moving_frame))
-        s = (n_y * cls.UPSAMPLE, n_x * cls.UPSAMPLE)
-        corr = fft.irfft2(xps / (np.abs(xps) + cls.EPS), s)
+        xps = fft.rfft2(ref_frame, workers=-1) * np.conj(fft.rfft2(moving_frame, workers=-1))
+        s = (n_y, n_x * cls.UPSAMPLE)
+        corr = fft.irfft2(xps / (np.abs(xps) + cls.EPS), s, workers=-1)
         arg_max = np.argmax(corr)
         i = arg_max // corr.shape[1]
         j = arg_max %  corr.shape[1]

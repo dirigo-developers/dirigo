@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 
-from dirigo import units
+from dirigo.components import units
 from dirigo.hw_interfaces.stage import LinearStage # for z-scanner
 
 """

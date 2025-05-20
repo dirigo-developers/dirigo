@@ -6,7 +6,7 @@ from nidaqmx.constants import (
 )
 from nidaqmx.stream_readers import CounterReader
 
-from dirigo import units
+from dirigo.components import units
 from dirigo.components.hardware import Hardware
 from dirigo.hw_interfaces.encoder import LinearEncoder, MultiAxisLinearEncoder
 from dirigo.plugins.scanners import CounterRegistry, validate_ni_channel

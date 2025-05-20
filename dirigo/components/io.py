@@ -4,7 +4,16 @@ import tomllib
 from typing import Optional
 
 import numpy as np
-from platformdirs import user_config_dir
+import tifffile
+from numpy.polynomial.polynomial import Polynomial
+import platformdirs as pd
+
+from dirigo.components import units
+
+
+
+def config_dir() -> Path:
+    return pd.user_config_path("Dirigo")
 
 
 def load_toml(file_name: Path | str) -> dict:
@@ -19,7 +28,7 @@ def load_toml(file_name: Path | str) -> dict:
 
 
 def load_scanner_calibration(
-        path: Path = Path(user_config_dir('Dirigo')) / "scanner/calibration.csv"
+        path: Path = config_dir() / "scanner/calibration.csv"
         ) -> tuple:
     
     ampls, freqs, phases = np.loadtxt(
@@ -29,6 +38,40 @@ def load_scanner_calibration(
         skiprows=1
     )
     return ampls, freqs, phases
+
+
+def load_distortion_calibration(
+        amplitude: units.Angle,
+        path: Path = config_dir() / "optics/distortion_calibration.csv"
+):
+    data = np.loadtxt(path, delimiter=',', dtype=np.float64, skiprows=1, ndmin=2)
+    amplitudes = data[:,0]
+    coefs = data[:,1:]
+
+    for i,a in enumerate(amplitudes):
+        if abs(a - amplitude)/amplitude < 0.001:
+            return Polynomial(coefs[i])
+    
+    raise RuntimeError("Could not find distortion calibration")
+
+
+def load_gradient_calibration(
+        path: Path = user_config_path("Dirigo") / f"optics/gradient_calibration.tif"
+):
+    return tifffile.imread(path)
+
+
+def load_line_width_calibration(
+        path: Path = Path(user_config_dir('Dirigo')) / "scanner/line_width_calibration.csv",
+        fit_deg: int = 3) -> Polynomial:
+    
+    amplitudes, widths =  np.loadtxt(
+        path,
+        delimiter=',',
+        unpack=True,
+        skiprows=1
+    )
+    return Polynomial.fit(x=widths, y=amplitudes, deg=fit_deg)
 
 
 @dataclass

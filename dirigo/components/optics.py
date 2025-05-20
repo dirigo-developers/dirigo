@@ -1,9 +1,9 @@
 from typing import Optional
+from pathlib import Path
 
-from dirigo import units
+from dirigo.components import units
+from dirigo.components.io import load_line_width_calibration
 
-
-# TODO, rework as interface?
 
 """
 Notes:
@@ -15,16 +15,20 @@ Any corrections are applied at Optics class level.
 class LaserScanningOptics: 
     def __init__(self, 
                  objective_focal_length: str, 
-                 relay_magnification: float,
-                 fast_axis_correction: float = 1.0,
-                 slow_axis_correction: float = 1.0) -> None:
+                 relay_magnification: float) -> None:
         """
         fast_axis_correction (float): extends scan by factor to correct mag error
         """
         self._objective_focal_length = units.Position(objective_focal_length)
         self._relay_magnification = float(relay_magnification)
-        self._fast_axis_correction = float(fast_axis_correction)
-        self._slow_axis_correction = float(slow_axis_correction)
+
+        # load line width calibration, if fails don't use calibration
+        try:
+            self._fast_axis_calibration = load_line_width_calibration()
+        except:
+            self._fast_axis_calibration = None
+
+        self._slow_axis_calibration = None
 
     @property
     def objective_focal_length(self) -> units.Position:
@@ -48,8 +52,8 @@ class LaserScanningOptics:
         Specify axis ('fast', 'slow') to invoke correction factor.
         """
         objective_angle = angle / self.relay_magnification 
-        position = objective_angle * self.objective_focal_length
-        return units.Position(position / self._correction(axis))
+        position = float(objective_angle) * self.objective_focal_length
+        return units.Position(position)
 
     def object_position_to_scan_angle(self, 
                                       position: units.Position,
@@ -59,18 +63,16 @@ class LaserScanningOptics:
 
         Specify axis ('fast', 'slow') to invoke correction factor.
         """
-        objective_angle = position / self.objective_focal_length
-        angle = objective_angle * self.relay_magnification
-        return units.Angle(angle * self._correction(axis))
-    
-    def _correction(self, axis: str) -> float:
-        correction = 1.0
-        if axis and axis.lower() == "fast":
-            correction = self._fast_axis_correction
-        elif axis and axis.lower() == "slow":
-            correction = self._slow_axis_correction
-        return correction
-    
+        if axis == "fast" and self._fast_axis_calibration:
+            angle = self._fast_axis_calibration(float(position))
+        elif axis == "slow" and self._slow_axis_calibration:
+            angle = self._slow_axis_calibration(float(position))
+        else:
+            objective_angle = position / self.objective_focal_length
+            angle = objective_angle * self.relay_magnification
+            
+        return units.Angle(angle)
+       
 
 class CameraOptics:
     """

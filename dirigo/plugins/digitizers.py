@@ -9,7 +9,7 @@ from nidaqmx.constants import (
     ProductCategory, Coupling, Edge, AcquisitionType, TerminalConfiguration
 )
 
-from dirigo import units
+from dirigo.components import units
 from dirigo.components.io import load_toml
 from dirigo.hw_interfaces import digitizer
 from dirigo.sw_interfaces.acquisition import AcquisitionProduct

@@ -23,8 +23,9 @@ dependencies = [
 line = "dirigo.plugins.acquisitions:LineAcquisition"
 frame = "dirigo.plugins.acquisitions:FrameAcquisition"
 stack = "dirigo.plugins.acquisitions:StackAcquisition"
-bidi_calibration = "dirigo.plugins.acquisitions:BidiCalibration"
+trigger_delay_calibration = "dirigo.plugins.acquisitions:BidiCalibration"
 frame_size_calibration = "dirigo.plugins.acquisitions:FrameSizeCalibration"
+frame_distortion_calibration = "dirigo.plugins.acquisitions:FrameDistortionCalibration"
 
 [project.entry-points."dirigo_processors"]
 raster_frame = "dirigo.plugins.processors:RasterFrameProcessor"
@@ -33,6 +34,7 @@ raster_frame = "dirigo.plugins.processors:RasterFrameProcessor"
 tiff = "dirigo.plugins.loggers:TiffLogger"
 bidi_calibration = "dirigo.plugins.loggers:BidiCalibrationLogger"
 frame_size_calibration = "dirigo.plugins.loggers:FrameSizeCalibrationLogger"
+frame_distortion_calibration = "dirigo.plugins.loggers:FrameDistortionCalibrationLogger"
 
 [project.entry-points."dirigo_encoders"]
 linear_encoders_via_ni = "dirigo.plugins.encoders:MultiAxisLinearEncodersViaNI"

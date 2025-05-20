@@ -1,12 +1,16 @@
 from abc import abstractmethod
-from typing import Optional
+from pathlib import Path
 
 import numpy as np
 from platformdirs import user_documents_path
 
 from dirigo.sw_interfaces.worker import Worker
 from dirigo.sw_interfaces import Acquisition, Processor
-from dirigo.components.io import SystemConfig
+
+
+
+def save_path() -> Path:
+    return user_documents_path() / "Dirigo"
 
 
 class Logger(Worker):
@@ -28,7 +32,7 @@ class Logger(Worker):
             raise ValueError("Upstream Worker must be either an Acquisition or a Processor")
 
         self.basename = basename
-        self.save_path = user_documents_path() / "Dirigo"
+        self.save_path = save_path()
         self.save_path.mkdir(parents=True, exist_ok=True)
         
         self.frames_per_file: int = None

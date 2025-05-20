@@ -10,7 +10,7 @@ import nidaqmx.errors
 from nidaqmx.stream_writers import AnalogMultiChannelWriter
 from nidaqmx.constants import AcquisitionType, RegenerationMode, LineGrouping
 
-from dirigo import units
+from dirigo.components import units
 from dirigo.hw_interfaces.scanner import (
     GalvoScanner, ResonantScanner, PolygonScanner,
     FastRasterScanner, SlowRasterScanner,
