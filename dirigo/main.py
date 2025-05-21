@@ -1,8 +1,9 @@
-import importlib.metadata
+from typing import Optional, Literal, Any, overload
+from functools import lru_cache
+import importlib.metadata as im
 from pathlib import Path
 
-from platformdirs import user_config_dir
-
+from dirigo import io
 from dirigo.components.io import SystemConfig
 from dirigo.components.hardware import Hardware
 from dirigo.sw_interfaces import Acquisition, Processor, Display, Logger
@@ -11,209 +12,114 @@ from dirigo.sw_interfaces.display import DisplayPixelFormat
 from dirigo.plugins.displays import FrameDisplay
 
 
+_Worker = Acquisition | Processor | Display | Logger
+
+
+class PluginError(RuntimeError):
+    """Raised when a Dirigo plugin cannot be located or instantiated."""
+
+
+@lru_cache
+def _entry_points(group: str) -> dict[str, type]:
+    eps = im.entry_points(group=f"dirigo_{group}s")
+    if not eps:
+        raise PluginError(f"No entry-points found for group '{group}'.")
+    return {ep.name: ep.load() for ep in eps}
+
 
 class Dirigo:
-    """
-    Dirigo is an API and collection of interfaces for customizable image data 
-    acquisition. 
-    """
+    """High-level facade for building Dirigo acquisition pipelines."""
 
-    def __init__(self):
-        # Retrieve system_config.toml
-        config_dir = Path(user_config_dir(appauthor="Dirigo", appname="Dirigo"))
-        if not config_dir.exists():
+    def __init__(self, 
+                 system_config_path: Optional[Path] = None) -> None:
+        
+        if system_config_path is None:
+            system_config_path = io.config_path() / "system_config.toml"
+        
+        if not system_config_path.exists():
             raise FileNotFoundError(
-                f"Could not find system configuration file. "
-                f"Expected to find directory: {config_dir}"
+                f"Could not find system configuration file at {system_config_path}."
             )
-        self.system_config = SystemConfig.from_toml(config_dir / "system_config.toml")
-
+        
+        self.system_config = SystemConfig.from_toml(system_config_path)
         self.hw = Hardware(self.system_config) 
 
-    @property
-    def acquisition_types(self) -> set[str]:
-        """Returns a set of the available acquisition types."""
-        entry_pts = importlib.metadata.entry_points(group="dirigo_acquisitions")
-        return {entry_pt.name for entry_pt in entry_pts}
+    def available(self, group: str) -> set[str]:
+        """Return available plugin names for a given group."""
+        return set(_entry_points(group))
+
+    @overload
+    def make(self, group: Literal["acquisition"], name: str = ..., *,
+             spec: AcquisitionSpec | str | None = ...,
+             **kw: Any) -> Acquisition: ...
     
-    def acquisition_factory(self, 
-                            type: str, 
-                            spec: AcquisitionSpec = None, 
-                            spec_name: str = "default") -> Acquisition:
-        """Returns an initialized acquisition worker object."""
-
-        # Dynamically load plugin class
-        entry_pts = importlib.metadata.entry_points(group="dirigo_acquisitions")
-
-        # Look for the specified plugin by name
-        for entry_pt in entry_pts:
-            if entry_pt.name == type:
-                # Load and instantiate the plugin class
-                try:
-                    plugin_class: Acquisition = entry_pt.load()
-                    
-                    # Get the acquisition specification if necessary 
-                    if spec:
-                        pass
-                    else:
-                        spec = plugin_class.get_specification(spec_name)
-
-                    # Instantiate and return the acquisition worker
-                    return plugin_class(self.hw, self.system_config, spec)  
-                
-                except Exception as e:
-                    raise RuntimeError(f"Failed to load Acquisition '{type}': {e}")
-                                
-        # If the plugin was not found, raise an error
-        raise ValueError(
-            f"Acquisition '{type}' not found in entry points."
-        )
+    @overload
+    def make(self, group: Literal["processor"],  name: str = ..., *,
+             upstream: Acquisition | Processor, **kw: Any) -> Processor: ...
     
-    def processor_factory(self, 
-                          upstream_worker: Acquisition | Processor, 
-                          type: str = "raster_frame",
-                          auto_connect: bool = True,
-                          auto_start: bool = True) -> Processor:
-        
-        # Dynamically load plugin class
-        entry_pts = importlib.metadata.entry_points(group="dirigo_processors")
-
-        # Look for the specified plugin by name
-        for entry_pt in entry_pts:
-            if entry_pt.name == type:
-                # Load and instantiate the plugin class
-                try:
-                    plugin_class: Logger = entry_pt.load()
-
-                    # Instantiate and return the acquisition worker
-                    processor: Processor = plugin_class(upstream_worker)  
-                
-                    if auto_connect:
-                        upstream_worker.add_subscriber(processor)
-
-                    if auto_start:
-                        processor.start()
-
-                    return processor
-                
-                except Exception as e:
-                    raise RuntimeError(f"Failed to load Processor '{type}': {e}")
-                                
-        # If the plugin was not found, raise an error
-        raise ValueError(
-            f"Processor '{type}' not found in entry points."
-        )
+    @overload
+    def make(self, group: Literal["display"], name: str = ..., *,
+             upstream: Acquisition | Processor,
+             pixel_format: DisplayPixelFormat = DisplayPixelFormat.RGB24,
+             **kw: Any) -> Display: ...
     
-    def display_factory(self, 
-                        upstream_worker: Acquisition | Processor, 
-                        display_pixel_format: DisplayPixelFormat = DisplayPixelFormat.RGB24,
-                        auto_connect: bool = True,
-                        auto_start: bool = True) -> Display:
-        
-        display = FrameDisplay(upstream_worker, display_pixel_format)
+    @overload
+    def make(self, group: Literal["logger"], name: str = ..., *,
+             upstream: Acquisition | Processor, **kw: Any) -> Logger: ...
 
-        if auto_connect:
-            upstream_worker.add_subscriber(display)
+    def make(self, group: str, name: str, **kw: Any) -> _Worker:
+        """
+        Make pluggable pipeline elements (acquisitions, processors, loggers,
+        displays)
+        """
+        plugins = _entry_points(group)
 
-        if auto_start:
-            display.start()
+        try:
+            cls = plugins[name]
+        except KeyError:
+            raise PluginError(f"No {group} plugin named '{name}'. "
+                              f"Available: {set(plugins)}")
 
-        return display
-    
-    def logger_factory(self, 
-                       upstream_worker: Acquisition | Processor,
-                       type: str = "tiff", 
-                       auto_connect: bool = True,
-                       auto_start: bool = True) -> Logger:
-        
-        # Dynamically load plugin class
-        entry_pts = importlib.metadata.entry_points(group="dirigo_loggers")
+        # special handling per group
+        if group == "acquisition":
+            spec = kw.pop("spec", None)
+            if isinstance(spec, str) or spec is None:
+                spec = cls.get_specification(spec_name=spec or "default")
+            return cls(self.hw, self.system_config, spec, **kw)              # type: ignore[arg-type]
 
-        # Look for the specified plugin by name
-        for entry_pt in entry_pts:
-            if entry_pt.name == type:
-                # Load and instantiate the plugin class
-                try:
-                    plugin_class: Logger = entry_pt.load()
+        if group == "display" and cls is FrameDisplay:                       # built-in fast path
+            upstream = kw.pop("upstream")
+            pixel_fmt = kw.pop("pixel_format", DisplayPixelFormat.RGB24)
+            disp = FrameDisplay(upstream, pixel_fmt, **kw)
+            if kw.get("autoconnect", True):
+                upstream.add_subscriber(disp)
+            if kw.get("autostart", True):
+                disp.start()
+            return disp
 
-                    # Instantiate and return the acquisition worker
-                    logger: Logger = plugin_class(upstream_worker)  
-                
-                    if auto_connect:
-                        upstream_worker.add_subscriber(logger)
+        # processor / logger share same pattern
+        if group in ("processor", "logger"):
+            upstream = kw.pop("upstream")
+            obj = cls(upstream, **kw)
+            if kw.get("autoconnect", True):
+                upstream.add_subscriber(obj)
+            if kw.get("autostart", True):
+                obj.start()
+            return obj
 
-                    if auto_start:
-                        logger.start()
-
-                    return logger
-                
-                except Exception as e:
-                    raise RuntimeError(f"Failed to load Logger '{type}': {e}")
-                                
-        # If the plugin was not found, raise an error
-        raise ValueError(
-            f"Logger '{type}' not found in entry points."
-        )
+        raise PluginError(f"Unsupported plugin group '{group}'.")
 
     
-    def acquisition_spec(self, acquisition_type: str, spec_name: str = "default"):
-        # Dynamically load plugin class
-        entry_pts = importlib.metadata.entry_points(group="dirigo_acquisitions")
 
-        # Look for the specified plugin by name
-        for entry_pt in entry_pts:
-            if entry_pt.name == acquisition_type:
-                # Load and instantiate the plugin class
-                try:
-                    plugin_class: Acquisition = entry_pt.load()
-                    
-                    # Get the acquisition specification
-                    return plugin_class.get_specification(spec_name)
-
-                except Exception as e:
-                    raise RuntimeError(f"Failed to load Acquisition '{type}': {e}")
-                                
-        # If the plugin was not found, raise an error
-        raise ValueError(
-            f"Acquisition '{type}' not found in entry points."
-        )
-    
-
-# Run this as a test and to help debug
 if __name__ == "__main__":
 
     diri = Dirigo()
 
-    acquisition = diri.acquisition_factory('frame')
-    processor = diri.processor_factory(acquisition)
-    
-    # acquisition = diri.acquisition_factory('bidi_calibration', spec_name='bidi_calibration')
-    # logger = diri.logger_factory(processor, 'bidi_calibration')
+    frame_acq = diri.make("acquisition", "frame")
+    processor = diri.make("processor", "raster_frame", upstream=frame_acq) 
+    logger    = diri.make("logger", "tiff", upstream=processor)
 
-    # acquisition = diri.acquisition_factory(
-    #     type='frame_size_calibration', 
-    #     spec_name='frame_size_calibration'
-    # )
-    # processor = diri.processor_factory(acquisition)
-    # # processor._initial_trigger_error = None # disables trigger phase calibration
-    # # logger = diri.logger_factory(processor)
-    # # logger.frames_per_file = float('inf') 
-    # size_logger = diri.logger_factory(processor, 'frame_size_calibration')
-
-
-    # acquisition = diri.acquisition_factory('point_scan_strip')
-    # processor = diri.processor_factory(acquisition)
-    # strip_processor = diri.processor_factory(processor, 'point_scan_strip')
-    # strip_stitcher = diri.processor_factory(strip_processor, 'strip_stitcher')
-    # tile_builder = diri.processor_factory(strip_stitcher, 'tile_builder')
-    # logger = diri.logger_factory(tile_builder, 'pyramid')
-    # raw_logger = diri.logger_factory(acquisition)
-    # raw_logger.frames_per_file = float('inf') 
-
-    # display = diri.display_factory(processor)
-    # logger.frames_per_file = float('inf')    
-
-    acquisition.start()
-    acquisition.join(timeout=100.0)
+    frame_acq.start()
+    frame_acq.join(timeout=100.0)
 
     print("Acquisition complete")

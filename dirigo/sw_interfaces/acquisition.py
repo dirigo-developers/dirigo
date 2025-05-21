@@ -1,10 +1,12 @@
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Type
 from collections.abc import Mapping, Sequence
 from pathlib import Path
+import re
 
 import numpy as np
 
 from dirigo.sw_interfaces.worker import Worker, Product
+from dirigo.hw_interfaces.hw_interface import HardwareInterface
 from dirigo.components.io import load_toml, SystemConfig
 from dirigo.components.units import RangeWithUnits
 
@@ -15,8 +17,9 @@ if TYPE_CHECKING:
 
 class AcquisitionSpec:
     """Base class for an acquisition specification ('spec')."""
+
     def to_dict(self) -> dict:
-        """Return a JSON‑ready dict containing *public* instance fields."""
+        """Return a JSON-ready dict containing *public* instance fields."""
         def make_jsonable(obj):
             if obj is None or isinstance(obj, (bool, int, float, str)):
                 return obj
@@ -74,12 +77,11 @@ class Acquisition(AcquisitionWorker):
     """
     Dirigo interface for data acquisition worker thread.
     """
-    REQUIRED_RESOURCES: list[str] = None # The first object in the list should be the data capture device (digitizer, camera, etc)
-    SPEC_LOCATION: str = None
-    SPEC_OBJECT: AcquisitionSpec
+    required_resources: tuple[Type[HardwareInterface]] = tuple() # The first object in the tuple should be the data capture device (digitizer, camera, etc)
+    Spec: Type[AcquisitionSpec] = AcquisitionSpec
     
     def __init__(self, 
-                 hw: 'Hardware', 
+                 hw: "Hardware", 
                  system_config: SystemConfig, 
                  spec: AcquisitionSpec, 
                  thread_name: str = "Acquisition"):
@@ -88,25 +90,25 @@ class Acquisition(AcquisitionWorker):
         self.system_config = system_config
         self.check_resources()
         self.spec = spec
-    
-    def check_resources(self):
-        """Iterates through class attribute REQUIRED_RESOURCES to check if all 
-        resources are present.
 
-        Raises RuntimeError if any required resources are missing.
+    def check_resources(self) -> None:
         """
-        if self.REQUIRED_RESOURCES is None: # No acquisition without any resources
-            raise NotImplementedError(
-                f"Acquisition must implement 'required_resources' attribute."
-            )
-        hw_items = self.hw.__dict__.items()
-
-        for resource in self.REQUIRED_RESOURCES:
-            present = any([isinstance(v, resource) for k,v in hw_items])
-            if not present:
+        Ensure *every* required interface is present **and successfully
+        instantiated** on ``self.hw``.  Raises RuntimeError on the first
+        missing or failed device.
+        """
+        for iface in self.required_resources:
+            attr = iface.attr()                     # ask the interface itself
+            try:
+                dev = getattr(self.hw, attr)        # instantiate lazily
+            except Exception as exc:
                 raise RuntimeError(
-                    f"Required resource, {resource} is not available as a "
-                    f"resource."
+                    f"Failed to initialise required {iface.__name__}: {exc}"
+                ) from exc
+            if dev is None:
+                raise RuntimeError(
+                    f"{iface.__name__} is not configured (missing [{attr}] "
+                    "section in system_config.toml)."
                 )
             
     @classmethod
@@ -114,14 +116,14 @@ class Acquisition(AcquisitionWorker):
         """Return the associated Specification object"""
         spec_fn = spec_name + ".toml"
         spec = load_toml(cls.SPEC_LOCATION / spec_fn)
-        return cls.SPEC_OBJECT(**spec)
+        return cls.Spec(**spec)
     
     # ! Acquisition subclasses must implement a run() method.
 
     @property
     def data_acquisition_device(self):
         """Returns handle to the hardware resource actually acquiring data."""
-        acq_device = self.REQUIRED_RESOURCES[0].__name__
+        acq_device = self.required_resources[0].__name__
         if acq_device == "Digitizer":
             return self.hw.digitizer
         elif acq_device == "LineScanCamera":

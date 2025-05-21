@@ -23,7 +23,7 @@ dependencies = [
 line = "dirigo.plugins.acquisitions:LineAcquisition"
 frame = "dirigo.plugins.acquisitions:FrameAcquisition"
 stack = "dirigo.plugins.acquisitions:StackAcquisition"
-trigger_delay_calibration = "dirigo.plugins.acquisitions:BidiCalibration"
+trigger_delay_calibration = "dirigo.plugins.calibrations:TriggerDelayCalibration"
 frame_size_calibration = "dirigo.plugins.acquisitions:FrameSizeCalibration"
 frame_distortion_calibration = "dirigo.plugins.acquisitions:FrameDistortionCalibration"
 

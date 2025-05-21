@@ -12,7 +12,7 @@ from dirigo.components import units
 
 
 
-def config_dir() -> Path:
+def config_path() -> Path:
     return pd.user_config_path("Dirigo")
 
 
@@ -28,7 +28,7 @@ def load_toml(file_name: Path | str) -> dict:
 
 
 def load_scanner_calibration(
-        path: Path = config_dir() / "scanner/calibration.csv"
+        path: Path = config_path() / "scanner/calibration.csv"
         ) -> tuple:
     
     ampls, freqs, phases = np.loadtxt(
@@ -42,7 +42,7 @@ def load_scanner_calibration(
 
 def load_distortion_calibration(
         amplitude: units.Angle,
-        path: Path = config_dir() / "optics/distortion_calibration.csv"
+        path: Path = config_path() / "optics/distortion_calibration.csv"
 ):
     data = np.loadtxt(path, delimiter=',', dtype=np.float64, skiprows=1, ndmin=2)
     amplitudes = data[:,0]
@@ -56,13 +56,13 @@ def load_distortion_calibration(
 
 
 def load_gradient_calibration(
-        path: Path = user_config_path("Dirigo") / f"optics/gradient_calibration.tif"
+        path: Path = config_path() / "optics/gradient_calibration.tif"
 ):
     return tifffile.imread(path)
 
 
 def load_line_width_calibration(
-        path: Path = Path(user_config_dir('Dirigo')) / "scanner/line_width_calibration.csv",
+        path: Path = config_path() / "scanner/line_width_calibration.csv",
         fit_deg: int = 3) -> Polynomial:
     
     amplitudes, widths =  np.loadtxt(
@@ -85,7 +85,7 @@ class SystemConfig:
     camera_optics: Optional[dict] = None
     detectors: Optional[dict] = None
     digitizer: Optional[dict] = None
-    stage: Optional[dict] = None
+    stages: Optional[dict] = None
     objective_scanner: Optional[dict] = None
     encoders: Optional[dict] = None
     fast_raster_scanner: Optional[dict] = None 
@@ -102,7 +102,7 @@ class SystemConfig:
             camera_optics=toml_data.get("camera_optics"),
             detectors=toml_data.get("detectors"),
             digitizer=toml_data.get("digitizer"),
-            stage=toml_data.get("stage"),
+            stages=toml_data.get("stages"),
             objective_scanner=toml_data.get("objective_scanner"),
             encoders=toml_data.get("encoders"),
             fast_raster_scanner=toml_data.get("fast_raster_scanner"),

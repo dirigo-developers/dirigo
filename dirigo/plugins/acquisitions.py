@@ -2,7 +2,7 @@ from pathlib import Path
 import threading
 import math
 import time
-from typing import Optional
+from typing import Optional, Type
 from functools import cached_property
 from dataclasses import dataclass, asdict
 
@@ -16,15 +16,13 @@ from dirigo.hw_interfaces.scanner import (
     FastRasterScanner, SlowRasterScanner, GalvoScanner, ResonantScanner,
     ObjectiveZScanner
 )
-from dirigo.sw_interfaces.acquisition import (
-    AcquisitionSpec, Acquisition, AcquisitionProduct
-)
-
+from dirigo.sw_interfaces.acquisition import Acquisition, AcquisitionProduct
+    
 
 TWO_PI = 2 * math.pi 
 
 
-class SampleAcquisitionSpec(AcquisitionSpec):
+class SampleAcquisitionSpec(Acquisition.Spec):
     def __init__(
             self,
             digitizer_profile: str = "default",
@@ -64,21 +62,20 @@ class SampleAcquisitionSpec(AcquisitionSpec):
         self.buffers_per_acquisition = buffers_per_acquisition
 
         self.buffers_allocated = buffers_allocated
-    
 
+    
 class SampleAcquisition(Acquisition):
     """
     Fundamental Acquisition type for Digitizer. Acquires a number of digitizer 
     samples at some rate. Should be independent of any spatial semantics.
     """
-    REQUIRED_RESOURCES = [Digitizer,]
-    SPEC_LOCATION = Path(user_config_dir("Dirigo")) / "acquisition/sample"
-    SPEC_OBJECT = SampleAcquisitionSpec
+    required_resources = (Digitizer,)
+    Spec: Type[SampleAcquisitionSpec] = SampleAcquisitionSpec
 
     def __init__(self, hw, system_config, spec):
         super().__init__(hw, system_config, spec) # sets up thread, inbox, stores hw, checks resources
         self.spec: SampleAcquisitionSpec # to refine type hints    
-        self.active = threading.Event()
+        self.active = threading.Event()  # to indicate data acquisition occuring
 
         self.hw.digitizer.load_profile(profile_name=self.spec.digitizer_profile)
     
@@ -197,6 +194,7 @@ class LineAcquisitionSpec(SampleAcquisitionSpec):
         """
         return round(self.line_width / self.pixel_size)
 
+
 @dataclass
 class LineAcquisitionRuntimeInfo:
     """
@@ -229,15 +227,15 @@ class LineAcquisitionRuntimeInfo:
 
 
 class LineAcquisition(SampleAcquisition):
-    REQUIRED_RESOURCES = [Digitizer, DetectorSet, FastRasterScanner]
+    required_resources = (Digitizer, DetectorSet, FastRasterScanner)
     SPEC_LOCATION = Path(user_config_dir("Dirigo")) / "acquisition/line"
-    SPEC_OBJECT = LineAcquisitionSpec
+    Spec: Type[LineAcquisitionSpec] = LineAcquisitionSpec
     
-    def __init__(self, hw, system_config, spec: LineAcquisitionSpec):
+    def __init__(self, hw, system_config, spec):
         """Initialize a line acquisition worker."""
         # Tip: since this method runs on main thread, limit to HW init tasks that will return fast, prepend slower tasks to run method
         super().__init__(hw, system_config, spec) # sets up thread, inbox, stores hw, checks resources
-        self.spec: LineAcquisitionSpec # to refine type hints        
+        self.spec: LineAcquisitionSpec # to refine type hints  
 
         # for brevity
         scanner = self.hw.fast_raster_scanner
@@ -433,6 +431,7 @@ class LineAcquisition(SampleAcquisition):
 
 
 class FrameAcquisitionSpec(LineAcquisitionSpec):
+    """Specifications for frame series acquisition"""
     MAX_PIXEL_HEIGHT_ADJUSTMENT = 0.01
     def __init__(self, 
                  frame_height: str, 
@@ -482,13 +481,13 @@ class FrameAcquisitionSpec(LineAcquisitionSpec):
 
 
 class FrameAcquisition(LineAcquisition):
-    REQUIRED_RESOURCES = [Digitizer, DetectorSet, FastRasterScanner, SlowRasterScanner]
+    required_resources = (Digitizer, DetectorSet, FastRasterScanner, SlowRasterScanner)
     SPEC_LOCATION = Path(user_config_dir("Dirigo")) / "acquisition/frame"
-    SPEC_OBJECT = FrameAcquisitionSpec
+    Spec: Type[FrameAcquisitionSpec] = FrameAcquisitionSpec
 
     def __init__(self, hw, system_config, spec: FrameAcquisitionSpec):
         super().__init__(hw, system_config, spec)
-        self.spec: FrameAcquisitionSpec
+        self.spec: FrameAcquisitionSpec # to refine type hints
 
         # Set up slow scanner, fast scanner is already set up in super().__init__()
         self.hw.slow_raster_scanner.amplitude = \
@@ -564,23 +563,23 @@ class StackAcquisitionSpec(FrameAcquisitionSpec):
     
 
 class StackAcquisition(Acquisition):
-    REQUIRED_RESOURCES = [Digitizer, FastRasterScanner, SlowRasterScanner, ObjectiveZScanner]
+    required_resources = (Digitizer, FastRasterScanner, SlowRasterScanner, ObjectiveZScanner)
     SPEC_LOCATION = Path(user_config_dir("Dirigo")) / "acquisition/stack"
-    SPEC_OBJECT = StackAcquisitionSpec
+    Spec: Type[StackAcquisitionSpec] = StackAcquisitionSpec
 
-    def __init__(self, hw, system_config, spec: StackAcquisitionSpec):
+    def __init__(self, hw, system_config, spec):
         super().__init__(hw, system_config, spec)
-        self.spec: StackAcquisitionSpec
+        self.spec: StackAcquisitionSpec # to refine type hints
 
         self._depths = np.arange(
-            start=spec.lower_limit,
-            stop=spec.upper_limit,
-            step=spec.depth_spacing
+            start=self.spec.lower_limit,
+            stop=self.spec.upper_limit,
+            step=self.spec.depth_spacing
         )
 
         # Set up child FrameAcquisition & subscribe to it
-        spec.buffers_per_acquisition = float('inf')
-        self._frame_acquisition = FrameAcquisition(hw, spec)
+        self.spec.buffers_per_acquisition = float('inf')
+        self._frame_acquisition = FrameAcquisition(hw, self.spec)
         self._frame_acquisition.add_subscriber(self)
 
         # Initialize object scanner
@@ -644,8 +643,6 @@ class StackAcquisition(Acquisition):
     
 
 
-
-
 class FrameSizeCalibrationSpec(FrameAcquisitionSpec):
     def __init__(self, 
                  min_ampl_frac: str | float = 0.2, 
@@ -666,13 +663,13 @@ class FrameSizeCalibrationSpec(FrameAcquisitionSpec):
 
 
 class FrameSizeCalibration(Acquisition):
-    REQUIRED_RESOURCES = [Digitizer, FastRasterScanner, SlowRasterScanner]
+    required_resources = (Digitizer, FastRasterScanner, SlowRasterScanner)
     SPEC_LOCATION = Path(user_config_dir("Dirigo")) / "acquisition/frame"
-    SPEC_OBJECT = FrameSizeCalibrationSpec
+    Spec: Type[FrameSizeCalibrationSpec] = FrameSizeCalibrationSpec
     
     def __init__(self, hw, system_config, spec: FrameSizeCalibrationSpec):
         super().__init__(hw, system_config, spec)
-        self.spec: FrameSizeCalibrationSpec
+        self.spec: FrameSizeCalibrationSpec # to refine type hints
         
         self._frame_acquisition = FrameAcquisition(self.hw, system_config, self.spec)
         self._frame_acquisition.add_subscriber(self)
@@ -759,14 +756,13 @@ class FrameDistortionCalibrationSpec(FrameAcquisitionSpec):
 
 
 class FrameDistortionCalibration(Acquisition):
-    REQUIRED_RESOURCES = [Digitizer, FastRasterScanner, SlowRasterScanner]
+    required_resources = (Digitizer, FastRasterScanner, SlowRasterScanner)
     SPEC_LOCATION = Path(user_config_dir("Dirigo")) / "acquisition/frame"
-    SPEC_OBJECT = FrameDistortionCalibrationSpec
+    Spec: Type[FrameDistortionCalibrationSpec] = FrameDistortionCalibrationSpec
 
     def __init__(self, hw, system_config, spec):
         super().__init__(hw, system_config, spec)
-
-        self.spec: FrameDistortionCalibrationSpec
+        self.spec: FrameDistortionCalibrationSpec # to refine type hints
         
         self._frame_acquisition = FrameAcquisition(self.hw, system_config, self.spec)
         self._frame_acquisition.add_subscriber(self)

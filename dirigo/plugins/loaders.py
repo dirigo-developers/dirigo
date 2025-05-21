@@ -33,7 +33,7 @@ def deserialize_float64_list(blob: bytes):
 
 
 class RawRasterFrameLoader(Loader):
-    SPEC_OBJECT = FrameAcquisitionSpec # This could be over-ridden
+    Spec = FrameAcquisitionSpec   # can be overridden
     
     def __init__(self, file_path: str | Path):
         super().__init__(file_path, thread_name="Frame loader")
@@ -55,7 +55,7 @@ class RawRasterFrameLoader(Loader):
             self.runtime_info = LineAcquisitionRuntimeInfo.from_dict(runtime_dict)
 
             spec_dict = json.loads(tags[TiffLogger.ACQUISITION_SPEC_TAG].value)
-            self.spec = self.SPEC_OBJECT(**spec_dict)
+            self.spec = self.Spec(**spec_dict)
 
             digi_dict = json.loads(tags[TiffLogger.DIGITIZER_PROFILE_TAG].value)
             self.digitizer_profile = DigitizerProfile.from_dict(digi_dict)

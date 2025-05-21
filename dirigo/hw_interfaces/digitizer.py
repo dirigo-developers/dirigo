@@ -9,6 +9,7 @@ import tomllib
 from platformdirs import user_config_dir
 
 from dirigo.components import units
+from dirigo.hw_interfaces.hw_interface import HardwareInterface
 from dirigo.sw_interfaces.acquisition import AcquisitionProduct
 
 """
@@ -643,9 +644,9 @@ class AuxillaryIO(ABC):
 
 
 
-class Digitizer(ABC):
+class Digitizer(HardwareInterface):
     """Abstract base class for digitizer hardware interface."""
-
+    attr_name = "digitizer"
     PROFILE_LOCATION = Path(user_config_dir("Dirigo")) / "digitizer"
 
     @abstractmethod

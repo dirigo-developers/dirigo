@@ -1,11 +1,14 @@
 from abc import ABC, abstractmethod
 
+from dirigo.hw_interfaces.hw_interface import HardwareInterface
 
 
-class Illuminator(ABC):
+class Illuminator(HardwareInterface):
     """
     Dirigo illuminator interface
     """
+    attr_name = "illuminator"
+    
     def __init__(self):
         pass
 

@@ -2,14 +2,17 @@ from abc import ABC, abstractmethod
 
 from dirigo.components import units
 from dirigo.hw_interfaces.stage import LinearStage # for z-scanner
+from dirigo.hw_interfaces.hw_interface import HardwareInterface
+
 
 """
 Dirigo scanner interface.
 """
 
 
-class RasterScanner(ABC):
+class RasterScanner(HardwareInterface):
     """Abstraction of a single raster scanner axis."""
+    attr_name = "raster_scanner"
     VALID_AXES = {'x', 'y'}
 
     def __init__(self, axis: str, angle_limits: dict, **kwargs):
@@ -146,14 +149,14 @@ class FastRasterScanner(RasterScanner):
     """Marker class indicating that this scanner is operated as the fast axis in
     a raster scanning system.
     """
-    pass
+    attr_name = "fast_raster_scanner"
 
 
 class SlowRasterScanner(RasterScanner):
     """Marker class indicating that this scanner is operated as the slow axis in
     a raster scanning system.
     """
-    pass
+    attr_name = "slow_raster_scanner"
 
 
 class ResonantScanner(RasterScanner):

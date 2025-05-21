@@ -3,7 +3,7 @@ from abc import ABC, abstractmethod
 import time
 
 from dirigo.components import units
-
+from dirigo.hw_interfaces.hw_interface import HardwareInterface
 
 
 @dataclass
@@ -20,10 +20,11 @@ class StageInfo:
     model: str
 
 
-class Stage(ABC):
+class Stage(HardwareInterface):
     """
     Abstract interface for a single stage. Can be linear or rotational.
     """
+    attr_name = "stage"
     VALID_AXES = {} # subclasses must overwrite with allowed axes labels e.g. 'x'
     SLEEP_INTERVAL = units.Time('1 ms')
 
@@ -214,10 +215,11 @@ class LinearStage(Stage):
         pass
 
 
-class MultiAxisStage(ABC):
+class MultiAxisStage(HardwareInterface):
     """
     Dirigo interface for an X, Y, and/or Z sample translation stage.
     """
+    attr_name = "stages"
     # TODO, device info?
 
     @property

@@ -3,9 +3,10 @@ from abc import ABC, abstractmethod
 import numpy as np
 
 from dirigo.components import units
+from dirigo.hw_interfaces.hw_interface import HardwareInterface
 
 
-class LinearEncoder(ABC):
+class LinearEncoder(HardwareInterface):
     """
     Abstraction of a linear encoder. Linear encoders can be used to either log
     stage axis position at triggered times (for post-hoc motion correction) or 
@@ -14,6 +15,7 @@ class LinearEncoder(ABC):
     method start_triggering() for linearized trigger out. If either is not 
     implemented, raises NotImplementedError.
     """
+    attr_name = "encoder"
     VALID_AXES = {'x', 'y', 'z'}
 
     def __init__(self, axis: str, **kwargs):
@@ -53,10 +55,11 @@ class LinearEncoder(ABC):
         pass
     
 
-class MultiAxisLinearEncoder(ABC):
+class MultiAxisLinearEncoder(HardwareInterface):
     """
     Dirigo interface for an X, Y, and/or Z stage position encoders.
     """
+    attr_name = "encoders" # more intuitive than typing hw.multi_axis_linear_encoder
     # TODO, device info?
 
     @property

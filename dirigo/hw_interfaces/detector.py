@@ -3,10 +3,11 @@ from collections.abc import MutableSequence
 from typing import Optional, List, TypeVar, Generic, Any
 
 from dirigo.components import units
+from dirigo.hw_interfaces.hw_interface import HardwareInterface
 
 
-
-class Detector(ABC):
+class Detector(HardwareInterface):
+    attr_name= "detector"
     """Abstract interface for a single detection channel."""
     
     @property
@@ -57,7 +58,8 @@ class Detector(ABC):
 D = TypeVar("D", bound=Detector)
 
 
-class DetectorSet(MutableSequence[D], Generic[D]):
+class DetectorSet(HardwareInterface, MutableSequence[D], Generic[D]):
+    attr_name = "detectors" # more intuitive than typing hw.detector_set[0]. etc 
     """Indexable container for Detectors."""
 
     def __init__(self, detectors: Optional[List[D]] = None) -> None:

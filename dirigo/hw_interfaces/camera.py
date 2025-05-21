@@ -3,6 +3,7 @@ from abc import ABC, abstractmethod
 from typing import Optional
 
 from dirigo.components import units
+from dirigo.hw_interfaces.hw_interface import HardwareInterface
 
 
 class CameraConnectionType(Enum):
@@ -11,7 +12,9 @@ class CameraConnectionType(Enum):
     USB         = 2
 
 
-class FrameGrabber(ABC):
+class FrameGrabber(HardwareInterface):
+    attr_name = "frame_grabber"
+
     def __init__(self):
         pass
 
@@ -81,7 +84,8 @@ class FrameGrabber(ABC):
         pass
 
 
-class Camera(ABC):
+class Camera(HardwareInterface):
+    attr_name = "camera"
     def __init__(self, frame_grabber: Optional[FrameGrabber], 
                  pixel_size: str, **kwargs):
         self._frame_grabber = frame_grabber 
@@ -158,6 +162,7 @@ class Camera(ABC):
 
 
 class LineScanCamera(Camera):
+    attr_name = "line_scan_camera"
     VALID_AXES = {'x', 'y'}
 
     def __init__(self, axis: str, **kwargs):

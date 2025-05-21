@@ -1,4 +1,5 @@
-import importlib.metadata
+from functools import cached_property
+import importlib.metadata as im
 from typing import Optional
 
 from dirigo.components.io import SystemConfig
@@ -18,100 +19,109 @@ class Hardware:
     Loads hardware specified in system_config.toml and holds references to the 
     components.
     """
-    # Note: the point of this class is to hold several 
-    # hardware references, not to implement functionality
-    def __init__(self, default_config: SystemConfig):
-        if default_config.laser_scanning_optics is not None:
-            self.laser_scanning_optics = LaserScanningOptics(
-                **default_config.laser_scanning_optics
-            )
-        else:
-            self.laser_scanning_optics = None
+    def __init__(self, system_config: SystemConfig) -> None:
+        self._cfg = system_config
+
+    # --- helper ---
+    def _load(self, group: str, type_name: str, **kw):
+        try:
+            cls = im.entry_points(group=group)[type_name.lower()].load()
+            return cls(**kw)
+        except KeyError as e:
+            raise ValueError(f"No plugin '{type_name}' in entry-point group "
+                             f"'{group}'.") from e
         
-        if default_config.camera_optics is not None:
-            self.camera_optics = CameraOptics(**default_config.camera_optics)
-        else:
-            self.camera_optics = None
+    # --- hardward devices (lazy loading) ---
+    @cached_property
+    def digitizer(self) -> Digitizer | None:
+        cfg = self._cfg.digitizer
+        return None if cfg is None else self._load(
+            "dirigo_digitizers", cfg["type"], **cfg)
+    
+    @cached_property
+    def fast_raster_scanner(self) -> FastRasterScanner | None:
+        cfg = self._cfg.fast_raster_scanner
+        return None if cfg is None else self._load(
+            "dirigo_scanners", cfg["type"], **cfg)
 
-        self.digitizer: Digitizer = self._try_instantiate(
-            group="dirigo_digitizers",
-            config=default_config.digitizer
-        )
+    @cached_property
+    def slow_raster_scanner(self) -> SlowRasterScanner | None:
+        cfg = self._cfg.slow_raster_scanner
+        return None if cfg is None else self._load(
+            "dirigo_scanners", cfg["type"],
+            fast_scanner=self.fast_raster_scanner, **cfg)
+    
+    @cached_property
+    def objective_z_scanner(self) -> ObjectiveZScanner | None:
+        cfg = self._cfg.objective_scanner
+        return None if cfg is None else self._load(
+            "dirigo_scanners", cfg["type"], **cfg)
 
-        self.stage: MultiAxisStage = self._try_instantiate(
-            group="dirigo_stages",
-            config=default_config.stage
-        )
+    @cached_property
+    def stages(self) -> MultiAxisStage | None:
+        cfg = self._cfg.stages
+        return None if cfg is None else self._load(
+            "dirigo_stages", cfg["type"], **cfg)
+    
+    @cached_property
+    def encoders(self) -> MultiAxisLinearEncoder | None:
+        cfg = self._cfg.encoders
+        return None if cfg is None else self._load(
+            "dirigo_encoders", cfg["type"], **cfg)
 
-        # motorized objective is considered a 'scanner' because it move the beam 
-        # through the sample, as opposed to moving the sample (stage).
-        self.objective_scanner: ObjectiveZScanner = self._try_instantiate(
-            group="dirigo_scanners", 
-            config=default_config.objective_scanner
-        )
+    @cached_property
+    def detectors(self) -> Optional[DetectorSet[Detector]]:
+        """Instantiate all detectors listed in the system-config file.
 
-        self.encoders: MultiAxisLinearEncoder = self._try_instantiate(
-            group="dirigo_encoders",
-            config=default_config.encoders
-        )
-
-        self.fast_raster_scanner: FastRasterScanner = self._try_instantiate(
-            group="dirigo_scanners",
-            config=default_config.fast_raster_scanner
-        )
-
-        self.slow_raster_scanner: SlowRasterScanner = self._try_instantiate(
-            group="dirigo_scanners",
-            config=default_config.slow_raster_scanner,
-            extra_args={"fast_scanner": self.fast_raster_scanner}
-        )
-
-        if default_config.detectors is not None:
-            self.detectors: DetectorSet[Detector] = DetectorSet()
-            for _, detector_config in default_config.detectors.items():
-                detector = self._try_instantiate(
-                    group="dirigo_detectors",
-                    config=detector_config,
-                    extra_args={"fast_scanner": self.fast_raster_scanner}
-                )
-                self.detectors.append(detector)
-        else:
-            self.detectors = None
-
-        self.frame_grabber: FrameGrabber = self._try_instantiate(
-            group="dirigo_frame_grabbers",
-            config=default_config.frame_grabber
-        )
-
-        # frame grabber must be instantiated before line scan camera
-        self.line_scan_camera: LineScanCamera = self._try_instantiate(
-            group="dirigo_line_scan_cameras",
-            config=default_config.line_scan_camera,
-            extra_args={"frame_grabber": self.frame_grabber}
-        )
-        
-        self.illuminator: Illuminator = self._try_instantiate(
-            group="dirigo_illuminators",
-            config=default_config.illuminator
-        )
-
-
-
-    def _try_instantiate(self, group: str, config: Optional[dict], extra_args=None):
-        if config is None:
+        Returns
+        -------
+        DetectorSet | None
+            • A DetectorSet (possibly empty) if a [detectors] table exists  
+            • None if the system-config omits the section entirely
+        """
+        cfg = self._cfg.detectors                         # a *table* or None
+        if cfg is None:
             return None
-        
-        if extra_args is None:
-            extra_args = {}
 
-        entry_pts = importlib.metadata.entry_points(group=group)
-        for entry_point in entry_pts:
-            if entry_point.name.lower() == config['type'].lower():
-                # Dynamically load and return the plugin class
-                ConcreteClass = entry_point.load()
-                return ConcreteClass(**{**config, **extra_args})
-            
-        raise ValueError(f"No {group} plugin found for: {config['type']}")
+        dset = DetectorSet()
+        for key, det_cfg in cfg.items():                  # preserves order in TOML
+            det = self._load("dirigo_detectors",
+                             det_cfg["type"],
+                             **det_cfg,
+                             fast_scanner=self.fast_raster_scanner)
+            dset.append(det)
+
+        return dset
+
+    @cached_property
+    def frame_grabber(self) -> FrameGrabber | None:
+        cfg = self._cfg.frame_grabber
+        return None if cfg is None else self._load(
+            "dirigo_frame_grabbers", cfg["type"], **cfg)
+    
+    @cached_property
+    def line_scan_camera(self) -> LineScanCamera | None:
+        cfg = self._cfg.line_scan_camera
+        return None if cfg is None else self._load(
+            "dirigo_line_scan_cameras", cfg["type"], 
+            frame_grabber=self.frame_grabber, **cfg)
+    
+    @cached_property
+    def illuminator(self) -> Illuminator | None:
+        cfg = self._cfg.illuminator
+        return None if cfg is None else self._load(
+            "dirigo_illuminators", cfg["type"], **cfg)
+
+    @cached_property
+    def laser_scanning_optics(self) -> LaserScanningOptics | None:
+        cfg = self._cfg.laser_scanning_optics
+        return LaserScanningOptics(**cfg) if cfg else None
+
+    @cached_property
+    def camera_optics(self) -> CameraOptics | None:
+        cfg = self._cfg.camera_optics
+        return CameraOptics(**cfg) if cfg else None
+        
     
     @property
     def nchannels_enabled(self) -> int:
