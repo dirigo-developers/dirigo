@@ -53,7 +53,7 @@ class Hardware:
     
     @cached_property
     def objective_z_scanner(self) -> ObjectiveZScanner | None:
-        cfg = self._cfg.objective_scanner
+        cfg = self._cfg.objective_z_scanner
         return None if cfg is None else self._load(
             "dirigo_scanners", cfg["type"], **cfg)
 
@@ -122,20 +122,19 @@ class Hardware:
         cfg = self._cfg.camera_optics
         return CameraOptics(**cfg) if cfg else None
         
-    
+    # --- conveniences ---
     @property
     def nchannels_enabled(self) -> int:
         """
         Returns the number channels currently enabled on the primary data 
         acquisition device.
         """
-        # TODO is this a good strategy? Are other devices multichannel?
-        if hasattr(self, 'digitizer'):
+        if self._cfg.digitizer:
             return sum([channel.enabled for channel in self.digitizer.channels])
-        elif hasattr(self, 'camera'):
+        elif self._cfg.line_scan_camera:
             return 1 # monochrome only for now, but RGB cameras should be 3-channel
         else:
-            return 0 # or raise error?
+            return None
         
     @property
     def nchannels_present(self) -> int:
@@ -143,11 +142,10 @@ class Hardware:
         Returns the number channels present on the primary data acquisition 
         device.
         """
-        # TODO is this a good strategy? Are other devices multichannel?
-        if hasattr(self, 'digitizer'):
+        if self._cfg.digitizer:
             return len(self.digitizer.channels)
-        elif hasattr(self, 'camera'):
+        elif self._cfg.line_scan_camera:
             return 1 # monochrome only for now, but RGB cameras should be 3-channel
         else:
-            return 0 # or raise error?
+            return None
         

@@ -86,7 +86,7 @@ class SystemConfig:
     detectors: Optional[dict] = None
     digitizer: Optional[dict] = None
     stages: Optional[dict] = None
-    objective_scanner: Optional[dict] = None
+    objective_z_scanner: Optional[dict] = None
     encoders: Optional[dict] = None
     fast_raster_scanner: Optional[dict] = None 
     slow_raster_scanner: Optional[dict] = None
@@ -103,7 +103,7 @@ class SystemConfig:
             detectors=toml_data.get("detectors"),
             digitizer=toml_data.get("digitizer"),
             stages=toml_data.get("stages"),
-            objective_scanner=toml_data.get("objective_scanner"),
+            objective_z_scanner=toml_data.get("objective_z_scanner"),
             encoders=toml_data.get("encoders"),
             fast_raster_scanner=toml_data.get("fast_raster_scanner"),
             slow_raster_scanner=toml_data.get("slow_raster_scanner"),

@@ -5,7 +5,8 @@ import numpy as np
 from platformdirs import user_documents_path
 
 from dirigo.sw_interfaces.worker import Worker
-from dirigo.sw_interfaces import Acquisition, Processor
+from dirigo.sw_interfaces.acquisition import Acquisition, AcquisitionProduct 
+from dirigo.sw_interfaces.processor import Processor, ProcessorProduct
 
 
 
@@ -42,4 +43,7 @@ class Logger(Worker):
     def save_data(self, data: np.ndarray):
         """Save an increment of data"""
         pass
+
+    def _receive_product(self, block = True, timeout = None) -> AcquisitionProduct | ProcessorProduct:
+        return super()._receive_product(block, timeout)
 

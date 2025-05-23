@@ -6,7 +6,7 @@ import numpy as np
 
 from dirigo.components import units 
 from dirigo.sw_interfaces.worker import Worker, Product
-from dirigo.sw_interfaces.acquisition import Acquisition, Loader
+from dirigo.sw_interfaces.acquisition import Acquisition, AcquisitionProduct, Loader
 
 
 
@@ -38,6 +38,8 @@ class Processor(Worker):
     """
     Dirigo interface for data processing worker thread.
     """
+    Product = ProcessorProduct
+
     def __init__(self, upstream: Acquisition | Self):
         """Stores the acquisition and spec in private attributes"""
         super().__init__("Processor")
@@ -58,8 +60,13 @@ class Processor(Worker):
             )
             self._product_pool.put(aq_buf)
 
-    def get_free_product(self) -> ProcessorProduct:
-        return self._product_pool.get()
+    def _get_free_product(self) -> ProcessorProduct:
+        """Gets an available ProcessorProduct from the product pool."""
+        return super()._get_free_product()
+    
+    def _receive_product(self, block = True, timeout = None) -> AcquisitionProduct | ProcessorProduct:
+        """Receive incoming product from the _inbox. """
+        return super()._receive_product(block, timeout)
 
     @property
     @abstractmethod # Not sure this is absolutely needed for every subclass of this.
@@ -70,3 +77,4 @@ class Processor(Worker):
         May be higher than the native bit depth of the data capture device.
         """
         pass
+

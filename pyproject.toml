@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "dirigo"
-version = "0.1.0"
+version = "0.2.0"
 description = "Dirigo is a collection of interfaces for customizable image data acquisition"
 authors = [
     {name = "T. D. Weber", email = "tweber@mit.edu"}
@@ -20,9 +20,11 @@ dependencies = [
 ]
 
 [project.entry-points."dirigo_acquisitions"]
-line = "dirigo.plugins.acquisitions:LineAcquisition"
-frame = "dirigo.plugins.acquisitions:FrameAcquisition"
-stack = "dirigo.plugins.acquisitions:StackAcquisition"
+raster_line = "dirigo.plugins.acquisitions:LineAcquisition"
+raster_frame = "dirigo.plugins.acquisitions:FrameAcquisition"
+raster_stack = "dirigo.plugins.acquisitions:StackAcquisition"
+
+# calibrations
 trigger_delay_calibration = "dirigo.plugins.calibrations:TriggerDelayCalibration"
 frame_size_calibration = "dirigo.plugins.acquisitions:FrameSizeCalibration"
 frame_distortion_calibration = "dirigo.plugins.acquisitions:FrameDistortionCalibration"
@@ -30,9 +32,14 @@ frame_distortion_calibration = "dirigo.plugins.acquisitions:FrameDistortionCalib
 [project.entry-points."dirigo_processors"]
 raster_frame = "dirigo.plugins.processors:RasterFrameProcessor"
 
+[project.entry-points."dirigo_displays"] # e.g. display processors
+frame = "dirigo.plugins.displays:FrameDisplay"
+
 [project.entry-points."dirigo_loggers"]
 tiff = "dirigo.plugins.loggers:TiffLogger"
-bidi_calibration = "dirigo.plugins.loggers:BidiCalibrationLogger"
+
+# special calibration loggers
+trigger_delay_calibration = "dirigo.plugins.calibrations:TriggerDelayCalibrationLogger"
 frame_size_calibration = "dirigo.plugins.loggers:FrameSizeCalibrationLogger"
 frame_distortion_calibration = "dirigo.plugins.loggers:FrameDistortionCalibrationLogger"
 

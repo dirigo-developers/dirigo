@@ -10,6 +10,7 @@ from scipy import fft
 from platformdirs import user_config_dir
 
 from dirigo.components import units
+from dirigo.sw_interfaces.worker import EndOfStream
 from dirigo.sw_interfaces.processor import Processor, ProcessorProduct
 from dirigo.sw_interfaces import Logger
 from dirigo.sw_interfaces.acquisition import Acquisition, AcquisitionProduct
@@ -87,15 +88,11 @@ class TiffLogger(Logger):
     def run(self):
         try:
             while True:
-                product = self.inbox.get(block=True)
-                product: AcquisitionProduct | ProcessorProduct 
-
-                if product is None: # Check for sentinel None
-                    self.publish(None) # pass sentinel
-                    return # thread ends
-                
-                with product:
+                with self._receive_product() as product:
                     self.save_data(product)
+
+        except EndOfStream:
+            self._publish(None)
 
         finally:
             self._close_and_write_metadata()
@@ -228,60 +225,6 @@ class TiffLogger(Logger):
         ]
 
 
-class BidiCalibrationLogger(Logger):
-    """Logs bidirecetional phase at amplitudes."""
-    def __init__(self, upstream: Processor):
-        super().__init__(upstream)
-
-        self._amplitudes = []
-        self._frequencies = []
-        self._phases = []
-        
-    def run(self):
-        try:
-            while True:
-                product: ProcessorProduct = self.inbox.get(block=True)
-                if product is None: return # Check for sentinel None
-
-                with product:
-                    self._amplitudes.append(
-                        self._acq.hw.fast_raster_scanner.amplitude
-                    )
-                    self._frequencies.append(product.frequency)
-                    self._phases.append(product.phase)
-                    
-        finally:
-            self.publish(None) # pass sentinel
-            self.save_data()
-
-    def save_data(self):
-        amplitudes = np.unique(self._amplitudes)
-        frequencies = []
-        phases = []
-        for ampl in amplitudes:
-            matching_f = []
-            matching_p = []
-            for a, f, p in zip(self._amplitudes, self._frequencies, self._phases):
-                if a == ampl:
-                    matching_f.append(f)
-                    matching_p.append(p)
-
-            frequencies.append(np.median(matching_f))
-            phases.append(np.median(matching_p))
-
-        # stack into a 2-column array
-        data = np.column_stack([amplitudes, frequencies, phases])
-
-        # write with a header comment for units
-        np.savetxt(
-            Path(user_config_dir('Dirigo')) / "scanner/calibration.csv",
-            data,
-            delimiter=',',
-            header='amplitude (rad),frequency (Hz),phase (rad)',
-            comments=''    # prevent numpy from prefixing "#" on header lines
-        )
-
-
 class FrameSizeCalibrationLogger(Logger):
     """Logs apparent translation."""
     UPSAMPLE       = 5          # global phase‑corr up‑sampling
@@ -296,7 +239,7 @@ class FrameSizeCalibrationLogger(Logger):
         try:
             while True:
                 # Get reference frame
-                product: ProcessorProduct = self.inbox.get()
+                product: ProcessorProduct = self._inbox.get()
                 if product is None: # Check for sentinel None
                     break 
                 with product:
@@ -304,7 +247,7 @@ class FrameSizeCalibrationLogger(Logger):
                     self._positions.append(product.positions)
 
         finally:
-            self.publish(None) # pass sentinel
+            self._publish(None) # pass sentinel
             self.save_data()
 
     def save_data(self):
@@ -374,7 +317,7 @@ class FrameDistortionCalibrationLogger(Logger):
         self._frames, self._positions = [], [] # collect measurement frames/pos
         try:
             while True:
-                product: ProcessorProduct = self.inbox.get()
+                product: ProcessorProduct = self._inbox.get()
                 if product is None: # Check for sentinel None
                     break 
                 with product:
@@ -382,7 +325,7 @@ class FrameDistortionCalibrationLogger(Logger):
                     self._positions.append(product.positions)
 
         finally:
-            self.publish(None) # pass sentinel
+            self._publish(None) # pass sentinel
             self.save_data()
 
     def save_data(self):

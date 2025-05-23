@@ -78,7 +78,9 @@ class Acquisition(AcquisitionWorker):
     Dirigo interface for data acquisition worker thread.
     """
     required_resources: tuple[Type[HardwareInterface]] = tuple() # The first object in the tuple should be the data capture device (digitizer, camera, etc)
+    optional_resources: tuple[Type[HardwareInterface]] = tuple()
     Spec: Type[AcquisitionSpec] = AcquisitionSpec
+    Product = AcquisitionProduct
     
     def __init__(self, 
                  hw: "Hardware", 
@@ -93,9 +95,8 @@ class Acquisition(AcquisitionWorker):
 
     def check_resources(self) -> None:
         """
-        Ensure *every* required interface is present **and successfully
-        instantiated** on ``self.hw``.  Raises RuntimeError on the first
-        missing or failed device.
+        Check whether required_resources are all present and instantiated. Also
+        attempts to instantiate optional_resources 
         """
         for iface in self.required_resources:
             attr = iface.attr()                     # ask the interface itself
@@ -110,6 +111,18 @@ class Acquisition(AcquisitionWorker):
                     f"{iface.__name__} is not configured (missing [{attr}] "
                     "section in system_config.toml)."
                 )
+            
+        for iface in self.optional_resources:
+            attr = iface.attr()
+            try:
+                dev = getattr(self.hw, attr)             # instantiate if configured
+                # if the device is not in system_config.toml, then dev will be None (will not raise error)
+            except Exception as exc:
+                raise RuntimeError(
+                    f"{self.__class__.__name__}: failed to initialise optional "
+                    f"{iface.__name__}: {exc}"
+                ) from exc
+
             
     @classmethod
     def get_specification(cls, spec_name: str = "default") -> AcquisitionSpec:

@@ -86,8 +86,8 @@ class RawRasterFrameLoader(Loader):
                     frame.positions = self._positions[self.frames_read]
 
                     print(f"publishing frame {self.frames_read}")
-                    self.publish(frame)
+                    self._publish(frame)
 
                     self.frames_read += 1
         finally:
-            self.publish(None) # sentinel coding finished
+            self._publish(None) # sentinel coding finished

@@ -4,6 +4,10 @@ import queue
 
 
 
+class EndOfStream(Exception):
+    """Raised by _receive_product when upstream is closed or the worker is stopping."""
+    pass
+
 
 class Product:
     """
@@ -17,7 +21,8 @@ class Product:
         self._lock = threading.Lock()
 
     def _add_consumers(self, n: int):
-        """Called once by Worker.publish just before the publish (fan-out)."""
+        """Add n consumer references. Called once by Worker.publish just before 
+        the publish (fan-out)."""
         self._remaining += n
         if self._remaining < 1:
             self._pool.put(self)
@@ -50,14 +55,14 @@ class Worker(threading.Thread, ABC):
         self._stop_event = threading.Event()  # Event to signal thread termination
 
         # Publisher-subscriber objects
-        self.inbox = queue.Queue()
+        self._inbox = queue.Queue()
         self._subscribers: list['Worker'] = []
 
         # Pool for re-usable product objects
         self._product_pool = queue.Queue()
 
     @abstractmethod
-    def run():
+    def run(self):
         pass
 
     def stop(self, blocking: bool = False):
@@ -76,18 +81,41 @@ class Worker(threading.Thread, ABC):
         """Remove reference to a subscriber."""
         self._subscribers.remove(subscriber)
 
-    def publish(self, obj: Product | None):
+    def _publish(self, obj: Product | None):
         """Fan out obj to all subscribers. """
         if obj is None: # sentinel for work finished
             for s in self._subscribers:
-                s.inbox.put(None)
+                s._inbox.put(None)
             return
         else:
             if not isinstance(obj, Product):
-                raise ValueError("Can only publish subclasses of RefCounted.")
+                raise ValueError("Can only publish subclasses of Product.")
             
         obj._add_consumers(len(self._subscribers))
 
         for subscriber in self._subscribers:
-            subscriber.inbox.put(obj) # "Thrilled to share ..."
+            subscriber._inbox.put(obj) # "Thrilled to share ..."
+
+    def _get_free_product(self) -> Product:
+        return self._product_pool.get()
+
+    def _receive_product(self,
+              block: bool = True,
+              timeout: float | None = None
+              ) -> Product | None:
+        """Wrapper around inbox.get()."""
+
+        if self._stop_event.is_set():
+            raise EndOfStream
+
+        product = self._inbox.get(block=block, timeout=timeout)
+        
+        if product is None:
+            raise EndOfStream
+
+        if not isinstance(product, Product):
+            raise TypeError(f"{self.name}: expected Product, got {type(product)!r}")
+
+        return product
+
 

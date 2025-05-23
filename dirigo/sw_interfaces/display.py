@@ -7,7 +7,8 @@ from numba import njit, types
 
 from dirigo.components.units import IntRange
 from dirigo.sw_interfaces.worker import Worker, Product
-from dirigo.sw_interfaces import Acquisition, Processor
+from dirigo.sw_interfaces.acquisition import Acquisition, AcquisitionProduct
+from dirigo.sw_interfaces.processor import Processor, ProcessorProduct
 
 
 
@@ -236,5 +237,8 @@ class Display(Worker):
             )
             self._product_pool.put(prod)
 
-    def get_free_product(self) -> DisplayProduct:
-        return self._product_pool.get()
+    def _get_free_product(self) -> DisplayProduct:
+        return super()._get_free_product()
+    
+    def _receive_product(self, block = True, timeout = None) -> AcquisitionProduct | ProcessorProduct:
+        return super()._receive_product(block, timeout)

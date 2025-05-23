@@ -16,6 +16,7 @@ from dirigo.hw_interfaces.scanner import (
     FastRasterScanner, SlowRasterScanner, GalvoScanner, ResonantScanner,
     ObjectiveZScanner
 )
+from dirigo.hw_interfaces.stage import MultiAxisStage
 from dirigo.sw_interfaces.acquisition import Acquisition, AcquisitionProduct
     
 
@@ -228,6 +229,7 @@ class LineAcquisitionRuntimeInfo:
 
 class LineAcquisition(SampleAcquisition):
     required_resources = (Digitizer, DetectorSet, FastRasterScanner)
+    optional_resources = (MultiAxisStage, ObjectiveZScanner)
     SPEC_LOCATION = Path(user_config_dir("Dirigo")) / "acquisition/line"
     Spec: Type[LineAcquisitionSpec] = LineAcquisitionSpec
     
@@ -330,12 +332,12 @@ class LineAcquisition(SampleAcquisition):
                 acq_product = self.get_free_product()
                 digi.acquire.get_next_completed_buffer(acq_product)
 
-                if self.hw.stage or self.hw.objective_scanner:
+                if self.hw.stages or self.hw.objective_z_scanner:
                     t0 = time.perf_counter()
                     acq_product.positions = self.read_positions()
                     t1 = time.perf_counter()
 
-                self.publish(acq_product)
+                self._publish(acq_product)
 
                 print(f"Acquired {digi.acquire.buffers_acquired} of {self.spec.buffers_per_acquisition} "
                       f"Reading stage positions took: {1000*(t1-t0):.3f} ms")
@@ -362,18 +364,18 @@ class LineAcquisition(SampleAcquisition):
             pass
 
         # Put None into queue to signal to subscribers that we are finished
-        self.publish(None)
+        self._publish(None)
 
     def read_positions(self):
         """Subclasses can override this method to provide position readout from
         stages or linear position encoders."""
         positions = []
-        if self.hw.stage:
-            positions.append(self.hw.stage.x.position)
-            positions.append(self.hw.stage.y.position)
+        if self.hw.stages:
+            positions.append(self.hw.stages.x.position)
+            positions.append(self.hw.stages.y.position)
 
-        if self.hw.objective_scanner:
-            positions.append(self.hw.objective_scanner.position)
+        if self.hw.objective_z_scanner:
+            positions.append(self.hw.objective_z_scanner.position)
         
         return tuple(positions) if len(positions) else None
 
@@ -482,6 +484,7 @@ class FrameAcquisitionSpec(LineAcquisitionSpec):
 
 class FrameAcquisition(LineAcquisition):
     required_resources = (Digitizer, DetectorSet, FastRasterScanner, SlowRasterScanner)
+    optional_resources = (MultiAxisStage, ObjectiveZScanner)
     SPEC_LOCATION = Path(user_config_dir("Dirigo")) / "acquisition/frame"
     Spec: Type[FrameAcquisitionSpec] = FrameAcquisitionSpec
 
@@ -564,6 +567,7 @@ class StackAcquisitionSpec(FrameAcquisitionSpec):
 
 class StackAcquisition(Acquisition):
     required_resources = (Digitizer, FastRasterScanner, SlowRasterScanner, ObjectiveZScanner)
+    optional_resources = (MultiAxisStage,)
     SPEC_LOCATION = Path(user_config_dir("Dirigo")) / "acquisition/stack"
     Spec: Type[StackAcquisitionSpec] = StackAcquisitionSpec
 
@@ -583,8 +587,8 @@ class StackAcquisition(Acquisition):
         self._frame_acquisition.add_subscriber(self)
 
         # Initialize object scanner
-        self.hw.objective_scanner.max_velocity = units.Velocity("300 um/s")
-        self.hw.objective_scanner.acceleration = units.Acceleration("1 mm/s^2")
+        self.hw.objective_z_scanner.max_velocity = units.Velocity("300 um/s")
+        self.hw.objective_z_scanner.acceleration = units.Acceleration("1 mm/s^2")
 
 
     def run(self):
@@ -599,9 +603,9 @@ class StackAcquisition(Acquisition):
         For galvo-galvo scanning, 
         """
         # Move to lower limit
-        z_scanner = self.hw.objective_scanner
+        z_scanner = self.hw.objective_z_scanner
         z = z_scanner.position
-        self.hw.objective_scanner.move_relative(self._depths[0])
+        self.hw.objective_z_scanner.move_relative(self._depths[0])
         
         # wait until reached start position
         while (z_scanner.position - z) - self._depths[0] > units.Position('1 um'):
@@ -614,16 +618,16 @@ class StackAcquisition(Acquisition):
             # Get sacrificial frames
             for _ in range(self.spec._sacrificial_frames_per_step):
                 # pocket the sacrificial frames (don't pass them on to subscribers)
-                if self.inbox.get(block=True) is None:
+                if self._inbox.get(block=True) is None:
                     return # runs finally: block on its way out
 
             for i in range(1, self.spec.depths_per_acquisition+1):
                 for _ in range(self.spec._saved_frames_per_step):
                     # Wait for frame data, and pass along
-                    buf: AcquisitionProduct = self.inbox.get(block=True)
+                    buf: AcquisitionProduct = self._inbox.get(block=True)
                     if buf is None:
                         return # runs finally: block on its way out
-                    self.publish(buf)
+                    self._publish(buf)
 
                     # TOOD, blank laser beam for step time (sacrificial frames)
 
@@ -634,11 +638,11 @@ class StackAcquisition(Acquisition):
                     # Wait for sacrificial frames
                     for _ in range(self.spec._sacrificial_frames_per_step):
                         # pocket the sacrificial frames (don't pass them on)
-                        if self.inbox.get(block=True) is None:
+                        if self._inbox.get(block=True) is None:
                             return # runs finally: block on its way out
         finally:
             self._frame_acquisition.stop()
-            self.publish(None) # publish the sentinel
+            self._publish(None) # publish the sentinel
             z_scanner.move_relative(-self._depths[-1])
     
 
@@ -663,7 +667,7 @@ class FrameSizeCalibrationSpec(FrameAcquisitionSpec):
 
 
 class FrameSizeCalibration(Acquisition):
-    required_resources = (Digitizer, FastRasterScanner, SlowRasterScanner)
+    required_resources = (Digitizer, FastRasterScanner, SlowRasterScanner, MultiAxisStage)
     SPEC_LOCATION = Path(user_config_dir("Dirigo")) / "acquisition/frame"
     Spec: Type[FrameSizeCalibrationSpec] = FrameSizeCalibrationSpec
     
@@ -679,9 +683,9 @@ class FrameSizeCalibration(Acquisition):
 
         fast_axis = self.system_config.fast_raster_scanner['axis']
         if fast_axis == "x":
-            self._fast_stage = self.hw.stage.x
+            self._fast_stage = self.hw.stages.x
         else:
-            self._fast_stage = self.hw.stage.y
+            self._fast_stage = self.hw.stages.y
         self._original_position = self._fast_stage.position
 
         ampl = self.hw.fast_raster_scanner.angle_limits.range
@@ -703,16 +707,16 @@ class FrameSizeCalibration(Acquisition):
 
                 # collect some sacrificial frames
                 for _ in range(4 * self.spec.sacrificial_frames):
-                    product = self.inbox.get()
+                    product = self._inbox.get()
                     if product is None: return
                     with product: 
                         pass
 
                 # Gather measurement frame
-                product = self.inbox.get()
+                product = self._inbox.get()
                 if product is None: return
                 with product: 
-                    self.publish(product)
+                    self._publish(product)
 
                 # Move 
                 line_width = self.spec.fill_fraction \
@@ -723,22 +727,22 @@ class FrameSizeCalibration(Acquisition):
 
                 # Discard frames in motion
                 for _ in range(self.spec.sacrificial_frames):
-                    product = self.inbox.get()
+                    product = self._inbox.get()
                     if product is None: return
                     with product: 
                         pass
                 
                 # Gather measurement frame
-                product = self.inbox.get()
+                product = self._inbox.get()
                 if product is None: return
                 with product: 
-                    self.publish(product)
+                    self._publish(product)
 
                 # Move back to original position
                 self._fast_stage.move_to(units.Position(self._original_position))
 
         finally:
-            self.publish(None)
+            self._publish(None)
             self._frame_acquisition.stop()
 
 
@@ -772,9 +776,9 @@ class FrameDistortionCalibration(Acquisition):
 
         fast_axis = self.system_config.fast_raster_scanner['axis']
         if fast_axis == "x":
-            self._fast_stage = self.hw.stage.x
+            self._fast_stage = self.hw.stages.x
         else:
-            self._fast_stage = self.hw.stage.y
+            self._fast_stage = self.hw.stages.y
         self._original_position = self._fast_stage.position
 
 
@@ -784,24 +788,24 @@ class FrameDistortionCalibration(Acquisition):
 
             # collect some sacrificial frames
             for _ in range(10 * self.spec.sacrificial_frames):
-                product = self.inbox.get()
+                product = self._inbox.get()
                 if product is None: return
                 with product: 
                     pass
             
             for _ in range(self.spec.n_steps):
                 # Gather frame
-                product = self.inbox.get()
+                product = self._inbox.get()
                 if product is None: return
                 with product: 
-                    self.publish(product)
+                    self._publish(product)
 
                 # Move 
                 self._fast_stage.move_to(self._fast_stage.position + self.spec.translation)
 
                 # Discard frames in motion
                 for _ in range(self.spec.sacrificial_frames):
-                    product = self.inbox.get()
+                    product = self._inbox.get()
                     if product is None: return
                     with product: 
                         pass
@@ -810,5 +814,5 @@ class FrameDistortionCalibration(Acquisition):
             self._fast_stage.move_to(self._original_position)
 
         finally:
-            self.publish(None)
+            self._publish(None)
             self._frame_acquisition.stop()

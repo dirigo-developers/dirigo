@@ -4,7 +4,6 @@ import importlib.metadata as im
 from pathlib import Path
 
 from dirigo import io
-from dirigo.components.io import SystemConfig
 from dirigo.components.hardware import Hardware
 from dirigo.sw_interfaces import Acquisition, Processor, Display, Logger
 from dirigo.sw_interfaces.acquisition import AcquisitionSpec
@@ -20,7 +19,7 @@ class PluginError(RuntimeError):
 
 
 @lru_cache
-def _entry_points(group: str) -> dict[str, type]:
+def _load_entry_points(group: str) -> dict[str, type]:
     eps = im.entry_points(group=f"dirigo_{group}s")
     if not eps:
         raise PluginError(f"No entry-points found for group '{group}'.")
@@ -41,12 +40,12 @@ class Dirigo:
                 f"Could not find system configuration file at {system_config_path}."
             )
         
-        self.system_config = SystemConfig.from_toml(system_config_path)
+        self.system_config = io.SystemConfig.from_toml(system_config_path)
         self.hw = Hardware(self.system_config) 
 
     def available(self, group: str) -> set[str]:
         """Return available plugin names for a given group."""
-        return set(_entry_points(group))
+        return set(_load_entry_points(group))
 
     @overload
     def make(self, group: Literal["acquisition"], name: str = ..., *,
@@ -72,7 +71,7 @@ class Dirigo:
         Make pluggable pipeline elements (acquisitions, processors, loggers,
         displays)
         """
-        plugins = _entry_points(group)
+        plugins = _load_entry_points(group)
 
         try:
             cls = plugins[name]
@@ -86,24 +85,25 @@ class Dirigo:
             if isinstance(spec, str) or spec is None:
                 spec = cls.get_specification(spec_name=spec or "default")
             return cls(self.hw, self.system_config, spec, **kw)              # type: ignore[arg-type]
+        
+        upstream = kw.pop("upstream")
+        autostart = kw.pop("autostart", True)
+        autoconnect = kw.pop("autoconnect", True)
 
         if group == "display" and cls is FrameDisplay:                       # built-in fast path
-            upstream = kw.pop("upstream")
             pixel_fmt = kw.pop("pixel_format", DisplayPixelFormat.RGB24)
             disp = FrameDisplay(upstream, pixel_fmt, **kw)
-            if kw.get("autoconnect", True):
+            if autoconnect:
                 upstream.add_subscriber(disp)
-            if kw.get("autostart", True):
+            if autostart:
                 disp.start()
             return disp
 
-        # processor / logger share same pattern
         if group in ("processor", "logger"):
-            upstream = kw.pop("upstream")
             obj = cls(upstream, **kw)
-            if kw.get("autoconnect", True):
+            if autoconnect:
                 upstream.add_subscriber(obj)
-            if kw.get("autostart", True):
+            if autostart:
                 obj.start()
             return obj
 
@@ -115,11 +115,12 @@ if __name__ == "__main__":
 
     diri = Dirigo()
 
-    frame_acq = diri.make("acquisition", "frame")
-    processor = diri.make("processor", "raster_frame", upstream=frame_acq) 
-    logger    = diri.make("logger", "tiff", upstream=processor)
+    acquisition = diri.make("acquisition", "raster_frame")
+    processor   = diri.make("processor", "raster_frame", upstream=acquisition)
+    display     = diri.make("display", "frame", upstream=processor)
+    logger      = diri.make("logger", "tiff", upstream=processor)
 
-    frame_acq.start()
-    frame_acq.join(timeout=100.0)
+    acquisition.start()
+    acquisition.join(timeout=100.0)
 
     print("Acquisition complete")

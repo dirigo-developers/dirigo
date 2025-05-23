@@ -8,6 +8,7 @@ from scipy import fft
 
 from dirigo.components import units
 from dirigo.components import io
+from dirigo.sw_interfaces.worker import EndOfStream
 from dirigo.sw_interfaces.processor import Processor
 from dirigo.sw_interfaces.acquisition import AcquisitionProduct
 from dirigo.plugins.acquisitions import (
@@ -182,22 +183,19 @@ class RasterFrameProcessor(Processor):
         # Pre-allocate array for processed image
         self.init_product_pool(n=4, shape=self.processed_shape, dtype=dt)
 
-        # Trigger timing
+        # Trigger timing/delay
         self._fixed_trigger_delay = runtime_info.digitizer_trigger_delay
 
         if "galvo" in system_config.fast_raster_scanner['type'].lower():
             delay = units.Time(system_config.fast_raster_scanner['input_delay'])
             self._trigger_error = delay * self._sample_clock_rate
+            
         elif "resonant" in system_config.fast_raster_scanner['type'].lower():
-            # use a calibration table
             try:
-                scanner_amplitude = runtime_info.scanner_amplitude
-                ampls, freqs, phases = io.load_scanner_calibration()
-                phase = np.interp(scanner_amplitude, ampls, phases)
-                frequency = np.interp(scanner_amplitude, ampls, freqs)
-                self._initial_trigger_error = \
-                    (phase / TWO_PI) * (digitizer_profile.sample_clock.rate / frequency)
-                #print("INITIAL TRIGGER PHASE", self._initial_trigger_error)
+                # anticipate correct phase delay from calibration table
+                self._initial_trigger_error = self.calibrated_trigger_delay(
+                    scanner_amplitude=runtime_info.scanner_amplitude
+                )
                 self._trigger_error = self._initial_trigger_error
 
             except:
@@ -225,62 +223,59 @@ class RasterFrameProcessor(Processor):
 
 
     def run(self):
-        
-        while True: # Loops until receives sentinel None
-            acq_prod: AcquisitionProduct = self.inbox.get() 
+        try:
+            while True: 
 
-            if acq_prod is None: # Check for sentinel None
-                self.publish(None) # pass along sentinel to indicate end
-                print('Exiting processing thread ')
-                return # concludes run() - this thread ends
-            
-            with acq_prod:
-                proc_product = self.get_free_product() # Request a product object
-                t0 = time.perf_counter()
+                with self._receive_product() as acq_prod:
+                    proc_product = self._get_free_product() # Check out a product from the pool
+                    t0 = time.perf_counter()
 
-                # If array of timestamps are assigned (default is None)
-                if isinstance(acq_prod.timestamps, np.ndarray):
-                    # Estimate scanner frequency from timestamps
-                    avg_trig_period = np.mean(np.diff(acq_prod.timestamps))
-                    self._fast_scanner_frequency = 1 / avg_trig_period
-                    #print("FAST SCANNER FREQ", self._fast_scanner_frequency)
+                    # If array of timestamps are assigned (default is None)
+                    if isinstance(acq_prod.timestamps, np.ndarray):
+                        # Estimate scanner frequency from timestamps
+                        avg_trig_period = np.mean(np.diff(acq_prod.timestamps))
+                        self._fast_scanner_frequency = 1 / avg_trig_period
+                        #print("FAST SCANNER FREQ", self._fast_scanner_frequency)
 
-                # Measure phase from bidi data (in uni-directional, phase is not critical)
-                if self._spec.bidirectional_scanning:
-                    trigger_phase = self.measure_phase(acq_prod.data)
-                    #print("TRIGGER SAMP", trigger_phase)
+                    # Measure phase from bidi data (in uni-directional, phase is not critical)
+                    if self._spec.bidirectional_scanning:
+                        trigger_phase = self.measure_phase(acq_prod.data)
+                        #print("TRIGGER SAMP", trigger_phase)
 
-                    # quality check
-                    if (self._initial_trigger_error is None 
-                        or abs(trigger_phase - self._initial_trigger_error) < 10): 
-                        self._trigger_error = trigger_phase
-                        
-                # Update resampling start indices--these can change a bit if the scanner frequency drifts
-                start_indices = self.calculate_start_indices(self._trigger_error) - self._fixed_trigger_delay
-                nsamples_to_sum = np.abs(np.diff(start_indices, axis=1))
-                t1 = time.perf_counter()
+                        # quality check
+                        if (self._initial_trigger_error is None 
+                            or abs(trigger_phase - self._initial_trigger_error) < 10): 
+                            self._trigger_error = trigger_phase
+                            
+                    # Update resampling start indices--these can change a bit if the scanner frequency drifts
+                    start_indices = self.calculate_start_indices(self._trigger_error) - self._fixed_trigger_delay
+                    nsamples_to_sum = np.abs(np.diff(start_indices, axis=1))
+                    t1 = time.perf_counter()
 
-                resample_kernel(
-                    raw_data=acq_prod.data, 
-                    invert_mask=self._invert_mask,
-                    offset=self.signal_offset,
-                    bit_shift=self._scaling_factor,
-                    gradient=self._gradient,
-                    resampled=proc_product.data,
-                    start_indices=start_indices, 
-                    nsamples_to_sum=nsamples_to_sum
-                )
-                proc_product.timestamps = acq_prod.timestamps
-                proc_product.positions = acq_prod.positions
-                proc_product.phase = TWO_PI * self._trigger_error \
-                    / (self._acq.digitizer_profile.sample_clock.rate * avg_trig_period)
-                proc_product.frequency = self._fast_scanner_frequency
+                    resample_kernel(
+                        raw_data=acq_prod.data, 
+                        invert_mask=self._invert_mask,
+                        offset=self.signal_offset,
+                        bit_shift=self._scaling_factor,
+                        gradient=self._gradient,
+                        resampled=proc_product.data,
+                        start_indices=start_indices, 
+                        nsamples_to_sum=nsamples_to_sum
+                    )
+                    proc_product.timestamps = acq_prod.timestamps
+                    proc_product.positions = acq_prod.positions
+                    proc_product.phase = TWO_PI * self._trigger_error \
+                        / (self._acq.digitizer_profile.sample_clock.rate * avg_trig_period)
+                    proc_product.frequency = self._fast_scanner_frequency
 
-                self.publish(proc_product) # sends off to Logger and/or Display workers
-                self._frames_processed += 1
-                t2 = time.perf_counter()
+                    self._publish(proc_product) # sends off to Logger and/or Display workers
+                    self._frames_processed += 1
+                    t2 = time.perf_counter()
 
-                #print(f"RECALC: {1000*(t1-t0):.03f} | FRAME {1000*(t2-t1):.03f} ")
+                    #print(f"RECALC: {1000*(t1-t0):.03f} | FRAME {1000*(t2-t1):.03f} ")
+
+        except EndOfStream:
+            self._publish(None) # forward sentinel
 
     @cached_property
     def _temporal_edges(self):
@@ -349,6 +344,15 @@ class RasterFrameProcessor(Processor):
             shift -= n
 
         return shift / UPSAMPLE / 2 - 1
+    
+    def calibrated_trigger_delay(self, scanner_amplitude: units.Angle) -> float:
+        ampls, freqs, phases = io.load_scanner_calibration()
+
+        phase = np.interp(scanner_amplitude, ampls, phases)
+        frequency = np.interp(scanner_amplitude, ampls, freqs)
+
+        digitizer_rate = self._acq.digitizer_profile.sample_clock.rate
+        return (phase / TWO_PI) * (digitizer_rate / frequency)
     
     @cached_property
     def _sample_clock_rate(self) -> units.SampleRate:

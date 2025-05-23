@@ -207,15 +207,15 @@ class MultiAxisLinearEncodersViaNI(MultiAxisLinearEncoder):
         query runtime hardware settings.
         """
         if self.x:
-            initial_x = hw.stage.x.position
-            #print("initial x", initial_x, "moving", hw.stage.x.moving)
+            initial_x = hw.stages.x.position
+            #print("initial x", initial_x, "moving", hw.stages.x.moving)
             self.x.start_logging(initial_x, hw.fast_raster_scanner.frequency)
         if self.y:
-            initial_y = hw.stage.y.position
-            #print("initial y", initial_y, "moving", hw.stage.y.moving)
+            initial_y = hw.stages.y.position
+            #print("initial y", initial_y, "moving", hw.stages.y.moving)
             self.y.start_logging(initial_y, hw.fast_raster_scanner.frequency)
         if self.z:
-            self.z.start_logging(hw.stage.z.position, hw.fast_raster_scanner.frequency)
+            self.z.start_logging(hw.stages.z.position, hw.fast_raster_scanner.frequency)
     
     def read_positions(self, n) -> np.ndarray:
         """Reads n samples from each of the available encoders.

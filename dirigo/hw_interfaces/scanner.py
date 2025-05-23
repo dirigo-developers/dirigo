@@ -432,4 +432,5 @@ class ObjectiveZScanner(LinearStage):
     objective scanner is to move the beam through the sample, which is the 
     Dirigo definition of a scanner.
     """
+    attr_name = "objective_z_scanner"
     VALID_AXES = {'z'}

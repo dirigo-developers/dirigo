@@ -4,8 +4,9 @@ import threading
 import numpy as np
 from numba import njit, prange, types
 
-from dirigo.sw_interfaces.processor import Processor, ProcessorProduct
-from dirigo.sw_interfaces.acquisition import Acquisition, AcquisitionProduct
+from dirigo.sw_interfaces.worker import EndOfStream
+from dirigo.sw_interfaces.processor import Processor
+from dirigo.sw_interfaces.acquisition import Acquisition
 from dirigo.sw_interfaces.display import Display, ColorVector, DisplayChannel, DisplayPixelFormat
 
 
@@ -123,76 +124,78 @@ class FrameDisplay(Display):
         
 
     def run(self):
-        while True:
-            # Get new data from inbox
-            product: AcquisitionProduct | ProcessorProduct = self.inbox.get(block=True)
+        try:
+            while True:
+                with self._receive_product() as product:
 
-            if product is None: # Check for sentinel None
-                self.publish(None) # pass sentinel
-                print('exiting display thread')
-                # Ends thread, but this object can still be used (ie to adjust 
-                # the appearance of the last acquired frame)
-                return 
-            
-            # Check whether position has changed
-            if product.positions is not None:
+                    # Check whether position has changed
+                    if product.positions is not None:
 
-                if isinstance(product.positions, np.ndarray):
-                    current_positions = product.positions[-1,:] # use final position only
-                elif isinstance(product.positions, tuple):
-                    current_positions = product.positions
+                        if isinstance(product.positions, np.ndarray):
+                            current_positions = product.positions[-1,:] # use final position only
+                        elif isinstance(product.positions, tuple):
+                            current_positions = product.positions
 
-                if (self._prev_position is not None):
+                        if (self._prev_position is not None):
 
-                    dr2 = (current_positions[0] - self._prev_position[0])**2  \
-                        + (current_positions[1] - self._prev_position[1])**2
+                            dr2 = (current_positions[0] - self._prev_position[0])**2  \
+                                + (current_positions[1] - self._prev_position[1])**2
+                            
+                            if dr2 > self._reset_average_xy_cutoff_sqr: 
+                                # if the Euclidean exceeds from last frame exceeds pixel size, then reset the rolling average index
+                                # Setting _i = 0, will cause this frame to be sliced into the ring buffer at the first position
+                                # and the averaging kernel will only average that 1 frame (effectively no averaging)
+                                # this allows reusing the _average_buffer object.
+                                self._i = 0
+
+                            elif len(current_positions) > 2: # Z axis also included
+                                dz = abs(current_positions[2] - self._prev_position[2])
+                                if dz > self._reset_average_z_cutoff:
+                                    # Similarly, reset _i if z position changes
+                                    self._i = 0
+                        
+                        self._prev_position = current_positions
                     
-                    if dr2 > self._reset_average_xy_cutoff_sqr: 
-                        # if the Euclidean exceeds from last frame exceeds pixel size, then reset the rolling average index
-                        # Setting _i = 0, will cause this frame to be sliced into the ring buffer at the first position
-                        # and the averaging kernel will only average that 1 frame (effectively no averaging)
-                        # this allows reusing the _average_buffer object.
-                        self._i = 0
-
-                    elif len(current_positions) > 2: # Z axis also included
-                        dz = abs(current_positions[2] - self._prev_position[2])
-                        if dz > self._reset_average_z_cutoff:
-                            # Similarly, reset _i if z position changes
+                    t0 = time.perf_counter()
+                    with self._average_buffer_lock:
+                        # _average_buffer is initially None and the first frame establishes height, width, etc
+                        # Averaging can also be reset or changed by setting this to None, prompting reallocation
+                        if self._average_buffer is None:
+                            frame_shape = product.data.shape
+                            ring_frame_buffer_shape = (self.n_frame_average,) + frame_shape
+                            self._average_buffer = np.zeros(
+                                shape=ring_frame_buffer_shape, 
+                                dtype=self.data_range.recommended_dtype
+                            )
+                            averaged_frame = np.zeros(
+                                shape=frame_shape,
+                                dtype=self.data_range.recommended_dtype
+                            )
                             self._i = 0
-                
-                self._prev_position = current_positions
-            
-            t0 = time.perf_counter()
-            with self._average_buffer_lock:
-                # _average_buffer is initially None and the first frame establishes height, width, etc
-                # Averaging can also be reset or changed by setting this to None, prompting reallocation
-                if self._average_buffer is None:
-                    frame_shape = product.data.shape
-                    ring_frame_buffer_shape = (self.n_frame_average,) + frame_shape
-                    self._average_buffer = np.zeros(
-                        shape=ring_frame_buffer_shape, 
-                        dtype=self.data_range.recommended_dtype
-                    )
-                    averaged_frame = np.zeros(
-                        shape=frame_shape,
-                        dtype=self.data_range.recommended_dtype
-                    )
-                    self._i = 0
 
-                self._average_buffer[self._i % self.n_frame_average] = product.data
+                        self._average_buffer[self._i % self.n_frame_average] = product.data
 
-                disp_product = self.get_free_product()
-                rolling_average_kernel(self._average_buffer, self._i, averaged_frame)
-                self._apply_display_kernel(averaged_frame, self._luts, disp_product.frame)
+                        disp_product = self._get_free_product()
+                        rolling_average_kernel(
+                            self._average_buffer, 
+                            self._i, 
+                            averaged_frame
+                        )
+                        self._apply_display_kernel(
+                            averaged_frame, 
+                            self._luts, 
+                            disp_product.frame
+                        )
 
-                self.publish(disp_product)
-                
-                self._prev_data = averaged_frame # store reference for use after thread finishes  
-                product._release()
+                        self._publish(disp_product)
+                        self._prev_data = averaged_frame # store reference for use after thread finishes  
 
-            t1 = time.perf_counter()
-            self._i += 1
-            #print(f"Channel display processing: {1000*(t1-t0):.3f}ms.")
+                    t1 = time.perf_counter()
+                    self._i += 1
+                    #print(f"Channel display processing: {1000*(t1-t0):.3f}ms.")
+
+        except EndOfStream:
+            self._publish(None) # forward sentinel
 
     def _apply_display_kernel(self, average_frame, luts, display_frame):
         additive_display_kernel(average_frame, luts, self.gamma_lut, display_frame)
@@ -246,8 +249,8 @@ class FrameDisplay(Display):
             # Don't update if no previous data exists
             return
         
-        disp_product = self.get_free_product()
+        disp_product = self._get_free_product()
         self._apply_display_kernel(self._prev_data, self._luts, disp_product.frame)
-        self.publish(disp_product)
+        self._publish(disp_product)
 
 
