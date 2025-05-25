@@ -124,6 +124,10 @@ class SampleAcquisition(Acquisition):
     @property
     def digitizer_profile(self) -> DigitizerProfile:
         return self.hw.digitizer.profile
+    
+    @classmethod
+    def get_specification(cls, spec_name = "default") -> SampleAcquisitionSpec:
+        return super().get_specification(spec_name)
 
 
 class LineAcquisitionSpec(SampleAcquisitionSpec): 
@@ -430,6 +434,10 @@ class LineAcquisition(SampleAcquisition):
             record_length = self.hw.digitizer.acquire.record_length_minimum
         
         return record_length
+    
+    @classmethod
+    def get_specification(cls, spec_name = "default") -> LineAcquisitionSpec:
+        return super().get_specification(spec_name)
 
 
 class FrameAcquisitionSpec(LineAcquisitionSpec):
@@ -527,6 +535,10 @@ class FrameAcquisition(LineAcquisition):
             self.hw.fast_raster_scanner.park()
         except NotImplementedError:
             pass # Scanners like resonant scanners can't be parked.
+
+    @classmethod
+    def get_specification(cls, spec_name = "default") -> FrameAcquisitionSpec:
+        return super().get_specification(spec_name)
         
         
 class StackAcquisitionSpec(FrameAcquisitionSpec):
@@ -645,174 +657,3 @@ class StackAcquisition(Acquisition):
             self._publish(None) # publish the sentinel
             z_scanner.move_relative(-self._depths[-1])
     
-
-
-class FrameSizeCalibrationSpec(FrameAcquisitionSpec):
-    def __init__(self, 
-                 min_ampl_frac: str | float = 0.2, 
-                 max_ampl_frac: str | float = 1.0, 
-                 n_amplitudes: int = 5,
-                 sacrificial_frames: int = 4, 
-                 translation_fraction: float = 0.2,
-                 **kwargs):
-        super().__init__(**kwargs)
-
-        self.ampl_frac_range = units.FloatRange(
-            min=float(min_ampl_frac), 
-            max=float(max_ampl_frac)
-        )
-        self.n_amplitudes = n_amplitudes
-        self.sacrificial_frames = sacrificial_frames
-        self.translation_fraction = translation_fraction
-
-
-class FrameSizeCalibration(Acquisition):
-    required_resources = (Digitizer, FastRasterScanner, SlowRasterScanner, MultiAxisStage)
-    SPEC_LOCATION = Path(user_config_dir("Dirigo")) / "acquisition/frame"
-    Spec: Type[FrameSizeCalibrationSpec] = FrameSizeCalibrationSpec
-    
-    def __init__(self, hw, system_config, spec: FrameSizeCalibrationSpec):
-        super().__init__(hw, system_config, spec)
-        self.spec: FrameSizeCalibrationSpec # to refine type hints
-        
-        self._frame_acquisition = FrameAcquisition(self.hw, system_config, self.spec)
-        self._frame_acquisition.add_subscriber(self)
-
-        self.digitizer_profile = self._frame_acquisition.digitizer_profile
-        self.runtime_info = self._frame_acquisition.runtime_info
-
-        fast_axis = self.system_config.fast_raster_scanner['axis']
-        if fast_axis == "x":
-            self._fast_stage = self.hw.stages.x
-        else:
-            self._fast_stage = self.hw.stages.y
-        self._original_position = self._fast_stage.position
-
-        ampl = self.hw.fast_raster_scanner.angle_limits.range
-        self._amplitudes = np.linspace(
-            start=spec.ampl_frac_range.min * ampl,
-            stop=spec.ampl_frac_range.max * ampl,
-            num=spec.n_amplitudes
-        )
-
-    def run(self):
-        optics = self.hw.laser_scanning_optics
-        try:
-            # Get 10x sacrificial start frames to allow warm up
-            self._frame_acquisition.start()
-            
-            for ampl in self._amplitudes:
-                # set amplitude
-                self.hw.fast_raster_scanner.amplitude = units.Angle(ampl)
-
-                # collect some sacrificial frames
-                for _ in range(4 * self.spec.sacrificial_frames):
-                    product = self._inbox.get()
-                    if product is None: return
-                    with product: 
-                        pass
-
-                # Gather measurement frame
-                product = self._inbox.get()
-                if product is None: return
-                with product: 
-                    self._publish(product)
-
-                # Move 
-                line_width = self.spec.fill_fraction \
-                    * optics.scan_angle_to_object_position(ampl)
-                self._fast_stage.move_to(self._fast_stage.position
-                    + line_width * self.spec.translation_fraction
-                )
-
-                # Discard frames in motion
-                for _ in range(self.spec.sacrificial_frames):
-                    product = self._inbox.get()
-                    if product is None: return
-                    with product: 
-                        pass
-                
-                # Gather measurement frame
-                product = self._inbox.get()
-                if product is None: return
-                with product: 
-                    self._publish(product)
-
-                # Move back to original position
-                self._fast_stage.move_to(units.Position(self._original_position))
-
-        finally:
-            self._publish(None)
-            self._frame_acquisition.stop()
-
-
-class FrameDistortionCalibrationSpec(FrameAcquisitionSpec):
-    def __init__(self, 
-                 translation: str | units.Position,
-                 sacrificial_frames: int = 5, 
-                 n_steps: int = 4,
-                 **kwargs):
-        super().__init__(**kwargs)
-
-        self.sacrificial_frames = sacrificial_frames
-        self.translation = units.Position(translation)
-        self.n_steps = n_steps
-
-
-class FrameDistortionCalibration(Acquisition):
-    required_resources = (Digitizer, FastRasterScanner, SlowRasterScanner)
-    SPEC_LOCATION = Path(user_config_dir("Dirigo")) / "acquisition/frame"
-    Spec: Type[FrameDistortionCalibrationSpec] = FrameDistortionCalibrationSpec
-
-    def __init__(self, hw, system_config, spec):
-        super().__init__(hw, system_config, spec)
-        self.spec: FrameDistortionCalibrationSpec # to refine type hints
-        
-        self._frame_acquisition = FrameAcquisition(self.hw, system_config, self.spec)
-        self._frame_acquisition.add_subscriber(self)
-
-        self.digitizer_profile = self._frame_acquisition.digitizer_profile
-        self.runtime_info = self._frame_acquisition.runtime_info
-
-        fast_axis = self.system_config.fast_raster_scanner['axis']
-        if fast_axis == "x":
-            self._fast_stage = self.hw.stages.x
-        else:
-            self._fast_stage = self.hw.stages.y
-        self._original_position = self._fast_stage.position
-
-
-    def run(self):
-        try:
-            self._frame_acquisition.start()
-
-            # collect some sacrificial frames
-            for _ in range(10 * self.spec.sacrificial_frames):
-                product = self._inbox.get()
-                if product is None: return
-                with product: 
-                    pass
-            
-            for _ in range(self.spec.n_steps):
-                # Gather frame
-                product = self._inbox.get()
-                if product is None: return
-                with product: 
-                    self._publish(product)
-
-                # Move 
-                self._fast_stage.move_to(self._fast_stage.position + self.spec.translation)
-
-                # Discard frames in motion
-                for _ in range(self.spec.sacrificial_frames):
-                    product = self._inbox.get()
-                    if product is None: return
-                    with product: 
-                        pass
-
-            # Move back to original position
-            self._fast_stage.move_to(self._original_position)
-
-        finally:
-            self._publish(None)
-            self._frame_acquisition.stop()

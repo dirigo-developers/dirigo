@@ -1,7 +1,6 @@
 from typing import TYPE_CHECKING, Type
 from collections.abc import Mapping, Sequence
 from pathlib import Path
-import re
 
 import numpy as np
 

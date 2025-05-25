@@ -1,5 +1,6 @@
 from pathlib import Path
 import json, struct
+from typing import Type
 
 import tifffile
 import numpy as np
@@ -32,10 +33,10 @@ def deserialize_float64_list(blob: bytes):
     return [stack[i].copy() for i in range(n_frames)]
 
 
-class RawRasterFrameLoader(Loader):
-    Spec = FrameAcquisitionSpec   # can be overridden
-    
-    def __init__(self, file_path: str | Path):
+class RawRasterFrameLoader(Loader):   
+    def __init__(self, 
+                 file_path: str | Path, 
+                 spec_class: Type[FrameAcquisitionSpec] = FrameAcquisitionSpec):
         super().__init__(file_path, thread_name="Frame loader")
 
         with tifffile.TiffFile(self._file_path) as tif:   
@@ -55,7 +56,7 @@ class RawRasterFrameLoader(Loader):
             self.runtime_info = LineAcquisitionRuntimeInfo.from_dict(runtime_dict)
 
             spec_dict = json.loads(tags[TiffLogger.ACQUISITION_SPEC_TAG].value)
-            self.spec = self.Spec(**spec_dict)
+            self.spec = spec_class(**spec_dict)
 
             digi_dict = json.loads(tags[TiffLogger.DIGITIZER_PROFILE_TAG].value)
             self.digitizer_profile = DigitizerProfile.from_dict(digi_dict)

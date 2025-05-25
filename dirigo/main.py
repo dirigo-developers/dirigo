@@ -86,6 +86,11 @@ class Dirigo:
                 spec = cls.get_specification(spec_name=spec or "default")
             return cls(self.hw, self.system_config, spec, **kw)              # type: ignore[arg-type]
         
+        if group == "loader":
+            # For loaders, spec information should be availabe in saved file
+            file_path = kw.pop("file_path")
+            return cls(file_path, **kw)
+        
         upstream = kw.pop("upstream")
         autostart = kw.pop("autostart", True)
         autoconnect = kw.pop("autoconnect", True)

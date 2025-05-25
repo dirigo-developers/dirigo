@@ -13,7 +13,7 @@ ampl_range.max fraction (0.0-1.0) of full scale scanner amplitude.
 """
 
 # Adjustable parameters
-N_AMPL = 100
+N_AMPL = 16
 AMPL_MIN = 0.25 # fraction of full amplitude
 AMPL_MAX = 1.0
 
@@ -21,7 +21,7 @@ AMPL_MAX = 1.0
 # Calibration script
 diri = Dirigo()
 
-# Use the default FrameAcquisition spec as basis
+# Use default FrameAcquisition spec as basis for frame size, pixel size, etc
 frame_spec = FrameAcquisition.get_specification()
 
 spec = TriggerDelayCalibration.Spec(
@@ -33,9 +33,9 @@ spec = TriggerDelayCalibration.Spec(
 name = "trigger_delay_calibration"
 acquisition = diri.make("acquisition", name, spec=spec)
 processor   = diri.make("processor", "raster_frame", upstream=acquisition)
-loggers     = diri.make("logger", name, upstream=processor)
+logger      = diri.make("logger", name, upstream=processor)
 
 acquisition.start()
 
 # wait until logger finishes
-loggers.join()
+logger.join()

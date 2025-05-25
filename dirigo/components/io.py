@@ -15,6 +15,9 @@ from dirigo.components import units
 def config_path() -> Path:
     return pd.user_config_path("Dirigo")
 
+def data_path() -> Path:
+    return pd.user_documents_path() / "Dirigo"
+
 
 def load_toml(file_name: Path | str) -> dict:
     file_name = Path(file_name)
