@@ -205,7 +205,7 @@ class RasterFrameProcessor(Processor):
         
         try:
             ampl = runtime_info.scanner_amplitude
-            self._distortion_polynomial = io.load_distortion_calibration(ampl)
+            self._distortion_polynomial = io.load_line_distortion_calibration(ampl)
         except:
             self._distortion_polynomial = Polynomial([1])
 

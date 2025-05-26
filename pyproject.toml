@@ -25,7 +25,7 @@ raster_frame = "dirigo.plugins.acquisitions:FrameAcquisition"
 raster_stack = "dirigo.plugins.acquisitions:StackAcquisition"
 # calibrations (create data for calibrations)
 trigger_delay_calibration = "dirigo.plugins.calibrations:TriggerDelayCalibration"
-line_distortion_calibration = "dirigo.plugins.calibrations:LineDistortionCalibration"
+stage_translation_calibration = "dirigo.plugins.calibrations:StageTranslationCalibration"
 
 [project.entry-points."dirigo_loaders"]
 raw_raster_frame = "dirigo.plugins.loaders:RawRasterFrameLoader"
@@ -38,10 +38,11 @@ frame = "dirigo.plugins.displays:FrameDisplay"
 
 [project.entry-points."dirigo_loggers"]
 tiff = "dirigo.plugins.loggers:TiffLogger"
-
 # special calibration loggers
 trigger_delay_calibration = "dirigo.plugins.calibrations:TriggerDelayCalibrationLogger"
 line_distortion_calibration = "dirigo.plugins.calibrations:LineDistortionCalibrationLogger"
+stage_scanner_angle_calibration = "dirigo.plugins.calibrations:StageScannerAngleCalibrationLogger"
+signal_offset_calibration = "dirigo.plugins.calibrations:SignalOffsetCalibrationLogger"
 
 [project.entry-points."dirigo_encoders"]
 linear_encoders_via_ni = "dirigo.plugins.encoders:MultiAxisLinearEncodersViaNI"

@@ -1,8 +1,6 @@
 from typing import Optional
-from pathlib import Path
 
-from dirigo.components import units
-from dirigo.components.io import load_line_width_calibration
+from dirigo.components import units, io
 
 
 """
@@ -22,13 +20,11 @@ class LaserScanningOptics:
         self._objective_focal_length = units.Position(objective_focal_length)
         self._relay_magnification = float(relay_magnification)
 
-        # load line width calibration, if fails don't use calibration
-        try:
-            self._fast_axis_calibration = load_line_width_calibration()
-        except:
-            self._fast_axis_calibration = None
+        # load line width calibration, TODO
 
-        self._slow_axis_calibration = None
+        # Load stage-scanner angle
+        self.stage_scanner_angle = io.load_stage_scanner_angle()
+        
 
     @property
     def objective_focal_length(self) -> units.Position:
@@ -63,13 +59,8 @@ class LaserScanningOptics:
 
         Specify axis ('fast', 'slow') to invoke correction factor.
         """
-        if axis == "fast" and self._fast_axis_calibration:
-            angle = self._fast_axis_calibration(float(position))
-        elif axis == "slow" and self._slow_axis_calibration:
-            angle = self._slow_axis_calibration(float(position))
-        else:
-            objective_angle = position / self.objective_focal_length
-            angle = objective_angle * self.relay_magnification
+        objective_angle = position / self.objective_focal_length
+        angle = objective_angle * self.relay_magnification
             
         return units.Angle(angle)
        

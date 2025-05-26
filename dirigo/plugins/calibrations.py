@@ -145,9 +145,7 @@ class TriggerDelayCalibrationLogger(Logger):
         )
 
 
-
-
-class LineDistortionCalibrationSpec(FrameAcquisition.Spec):
+class StageTranslationCalibrationSpec(FrameAcquisition.Spec):
     def __init__(self,
                  translation: units.Position | str,
                  ignore_frames: int = 10,
@@ -162,12 +160,17 @@ class LineDistortionCalibrationSpec(FrameAcquisition.Spec):
         self.buffers_per_acquisition = float('inf')
 
 
-class LineDistortionCalibration(Acquisition):
-    Spec: Type[LineDistortionCalibrationSpec] = LineDistortionCalibrationSpec
+class StageTranslationCalibration(Acquisition):
+    """
+    Translates the stage between capturing frames. Can be used with small 
+    translations to estimate distortion field or large displacements to estimate
+    frame size / angle relative the stage
+    """
+    Spec: Type[StageTranslationCalibrationSpec] = StageTranslationCalibrationSpec
 
     def __init__(self, hw, system_config, spec):
         super().__init__(hw, system_config, spec, thread_name="Line distortion calibration")
-        self.spec: LineDistortionCalibrationSpec
+        self.spec: StageTranslationCalibrationSpec
 
         self._frame_acquisition = FrameAcquisition(self.hw, system_config, self.spec)
         self._frame_acquisition.add_subscriber(self)
@@ -192,21 +195,21 @@ class LineDistortionCalibration(Acquisition):
                     pass
             
             for i in range(self.spec.n_steps):
-                print(f"Collecting frame {i} of {self.spec.n_steps}")
+                print(f"Collecting frame {i+1} of {self.spec.n_steps}")
 
                 # Gather frame
                 with self._receive_product() as product: 
                     self._publish(product)
-
-                # Move 
-                self._fast_stage.move_to(
-                    self._fast_stage.position + self.spec.translation
-                )
-
-                # Discard frames in motion
-                for _ in range(self.spec.ignore_frames):
-                    with self._receive_product() as product:
-                        pass
+                
+                if i < self.spec.n_steps - 1:
+                    # Move 
+                    self._fast_stage.move_to(
+                        self._fast_stage.position + self.spec.translation
+                    )
+                    # Discard frames in motion
+                    for _ in range(self.spec.ignore_frames):
+                        with self._receive_product() as product:
+                            pass
 
             # Move back to original position
             self._fast_stage.move_to(self._original_position)
@@ -221,15 +224,18 @@ class LineDistortionCalibration(Acquisition):
 
 class LineDistortionCalibrationLogger(Logger):
     """Logs apparent distortion use patches to create a local distortion field."""
-    UPSAMPLE       = 20          # global phase‑corr up‑sampling
+    UPSAMPLE_X     = 20
+    UPSAMPLE_Y     = 1
     EPS            = 1e-1
     PATCH          = 64
     STRIDE         = 8
 
     def __init__(self, upstream: Processor):
         super().__init__(upstream)
-        self._acq: LineDistortionCalibration
-        self._fn = io.config_path() / "scanner/distortion_calibration_data.csv"
+        self._acq: StageTranslationCalibration
+        self.basename = "line_distortion_calibration"
+        self.filepath = io.config_path() / "optics" / (self.basename + ".csv")
+        self.data_filepath = io.data_path() /(self.basename + "_data.csv")
 
     def run(self):
         self._frames, self._positions = [], [] # collect measurement frames/pos
@@ -259,7 +265,6 @@ class LineDistortionCalibrationLogger(Logger):
         dx_observed = np.zeros(shape=(n_x // self.STRIDE, n_comparisons))
         field_position = np.zeros(n_x // self.STRIDE)
         
-        ref_frame = self._frames[0]
         for f_idx, frame in enumerate(self._frames[1:]):
 
             for p_idx in range(n_x // self.STRIDE):
@@ -300,11 +305,11 @@ class LineDistortionCalibrationLogger(Logger):
             (field_position[:,np.newaxis], dx_true/dx_observed),
             axis=1
         )
-        np.savetxt(self._fn, data, delimiter=',',header="field position,dx_true/dx_observed")
+        np.savetxt(self.data_filepath, data, delimiter=',',header="field position,dx_true/dx_observed")
 
         # If not calibrated (would have trivial Polynomial(1)), save distortion polynomial
         if self._processor._distortion_polynomial == Polynomial([1]):
-            fn = io.config_path() / "optics/distortion_calibration.csv"
+            fn = self.filepath
             calib_data = np.array([[self._acq.runtime_info.scanner_amplitude, c0, c1, c2]])
             if fn.exists(): # add to existing calibration
                 data = np.loadtxt(fn, delimiter=',', dtype=np.float64, skiprows=1, ndmin=2)
@@ -319,7 +324,7 @@ class LineDistortionCalibrationLogger(Logger):
         n_y, n_x = ref_frame.shape
 
         xps = fft.rfft2(ref_frame, workers=-1) * np.conj(fft.rfft2(moving_frame, workers=-1))
-        s = (n_y, n_x * cls.UPSAMPLE)
+        s = (n_y * cls.UPSAMPLE_Y, n_x * cls.UPSAMPLE_X)
         corr = fft.irfft2(xps / (np.abs(xps) + cls.EPS), s, workers=-1)
         arg_max = np.argmax(corr)
         i = arg_max // corr.shape[1]
@@ -330,4 +335,73 @@ class LineDistortionCalibrationLogger(Logger):
         if j > (s[1] // 2): 
             j -= s[1]
 
-        return i / cls.UPSAMPLE, j / cls.UPSAMPLE
+        return i / cls.UPSAMPLE_Y, j / cls.UPSAMPLE_X
+    
+
+class StageScannerAngleCalibrationLogger(LineDistortionCalibrationLogger):
+    UPSAMPLE_X     = 10
+    UPSAMPLE_Y     = 10
+
+    def __init__(self, upstream: Processor):
+        super().__init__(upstream)
+        self.basename = "stage_scanner_angle"
+        self.filepath = io.config_path() / "optics" / (self.basename + ".csv")
+
+    # run() is same as LineDistortionCalibrationLogger
+
+    def save_data(self):
+        """Compare pairs of frames"""
+        ref_frame = self._frames[0]
+
+        thetas = []
+        for f_idx, frame in enumerate(self._frames[1:]):
+            i, j = self.x_corr(ref_frame, moving_frame=frame)
+
+            theta = units.Angle(np.arctan(i / j))
+            print(f"Frame pair {f_idx+1} comparison: {theta.with_unit('deg')}")
+            thetas.append(theta)
+
+            ref_frame = frame
+
+        # filter outliers
+        t_med = np.median(thetas)
+        thetas = [t for t in thetas if abs((t-t_med)/t_med) < 0.5]
+        theta_mean = np.mean(thetas, keepdims=True)
+        print(f"Average stage-scanner angle: {units.Angle(theta_mean[0]).with_unit('deg')}")
+
+        np.savetxt(
+            self.filepath, 
+            theta_mean, 
+            delimiter=',',
+            header="stage-scanner angle (rad)"
+        )
+
+
+class SignalOffsetCalibrationLogger(Logger):
+    
+    def __init__(self, upstream: Processor):
+        super().__init__(upstream)
+        self.basename = "signal_offset"
+        self.filepath = io.config_path() / "digitizer" / (self.basename + ".csv")
+
+    def run(self):
+        self._buffers = [] # collect measurement frames/pos
+        try:
+            while True:
+                with self._receive_product() as product:
+                    self._buffers.append(product.data.copy())
+
+        except EndOfStream:
+            self._publish(None) # forward sentinel
+            self.save_data()
+
+    def save_data(self):
+        
+        signal_means = []
+        for i, buffer in enumerate(self._buffers):
+            signal_mean = np.mean(buffer, axis=(0,1))
+            print(f"Buffer {i}, signal offsets: {signal_mean}")
+            signal_means.append(signal_mean)
+
+        signal_means = np.mean(
+            

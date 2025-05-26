@@ -43,10 +43,10 @@ def load_scanner_calibration(
     return ampls, freqs, phases
 
 
-def load_distortion_calibration(
+def load_line_distortion_calibration(
         amplitude: units.Angle,
-        path: Path = config_path() / "optics/distortion_calibration.csv"
-):
+        path: Path = config_path() / "optics/line_distortion_calibration.csv"
+    ):
     data = np.loadtxt(path, delimiter=',', dtype=np.float64, skiprows=1, ndmin=2)
     amplitudes = data[:,0]
     coefs = data[:,1:]
@@ -58,23 +58,21 @@ def load_distortion_calibration(
     raise RuntimeError("Could not find distortion calibration")
 
 
+def load_stage_scanner_angle(
+        path: Path = config_path() / "optics/stage_scanner_angle.csv"
+    ):
+    try:
+        data = np.loadtxt(path, delimiter=',', dtype=np.float64, skiprows=1)
+        return units.Angle(float(data))
+    except FileNotFoundError:
+        return None
+
+
 def load_gradient_calibration(
         path: Path = config_path() / "optics/gradient_calibration.tif"
-):
+    ):
     return tifffile.imread(path)
 
-
-def load_line_width_calibration(
-        path: Path = config_path() / "scanner/line_width_calibration.csv",
-        fit_deg: int = 3) -> Polynomial:
-    
-    amplitudes, widths =  np.loadtxt(
-        path,
-        delimiter=',',
-        unpack=True,
-        skiprows=1
-    )
-    return Polynomial.fit(x=widths, y=amplitudes, deg=fit_deg)
 
 
 @dataclass

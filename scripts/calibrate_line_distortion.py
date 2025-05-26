@@ -1,12 +1,52 @@
+import numpy as np
+from numpy.polynomial.polynomial import Polynomial
+import matplotlib.pyplot as plt
+
 from dirigo.main import Dirigo
 from dirigo import io
 
 from dirigo.plugins.acquisitions import FrameAcquisition
 from dirigo.plugins.calibrations import LineDistortionCalibration
 
-# Adjustable parameters
+
+# User-adjustable parameters
 TRANSLATION = "30 um"
 N_STEPS = 3
+
+# Plotting functions
+def check_calibration(file_path: str, ff: float) -> tuple:
+
+    data = np.loadtxt(file_path, delimiter=',', dtype=np.float64, skiprows=1)
+    ys = data[:,1:]
+    xs = np.tile(data[:,[0]], (1, ys.shape[1])) 
+
+    n_samples, n_replicates = ys.shape
+
+    nan_mask = np.isnan(ys)
+    pfit: Polynomial = Polynomial.fit(
+        x=xs[~nan_mask].ravel(),
+        y=ys[~nan_mask].ravel(),
+        deg=2
+    )
+    c0, c1, c2 = pfit.convert().coef
+    print(f"global fit:  y = {c2:.6g}·x² + {c1:.6g}·x + {c0:.6g}")
+
+    x_fit = np.linspace(-ff, ff, 1000)
+    y_fit = pfit(x_fit)
+
+    print(f"Fit integral: {np.sum(y_fit-1)*(x_fit[1]-x_fit[0])}")
+
+    for idx in range(n_replicates):
+        plt.plot(xs[:,idx], ys[:,idx], marker='o', ls='', label=f"replicate {idx}")
+
+    plt.plot(x_fit, y_fit, 'k--', lw=2, label="global fit")
+    plt.xlabel("sample index")
+    plt.ylabel("value")
+    plt.title("Pooled fit across all replicates")
+    plt.legend()
+    plt.tight_layout()
+    plt.grid(True)  
+    plt.show()
 
 
 # Calibration script
@@ -25,6 +65,7 @@ name = "line_distortion_calibration"
 acquisition = diri.make("acquisition", name, spec=spec)
 processor   = diri.make("processor", "raster_frame", upstream=acquisition)
 logger      = diri.make("logger", name, upstream=processor)
+# also log raw frame data so we can reprocess later to check calibration
 raw_logger  = diri.make("logger", "tiff", upstream=acquisition)
 raw_logger.basename = name
 raw_logger.frames_per_file = float('inf')
@@ -32,8 +73,11 @@ raw_logger.frames_per_file = float('inf')
 acquisition.start()
 logger.join()
 
+# Check initial distortion
+check_calibration(logger.data_filepath, ff=spec.fill_fraction)
 
-# Check quality of correction using saved data
+
+# Check quality of correction using saved data and reprocessing frames
 loader    = diri.make("loader", "raw_raster_frame", 
                       file_path=io.data_path() / f"{name}.tif",
                       spec_class=LineDistortionCalibration.Spec)
@@ -43,3 +87,4 @@ logger    = diri.make("logger", name, upstream=processor)
 loader.start()
 logger.join()
 
+check_calibration(logger.data_filepath, ff=spec.fill_fraction)
