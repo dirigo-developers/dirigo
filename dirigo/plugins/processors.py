@@ -19,8 +19,6 @@ from dirigo.plugins.acquisitions import (
 
 TWO_PI = 2 * np.pi
 
-# issues:
-# need to support uint16 and uint8 (rarer)
 sigs = [
     #buffer_data    invert_mask  offset    bit_shift  gradient     resampled (out)  start_indices  nsamples_to_sum
     (int16[:,:,:],  int16[:],    int16[:], int32,     float32[:],  int16[:,:,:],    int32[:,:],    int32[:,:]),
@@ -178,7 +176,7 @@ class RasterFrameProcessor(Processor):
             [c.inverted for c in digitizer_profile.channels], dtype=dt
         ) + 1
 
-        self.signal_offset = np.zeros_like(self._invert_mask)
+        self.signal_offset = np.round(io.load_signal_offset()).astype(np.int16)
 
         # Pre-allocate array for processed image
         self.init_product_pool(n=4, shape=self.processed_shape, dtype=dt)

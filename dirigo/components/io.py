@@ -68,6 +68,15 @@ def load_stage_scanner_angle(
         return None
 
 
+def load_signal_offset(
+        path: Path = config_path() / "digitizer/signal_offset.csv"
+):
+    try:
+        return np.loadtxt(path, delimiter=',', dtype=np.float64, skiprows=1)
+    except FileNotFoundError:
+        return None
+
+
 def load_gradient_calibration(
         path: Path = config_path() / "optics/gradient_calibration.tif"
     ):

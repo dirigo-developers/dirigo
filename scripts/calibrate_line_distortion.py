@@ -6,7 +6,7 @@ from dirigo.main import Dirigo
 from dirigo import io
 
 from dirigo.plugins.acquisitions import FrameAcquisition
-from dirigo.plugins.calibrations import LineDistortionCalibration
+from dirigo.plugins.calibrations import StageTranslationCalibration
 
 
 # User-adjustable parameters
@@ -55,14 +55,14 @@ diri = Dirigo()
 # Use default FrameAcquisition spec as basis for frame size, pixel size, etc
 frame_spec = FrameAcquisition.get_specification()
 
-spec = LineDistortionCalibration.Spec(
+spec = StageTranslationCalibration.Spec(
     translation=TRANSLATION,
     n_steps=N_STEPS,
     **frame_spec.to_dict()
 )
 
 name = "line_distortion_calibration"
-acquisition = diri.make("acquisition", name, spec=spec)
+acquisition = diri.make("acquisition", "stage_translation_calibration", spec=spec)
 processor   = diri.make("processor", "raster_frame", upstream=acquisition)
 logger      = diri.make("logger", name, upstream=processor)
 # also log raw frame data so we can reprocess later to check calibration
@@ -70,8 +70,8 @@ raw_logger  = diri.make("logger", "tiff", upstream=acquisition)
 raw_logger.basename = name
 raw_logger.frames_per_file = float('inf')
 
-acquisition.start()
-logger.join()
+# acquisition.start()
+# logger.join()
 
 # Check initial distortion
 check_calibration(logger.data_filepath, ff=spec.fill_fraction)
@@ -80,7 +80,7 @@ check_calibration(logger.data_filepath, ff=spec.fill_fraction)
 # Check quality of correction using saved data and reprocessing frames
 loader    = diri.make("loader", "raw_raster_frame", 
                       file_path=io.data_path() / f"{name}.tif",
-                      spec_class=LineDistortionCalibration.Spec)
+                      spec_class=StageTranslationCalibration.Spec)
 processor = diri.make("processor", "raster_frame", upstream=loader)
 logger    = diri.make("logger", name, upstream=processor)
 

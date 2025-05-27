@@ -404,4 +404,62 @@ class SignalOffsetCalibrationLogger(Logger):
             signal_means.append(signal_mean)
 
         signal_means = np.mean(
-            
+            np.stack(signal_means),
+            axis=0,
+            keepdims=True
+        )
+
+        hdr = str()
+        for i in range(signal_means.size):
+            hdr += f"Channel {i},"
+
+        np.savetxt(
+            self.filepath, 
+            signal_means,
+            delimiter=',',
+            header=hdr[:-1]
+        )
+
+
+
+class LineGradientCalibrationLogger(Logger):
+    
+    def __init__(self, upstream: Processor):
+        super().__init__(upstream)
+        self.basename = "line_gradient"
+        self.filepath = io.config_path() / "optics" / (self.basename + ".csv")
+
+    def run(self):
+        self._frames = [] # collect measurement frames/pos
+        try:
+            while True:
+                with self._receive_product() as product:
+                    self._frames.append(product.data.copy())
+
+        except EndOfStream:
+            self._publish(None) # forward sentinel
+            self.save_data()
+
+    def save_data(self):
+        
+        line_averages = []
+        for i, buffer in enumerate(self._frames):
+            line_average = np.mean(buffer, axis=(0))
+            line_averages.append(line_average)
+
+        line_averages = np.mean(
+            np.stack(line_averages),
+            axis=0,
+            keepdims=True
+        )
+
+        hdr = str()
+        for i in range(signal_means.size):
+            hdr += f"Channel {i},"
+
+        np.savetxt(
+            self.filepath, 
+            signal_means,
+            delimiter=',',
+            header=hdr[:-1]
+        )

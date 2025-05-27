@@ -43,6 +43,7 @@ trigger_delay_calibration = "dirigo.plugins.calibrations:TriggerDelayCalibration
 line_distortion_calibration = "dirigo.plugins.calibrations:LineDistortionCalibrationLogger"
 stage_scanner_angle_calibration = "dirigo.plugins.calibrations:StageScannerAngleCalibrationLogger"
 signal_offset_calibration = "dirigo.plugins.calibrations:SignalOffsetCalibrationLogger"
+line_gradient_calibration = "dirigo.plugins.calibrations:LineGradientCalibrationLogger"
 
 [project.entry-points."dirigo_encoders"]
 linear_encoders_via_ni = "dirigo.plugins.encoders:MultiAxisLinearEncodersViaNI"
