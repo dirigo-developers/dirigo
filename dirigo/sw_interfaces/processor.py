@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Optional, cast
 from abc import abstractmethod
 from typing import Self
 
@@ -42,7 +42,7 @@ class Processor(Worker):
 
     def __init__(self, upstream: Acquisition | Self):
         """Stores the acquisition and spec in private attributes"""
-        super().__init__("Processor")
+        super().__init__(name="Processor")
         if isinstance(upstream, (Acquisition, Loader)):
             self._acq = upstream
             self._spec = upstream.spec
@@ -52,7 +52,7 @@ class Processor(Worker):
         else:
             raise ValueError("Upstream worker passed to Processor must be either an Acquisition or another Processor")
     
-    def init_product_pool(self, n, shape, dtype):
+    def init_product_pool(self, n, shape, dtype) -> None:
         for _ in range(n):
             aq_buf = ProcessorProduct(
                 pool=self._product_pool,
@@ -62,11 +62,11 @@ class Processor(Worker):
 
     def _get_free_product(self) -> ProcessorProduct:
         """Gets an available ProcessorProduct from the product pool."""
-        return super()._get_free_product()
+        return super()._get_free_product() # type: ignore
     
-    def _receive_product(self, block = True, timeout = None) -> AcquisitionProduct | ProcessorProduct:
-        """Receive incoming product from the _inbox. """
-        return super()._receive_product(block, timeout)
+    # def _receive_product(self, block = True, timeout = None) -> AcquisitionProduct | ProcessorProduct:
+    #     """Receive incoming product from the _inbox. """
+    #     return cast(ProcessorProduct, super()._receive_product(block, timeout))
 
     @property
     @abstractmethod # Not sure this is absolutely needed for every subclass of this.

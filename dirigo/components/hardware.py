@@ -81,7 +81,7 @@ class Hardware:
         return self._load("dirigo_encoders", cfg["type"], **cfg)
 
     @cached_property
-    def detectors(self) -> Optional[DetectorSet[Detector]]:
+    def detectors(self) -> DetectorSet[Detector]:
         """Instantiate all detectors listed in the system-config file.
 
         Returns

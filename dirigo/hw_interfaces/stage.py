@@ -175,6 +175,16 @@ class LinearStage(Stage):
         wait until finished moving (blocking=True).
         """
         pass
+
+    # @abstractmethod 
+    # def move_relative(self, distance: units.Position, blocking: bool = False):
+    #     """
+    #     Initiate from current position some distance. 
+
+    #     Choose whether to return immediately (blocking=False, default) or to
+    #     wait until finished moving (blocking=True).
+    #     """
+    #     pass
     
     @property
     @abstractmethod

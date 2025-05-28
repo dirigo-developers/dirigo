@@ -207,10 +207,6 @@ class Display(Worker):
         pass
 
     @property
-    def pixel_size(self):
-        return self._acquisition.spec.pixel_size
-        
-    @property
     def data_range(self) -> IntRange:
         """ 
         The incoming data range from either the processor or the acquisition worker. 
@@ -238,7 +234,7 @@ class Display(Worker):
             self._product_pool.put(prod)
 
     def _get_free_product(self) -> DisplayProduct:
-        return super()._get_free_product()
+        return super()._get_free_product() # type: ignore
     
-    def _receive_product(self, block = True, timeout = None) -> AcquisitionProduct | ProcessorProduct:
-        return super()._receive_product(block, timeout)
+    # def _receive_product(self, block = True, timeout = None) -> AcquisitionProduct | ProcessorProduct:
+    #     return super()._receive_product(block, timeout)

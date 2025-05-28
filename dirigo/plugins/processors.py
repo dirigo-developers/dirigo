@@ -8,7 +8,7 @@ from scipy import fft
 
 from dirigo.components import units
 from dirigo.components import io
-from dirigo.sw_interfaces.worker import EndOfStream
+from dirigo.sw_interfaces.worker import EndOfStream, Product
 from dirigo.sw_interfaces.processor import Processor
 from dirigo.sw_interfaces.acquisition import AcquisitionProduct
 from dirigo.plugins.acquisitions import (
@@ -162,9 +162,9 @@ class RasterFrameProcessor(Processor):
         self._bits_precision = bits_precision
         
         # Compute shape
-        try:
+        if isinstance(self._spec, FrameAcquisitionSpec):
             n_lines = self._spec.lines_per_frame
-        except:
+        else:
             # fall-back when processing LineAcquisition as a frame
             n_lines = self._spec.lines_per_buffer
         
@@ -219,6 +219,8 @@ class RasterFrameProcessor(Processor):
 
         self._frames_processed = 0
 
+    def _receive_product(self, block: bool = True, timeout: float | None = None) -> AcquisitionProduct:
+        return super()._receive_product(block, timeout) # type: ignore
 
     def run(self):
         try:
@@ -264,7 +266,7 @@ class RasterFrameProcessor(Processor):
                     proc_product.positions = acq_prod.positions
                     proc_product.phase = TWO_PI * self._trigger_error \
                         / (self._acq.digitizer_profile.sample_clock.rate * avg_trig_period)
-                    proc_product.frequency = self._fast_scanner_frequency
+                    proc_product.frequency = float(self._fast_scanner_frequency)
 
                     self._publish(proc_product) # sends off to Logger and/or Display workers
                     self._frames_processed += 1
@@ -317,7 +319,7 @@ class RasterFrameProcessor(Processor):
         starts_exact = self._temporal_edges * self.samples_per_period + trigger_phase
         return np.ceil(starts_exact - 1e-6).astype(np.int32) 
     
-    def measure_phase(self, data: np.ndarray) -> units.Angle:
+    def measure_phase(self, data: np.ndarray) -> float:
         """
         Measure the apparent fast raster scanner trigger phase, in samples
         (for bidirectional scanning).
@@ -326,7 +328,7 @@ class RasterFrameProcessor(Processor):
         
         data_window = crop_bidi_data(
             data=data, 
-            lines_per_frame=self._spec.lines_per_frame, 
+            lines_per_frame=self.processed_shape[0], 
             trigger_delay=self._fixed_trigger_delay, 
             samples_per_period=self.samples_per_period
         )                                         # TODO preallocate data_window
@@ -337,7 +339,7 @@ class RasterFrameProcessor(Processor):
         n = data_window.shape[1] * UPSAMPLE
         corr = np.abs(fft.irfft(xps, n))
 
-        shift = np.argmax(corr)
+        shift = float(np.argmax(corr))
         if shift > (n//2):  # Handle wrap-around for negative shifts
             shift -= n
 

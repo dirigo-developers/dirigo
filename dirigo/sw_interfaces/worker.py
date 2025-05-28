@@ -43,7 +43,7 @@ class Product:
 
 
 class Worker(threading.Thread, ABC):
-    def __init__(self, name: str = None):
+    def __init__(self, name: str = "Worker"):
         """
         Sets up a worker Thread object with internal publisher-subscriber model.
 
@@ -64,6 +64,9 @@ class Worker(threading.Thread, ABC):
     @abstractmethod
     def run(self):
         pass
+    
+    # often define init_product_pool (for workers creating something: 
+    # Acquisition, Processor, Display, but not Logger)
 
     def stop(self, blocking: bool = False):
         """Sets a flag to stop thread."""
@@ -103,7 +106,11 @@ class Worker(threading.Thread, ABC):
               block: bool = True,
               timeout: float | None = None
               ) -> Product:
-        """Wrapper around inbox.get()."""
+        """
+        Wrapper around inbox.get().
+        
+        Raises EndOfStream error if sentinel None is received.
+        """
 
         if self._stop_event.is_set():
             raise EndOfStream

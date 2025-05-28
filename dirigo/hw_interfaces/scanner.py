@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+from typing import Literal, Any, get_args
 
 from dirigo.components import units
 from dirigo.hw_interfaces.stage import LinearStage # for z-scanner
@@ -8,6 +9,9 @@ from dirigo.hw_interfaces.hw_interface import HardwareInterface
 """
 Dirigo scanner interface.
 """
+
+WaveformNames = Literal['sinusoid', 'asymmetric triangle', 'sawtooth']
+                # e.g.   resonant    galvanometer           polygon
 
 
 class RasterScanner(HardwareInterface):
@@ -137,7 +141,7 @@ class RasterScanner(HardwareInterface):
         """
 
     @abstractmethod
-    def start(self):
+    def start(self, **kw: Any):
         pass
 
     @abstractmethod
@@ -179,7 +183,7 @@ class ResonantScanner(RasterScanner):
     def __init__(self, 
                  frequency: str, 
                  frequency_error: float,
-                 response_time: str = None,
+                 response_time: str = "0 s",
                  **kwargs):
         super().__init__(**kwargs)
         
@@ -191,11 +195,12 @@ class ResonantScanner(RasterScanner):
         self._frequency = frequency_obj
         self.frequency_error = frequency_error
 
-        if response_time:
-            response_time = units.Time(response_time)
-            if not (0 < response_time < units.Time('1 s')):
-                raise ValueError("Response time outside of range 0-1 seconds.")
-            self.response_time = response_time
+        r_time = units.Time(response_time)
+        if not (0 <= r_time < units.Time('1 s')):
+            raise ValueError(
+                "Response time outside of valid range 0-1 seconds, got {r_time}."
+            )
+        self.response_time = r_time
     
     @property
     def frequency(self) -> units.Frequency:
@@ -233,7 +238,7 @@ class ResonantScanner(RasterScanner):
     
     def center(self):
         """Sets resonant amplitude to 0."""
-        self.amplitude = 0 # or turn off?
+        self.amplitude = units.Angle(0) # or turn off?
 
 
 class PolygonScanner(RasterScanner):
@@ -283,31 +288,32 @@ class PolygonScanner(RasterScanner):
         )
     
     def park(self):
-        raise NotImplemented("Polygon scanners can not be parked.")
+        raise NotImplementedError("Polygon scanners can not be parked.")
     
     def center(self):
-        raise NotImplemented("Polygon scanners can not be centered.")
+        raise NotImplementedError("Polygon scanners can not be centered.")
 
 
 class GalvoScanner(RasterScanner):
     """Abstraction for galvanometer mirror servo scanner."""
     INPUT_DELAY_RANGE = units.TimeRange(min=0, max=units.Time('0.5 ms'))
 
-    def __init__(self, input_delay: units.Time = None, **kwargs):
+    def __init__(self, 
+                 input_delay: str = "0 s", 
+                 **kwargs):
         super().__init__(**kwargs)
 
         self._amplitude = units.Angle(0.0)
         self._offset = units.Angle(0.0)
         
-        self._frequency = None
-        self._waveform = None
-        self._duty_cycle = None
+        self._frequency = units.Frequency(0)
+        self._waveform: WaveformNames = "asymmetric triangle"
+        self._duty_cycle: float = 0.0
 
-        if input_delay:
-            input_delay = units.Time(input_delay)
-            if not self.INPUT_DELAY_RANGE.within_range(input_delay):
-                raise ValueError(f"input_delay out of valid range ({self.INPUT_DELAY_RANGE})")
-            self.input_delay = input_delay
+        delay = units.Time(input_delay)
+        if not self.INPUT_DELAY_RANGE.within_range(delay):
+            raise ValueError(f"input_delay out of valid range ({self.INPUT_DELAY_RANGE})")
+        self.input_delay = delay
 
     @property
     def amplitude(self) -> units.Angle:
@@ -380,12 +386,12 @@ class GalvoScanner(RasterScanner):
         self._frequency = freq
 
     @property
-    def waveform(self) -> str: 
+    def waveform(self) -> WaveformNames: 
         return self._waveform
     
     @waveform.setter
-    def waveform(self, new_waveform: str):
-        if new_waveform not in {'sinusoid', 'sawtooth', 'triangle', 'asymmetric triangle'}:
+    def waveform(self, new_waveform: WaveformNames):
+        if new_waveform not in get_args(WaveformNames):
             raise ValueError(
                 f"Error setting waveform type. Valid options 'sinusoid', "
                 f"'sawtooth', 'triangle'. Recieved {new_waveform}"

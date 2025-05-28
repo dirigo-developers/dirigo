@@ -43,7 +43,7 @@ alazar = "dirigo_alazar:AlazarDigitizer"
 @dataclass(frozen=True, slots=True)
 class SampleClockProfile:
     source: str
-    rate: Optional[units.SampleRate] = None
+    rate: units.SampleRate
     edge: Literal["Rising", "Falling"] = "Rising"
 
     @classmethod
@@ -89,7 +89,7 @@ class ChannelProfile:
 class TriggerProfile:
     source: str
     slope: str
-    level: int
+    level: units.Voltage
     external_range: str
     external_coupling: Literal["AC", "DC"]
 
@@ -98,7 +98,7 @@ class TriggerProfile:
         return cls(
             source = d["source"],
             slope = d["slope"],
-            level = d["level"],
+            level = units.Voltage(d["level"]),
             external_range = d["external_range"],
             external_coupling = d["external_coupling"]
         )
@@ -206,13 +206,13 @@ class Channel(ABC):
 
     @property
     @abstractmethod
-    def impedance(self) -> str:
-        """Input impedance setting (e.g., "50 Ohm", "1 MOhm")."""
+    def impedance(self) -> units.Resistance:
+        """Input impedance setting (e.g., 50 Ohm, 1 MOhm)."""
         pass
 
     @impedance.setter
     @abstractmethod
-    def impedance(self, impedance: str):
+    def impedance(self, impedance: units.Resistance):
         """Set the input impedance.
         
         Must match one of the options provided by `impedance_options`.
@@ -221,23 +221,19 @@ class Channel(ABC):
 
     @property
     @abstractmethod
-    def impedance_options(self) -> set[str]:
+    def impedance_options(self) -> set[units.Resistance]:
         """Set of available input impedance modes."""
         pass
 
     @property
     @abstractmethod
-    def range(self) -> str: 
+    def range(self) -> units.VoltageRange: 
         """Voltage range for the channel."""
-        # should this return a dirigo.VoltageRange object?
-        # arguments against: 
-        # - digitizer input ranges are discrete options (if available at all)
-        # - can't think of need for easier numerical access to range limits
         pass
 
     @range.setter
     @abstractmethod
-    def range(self, range: str):
+    def range(self, range: units.VoltageRange):
         """Set the voltage range for the channel.
         
         Must match one of the options provided by `range_options`.
@@ -246,15 +242,11 @@ class Channel(ABC):
 
     @property
     @abstractmethod
-    def range_options(self) -> set[str]:
+    def range_options(self) -> set[units.VoltageRange]:
         """Set of available voltage ranges."""
         pass
     
     
-
-    
-
-
 class SampleClock(ABC):
     """Abstract base class for configuring the digitizer's sampling clock."""
 
@@ -542,7 +534,8 @@ class Acquire(ABC):
     @property
     @abstractmethod
     def buffers_per_acquisition(self) -> int:
-        """Total number of buffers to acquire during an acquisition.
+        """Total number of buffers to acquire during an acquisition. -1 codes
+        for unlimited.
         
         Must be greater than or equal to `buffers_allocated`.
         """
@@ -673,7 +666,6 @@ class Digitizer(HardwareInterface):
 
         for channel, channel_profile in zip(self.channels, self.profile.channels):
             channel.enabled = channel_profile.enabled
-            # Digitizer doesn't need to know whether a channel is inverted
             channel.coupling = channel_profile.coupling
             channel.impedance = channel_profile.impedance
             channel.range = channel_profile.range

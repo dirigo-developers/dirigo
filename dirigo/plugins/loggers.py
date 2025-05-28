@@ -1,6 +1,6 @@
 from functools import cached_property
 import json, struct
-from typing import Sequence
+from typing import Sequence, overload
 
 import tifffile
 import numpy as np
@@ -70,13 +70,16 @@ class TiffLogger(Logger):
 
         self.frames_per_file = int(max_frames_per_file) 
         
-        self._fn = None
+        #self._fn = None
         self._writer = None # generated upon attempt to save first frame
         self.frames_saved = 0
         self.files_saved = 0
 
         self._timestamps = [] # accumulate as frames arrive from acquistion or processor
         self._positions = []
+
+    def _receive_product(self) ->  AcquisitionProduct | ProcessorProduct:
+        return super()._receive_product(self) # type: ignore
          
     def run(self):
         try:
@@ -137,15 +140,15 @@ class TiffLogger(Logger):
             # write metadata by overwrite (appends data to end of file and
             # 'patches' the offset to point at this new location, tifffile does
             # all of this automatically)
-            with tifffile.TiffFile(self._fn, mode='r+b') as tif:
+            with tifffile.TiffFile(self._fn, mode='r+b') as tif: # type: ignore
 
                 if len(self._timestamps) > 0:
                     data = serialize_float64_list(self._timestamps)
-                    tif.pages[0].tags[self.TIMESTAMPS_TAG].overwrite(data)
+                    tif.pages[0].tags[self.TIMESTAMPS_TAG].overwrite(data) # type: ignore
 
                 if len(self._positions) > 0:
                     data = serialize_float64_list(self._positions)
-                    tif.pages[0].tags[self.POSITIONS_TAG].overwrite(data)
+                    tif.pages[0].tags[self.POSITIONS_TAG].overwrite(data) # type: ignore
 
             # Clear accumulants
             self._timestamps = []

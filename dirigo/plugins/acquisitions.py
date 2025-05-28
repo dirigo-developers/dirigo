@@ -10,6 +10,8 @@ from platformdirs import user_config_dir
 import numpy as np
 
 from dirigo.components import units
+from dirigo.sw_interfaces.worker import EndOfStream, Product
+from dirigo.sw_interfaces.acquisition import Acquisition, AcquisitionProduct
 from dirigo.hw_interfaces.detector import DetectorSet, Detector
 from dirigo.hw_interfaces.digitizer import Digitizer, DigitizerProfile
 from dirigo.hw_interfaces.scanner import (
@@ -17,7 +19,6 @@ from dirigo.hw_interfaces.scanner import (
     ObjectiveZScanner
 )
 from dirigo.hw_interfaces.stage import MultiAxisStage
-from dirigo.sw_interfaces.acquisition import Acquisition, AcquisitionProduct
     
 
 TWO_PI = 2 * math.pi 
@@ -26,11 +27,11 @@ TWO_PI = 2 * math.pi
 class SampleAcquisitionSpec(Acquisition.Spec):
     def __init__(
             self,
+            record_length: int,
             digitizer_profile: str = "default",
             timestamps_enabled: bool = True,
             pre_trigger_samples: int = 0,
-            trigger_delay_samples: Optional[int] = None,
-            record_length: Optional[int] = None,
+            trigger_delay_samples: int = 0,
             records_per_buffer: int = 8,
             buffers_per_acquisition: int | float = float('inf'),
             buffers_allocated: int = 4,
@@ -47,20 +48,15 @@ class SampleAcquisitionSpec(Acquisition.Spec):
         except AttributeError:
             pass # if subclass implements a property for `records_per_buffer`
 
-        # Validate buffers per acquisition
-        if isinstance(buffers_per_acquisition, str):
-            if buffers_per_acquisition.lower() == "inf":
-                buffers_per_acquisition = float('inf')
-            else:
-                raise ValueError(f"`buffers_per_acquisition` must be a finite int or a string, 'inf'.")
-        elif isinstance(buffers_per_acquisition, float):
-            if not buffers_per_acquisition == float('inf'):
-                raise ValueError(f"`buffers_per_acquisition` must be integer or string 'inf'.")
-        elif not isinstance(buffers_per_acquisition, int):
-            raise ValueError(f"`buffers_per_acquisition` must be integer or string, 'inf'.")
-        elif buffers_per_acquisition < 1:
-            raise ValueError(f"`buffers_per_acquisition` must be > 0.")
-        self.buffers_per_acquisition = buffers_per_acquisition
+        # Validate buffers per acquisition (-1 means infinite)
+        if (buffers_per_acquisition == float('inf') 
+            or buffers_per_acquisition in ["inf", "infinity"]
+            or buffers_per_acquisition == -1):
+            self.buffers_per_acquisition = -1
+        elif isinstance(buffers_per_acquisition, int) and buffers_per_acquisition > 0:
+            self.buffers_per_acquisition = buffers_per_acquisition
+        else:
+            raise ValueError(f"`buffers_per_acquisition` must be 'inf' or > 0.")
 
         self.buffers_allocated = buffers_allocated
 
@@ -70,7 +66,8 @@ class SampleAcquisition(Acquisition):
     Fundamental Acquisition type for Digitizer. Acquires a number of digitizer 
     samples at some rate. Should be independent of any spatial semantics.
     """
-    required_resources = (Digitizer,)
+    required_resources = [Digitizer,]
+    spec_location = Path() # TODO
     Spec: Type[SampleAcquisitionSpec] = SampleAcquisitionSpec
 
     def __init__(self, hw, system_config, spec):
@@ -127,7 +124,7 @@ class SampleAcquisition(Acquisition):
     
     @classmethod
     def get_specification(cls, spec_name = "default") -> SampleAcquisitionSpec:
-        return super().get_specification(spec_name)
+        return super().get_specification(spec_name) # type: ignore
 
 
 class LineAcquisitionSpec(SampleAcquisitionSpec): 
@@ -137,24 +134,25 @@ class LineAcquisitionSpec(SampleAcquisitionSpec):
         self,
         line_width: str,
         pixel_size: str,
+        lines_per_buffer: int,
         bidirectional_scanning: bool = False,
-        pixel_time: str = None, # e.g. "1 μs"
+        pixel_time: Optional[str] = None, # e.g. "1 μs"
         fill_fraction: float = 1.0,
-        lines_per_buffer: int = None,
         **kwargs
     ):
-        super().__init__(**kwargs)
+        super().__init__(record_length=0, # will be overwritten
+                         **kwargs)
         self.bidirectional_scanning = bidirectional_scanning 
         if pixel_time:
             self.pixel_time = units.Time(pixel_time)
         else:
             self.pixel_time = None # None codes for non-constant pixel time (ie resonant scanning)
         self.line_width = units.Position(line_width)
-        pixel_size = units.Position(pixel_size)
+        psize = units.Position(pixel_size)
 
         # Adjust pixel size such that line_width/pixel_size is an integer
-        self.pixel_size = self.line_width / round(self.line_width / pixel_size)
-        if abs(self.pixel_size - pixel_size) / pixel_size > self.MAX_PIXEL_SIZE_ADJUSTMENT:
+        self.pixel_size = self.line_width / round(self.line_width / psize)
+        if abs(self.pixel_size - psize) / psize > self.MAX_PIXEL_SIZE_ADJUSTMENT:
             raise ValueError(
                 f"To maintain integer number of pixels in line, required adjusting " \
                 f"the pixel size by more than pre-specified limit: {100*self.MAX_PIXEL_SIZE_ADJUSTMENT}%"
@@ -232,9 +230,9 @@ class LineAcquisitionRuntimeInfo:
 
 
 class LineAcquisition(SampleAcquisition):
-    required_resources = (Digitizer, DetectorSet, FastRasterScanner)
-    optional_resources = (MultiAxisStage, ObjectiveZScanner)
-    SPEC_LOCATION = Path(user_config_dir("Dirigo")) / "acquisition/line"
+    required_resources = [Digitizer, DetectorSet, FastRasterScanner]
+    optional_resources = [MultiAxisStage, ObjectiveZScanner]
+    spec_location = Path(user_config_dir("Dirigo")) / "acquisition/line"
     Spec: Type[LineAcquisitionSpec] = LineAcquisitionSpec
     
     def __init__(self, hw, system_config, spec):
@@ -255,26 +253,26 @@ class LineAcquisition(SampleAcquisition):
         # If using galvo scanner, then set it up based on acquisition spec parameters
         if isinstance(scanner, GalvoScanner):
             scanner.amplitude = optics.object_position_to_scan_angle(
-                spec.line_width,
+                self.spec.line_width,
                 axis="fast"
             )
 
             # Fast axis period should be multiple of digitizer sample resolution
-            T_exact = spec.pixel_time * spec.pixels_per_line / spec.fill_fraction
+            assert self.spec.pixel_time is not None
+            T_exact = self.spec.pixel_time * self.spec.pixels_per_line / self.spec.fill_fraction
             dt = units.Time(
                 digi.acquire.record_length_resolution / digi.sample_clock.rate
             )
             T_rounded = round(T_exact / dt) * dt
             scanner.frequency = 1 / T_rounded 
             scanner.waveform = "asymmetric triangle"
-            scanner.duty_cycle = spec.fill_fraction # TODO set duty cycle to 50% if doing bidi
+            scanner.duty_cycle = self.spec.fill_fraction # TODO set duty cycle to 50% if doing bidi
         
         elif isinstance(scanner, ResonantScanner):
             # for res scanner: fixed: frequency, waveform, duty cycle; 
             # adjustable: amplitude
             scanner.amplitude = optics.object_position_to_scan_angle(
-                spec.extended_scan_width,
-                #axis="fast"
+                self.spec.extended_scan_width,
             )
             
         # Scanner settings implemented, configure digitizer acquisition params
@@ -311,7 +309,7 @@ class LineAcquisition(SampleAcquisition):
             self.active.set()
 
         elif isinstance(self.hw.fast_raster_scanner, GalvoScanner):
-            if digi._mode == "analog":
+            if digi._mode == "analog": # type: ignore #TODO fix this
                 self.hw.fast_raster_scanner.start(
                     input_sample_rate=digi.sample_clock.rate,
                     input_sample_clock_channel=digi.sample_clock.source,
@@ -320,7 +318,7 @@ class LineAcquisition(SampleAcquisition):
                 )
                 digi.acquire.start()
 
-            elif digi._mode == "edge counting":
+            elif digi._mode == "edge counting": # type: ignore #TODO fix this
                 digi.acquire.start()
                 self.hw.fast_raster_scanner.start(
                     input_sample_rate=digi.sample_clock.rate,
@@ -344,7 +342,7 @@ class LineAcquisition(SampleAcquisition):
                 self._publish(acq_product)
 
                 print(f"Acquired {digi.acquire.buffers_acquired} of {self.spec.buffers_per_acquisition} "
-                      f"Reading stage positions took: {1000*(t1-t0):.3f} ms")
+                      f"Reading stage positions took: {1000*(float(t1)-t0):.3f} ms")
         finally:
             self.cleanup()
 
@@ -437,7 +435,7 @@ class LineAcquisition(SampleAcquisition):
     
     @classmethod
     def get_specification(cls, spec_name = "default") -> LineAcquisitionSpec:
-        return super().get_specification(spec_name)
+        return super().get_specification(spec_name) # type: ignore
 
 
 class FrameAcquisitionSpec(LineAcquisitionSpec):
@@ -446,26 +444,28 @@ class FrameAcquisitionSpec(LineAcquisitionSpec):
     def __init__(self, 
                  frame_height: str, 
                  flyback_periods: int, 
-                 pixel_height: str = None, 
+                 pixel_height: str = "", # leave empty to set pxiel height = width
                  **kwargs):
-        super().__init__(**kwargs)
-
+        # set some parameters early so line_per_frame property can work
+        self.pixel_size = kwargs["pixel_size"]
+        self.bidirectional_scanning = kwargs["bidirectional_scanning"]
+        
         self.frame_height = units.Position(frame_height)
-
-        if pixel_height is not None:
-            pixel_height = units.Position(pixel_height)
+        if pixel_height == "":
+            p_height = units.Position(self.pixel_size)
         else:
-            # If no pixel height is specified, assume square pixel shape
-            pixel_height = self.pixel_size
+            p_height = units.Position(pixel_height)
 
-        self.pixel_height = self.frame_height / round(self.frame_height / pixel_height)
-        if abs(self.pixel_height - pixel_height) / pixel_height > self.MAX_PIXEL_HEIGHT_ADJUSTMENT:
+        self.pixel_height = self.frame_height / round(self.frame_height / p_height)
+        if abs(self.pixel_height - p_height) / p_height > self.MAX_PIXEL_HEIGHT_ADJUSTMENT:
             raise ValueError(
                 f"To maintain integer number of pixels in frame height, required adjusting " \
                 f"the pixel height by more than pre-specified limit: {100*self.MAX_PIXEL_HEIGHT_ADJUSTMENT}%"
             )
 
         self.flyback_periods = flyback_periods
+        
+        super().__init__(lines_per_buffer=self.lines_per_frame, **kwargs)
 
     @property
     def lines_per_frame(self) -> int:
@@ -493,7 +493,7 @@ class FrameAcquisitionSpec(LineAcquisitionSpec):
 class FrameAcquisition(LineAcquisition):
     required_resources = (Digitizer, DetectorSet, FastRasterScanner, SlowRasterScanner)
     optional_resources = (MultiAxisStage, ObjectiveZScanner)
-    SPEC_LOCATION = Path(user_config_dir("Dirigo")) / "acquisition/frame"
+    spec_location = Path(user_config_dir("Dirigo")) / "acquisition/frame"
     Spec: Type[FrameAcquisitionSpec] = FrameAcquisitionSpec
 
     def __init__(self, hw, system_config, spec: FrameAcquisitionSpec):
@@ -538,7 +538,7 @@ class FrameAcquisition(LineAcquisition):
 
     @classmethod
     def get_specification(cls, spec_name = "default") -> FrameAcquisitionSpec:
-        return super().get_specification(spec_name)
+        return super().get_specification(spec_name) # type: ignore
         
         
 class StackAcquisitionSpec(FrameAcquisitionSpec):
@@ -578,9 +578,9 @@ class StackAcquisitionSpec(FrameAcquisitionSpec):
     
 
 class StackAcquisition(Acquisition):
-    required_resources = (Digitizer, FastRasterScanner, SlowRasterScanner, ObjectiveZScanner)
-    optional_resources = (MultiAxisStage,)
-    SPEC_LOCATION = Path(user_config_dir("Dirigo")) / "acquisition/stack"
+    required_resources = [Digitizer, FastRasterScanner, SlowRasterScanner, ObjectiveZScanner]
+    optional_resources = [MultiAxisStage,]
+    spec_location = Path(user_config_dir("Dirigo")) / "acquisition/stack"
     Spec: Type[StackAcquisitionSpec] = StackAcquisitionSpec
 
     def __init__(self, hw, system_config, spec):
@@ -594,14 +594,18 @@ class StackAcquisition(Acquisition):
         )
 
         # Set up child FrameAcquisition & subscribe to it
-        self.spec.buffers_per_acquisition = float('inf')
-        self._frame_acquisition = FrameAcquisition(hw, self.spec)
+        self.spec.buffers_per_acquisition = -1 # codes for infinite buffers
+        self._frame_acquisition = FrameAcquisition(hw, system_config, self.spec)
         self._frame_acquisition.add_subscriber(self)
 
         # Initialize object scanner
         self.hw.objective_z_scanner.max_velocity = units.Velocity("300 um/s")
         self.hw.objective_z_scanner.acceleration = units.Acceleration("1 mm/s^2")
 
+    def _receive_product(self, 
+                         block: bool = True, 
+                         timeout: float | None = None) -> AcquisitionProduct:
+        return super()._receive_product(block, timeout) # type: ignore
 
     def run(self):
         """
@@ -617,9 +621,9 @@ class StackAcquisition(Acquisition):
         # Move to lower limit
         z_scanner = self.hw.objective_z_scanner
         z = z_scanner.position
-        self.hw.objective_z_scanner.move_relative(self._depths[0])
+        self.hw.objective_z_scanner.move_to(self._depths[0])
         
-        # wait until reached start position
+        # spin until reach start position
         while (z_scanner.position - z) - self._depths[0] > units.Position('1 um'):
             time.sleep(0.01)
 
@@ -627,33 +631,29 @@ class StackAcquisition(Acquisition):
             # Start child FrameAcquisition
             self._frame_acquisition.start()
 
-            # Get sacrificial frames
+            # Get sacrificial frames (don't pass them along)
             for _ in range(self.spec._sacrificial_frames_per_step):
-                # pocket the sacrificial frames (don't pass them on to subscribers)
-                if self._inbox.get(block=True) is None:
-                    return # runs finally: block on its way out
+                with self._receive_product(): pass
 
             for i in range(1, self.spec.depths_per_acquisition+1):
                 for _ in range(self.spec._saved_frames_per_step):
                     # Wait for frame data, and pass along
-                    buf: AcquisitionProduct = self._inbox.get(block=True)
-                    if buf is None:
-                        return # runs finally: block on its way out
-                    self._publish(buf)
+                    with self._receive_product() as product:
+                        self._publish(product)
 
                     # TOOD, blank laser beam for step time (sacrificial frames)
 
                 if i < self.spec.depths_per_acquisition:
                     # Move Z scanner to next depth
-                    z_scanner.move_relative(self._depths[i]-self._depths[i-1])
+                    z_scanner.move_to(self._depths[i]-self._depths[i-1])
 
                     # Wait for sacrificial frames
                     for _ in range(self.spec._sacrificial_frames_per_step):
-                        # pocket the sacrificial frames (don't pass them on)
-                        if self._inbox.get(block=True) is None:
-                            return # runs finally: block on its way out
+                        with self._receive_product(): pass
+        
         finally:
             self._frame_acquisition.stop()
             self._publish(None) # publish the sentinel
-            z_scanner.move_relative(-self._depths[-1])
-    
+            z_scanner.move_to(-self._depths[-1])
+
+            

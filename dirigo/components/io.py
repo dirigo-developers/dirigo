@@ -1,7 +1,8 @@
 from dataclasses import dataclass, asdict
 from pathlib import Path
 import tomllib
-from typing import Optional
+from typing import Optional, Any
+from functools import cached_property
 
 import numpy as np
 import tifffile
@@ -19,7 +20,7 @@ def data_path() -> Path:
     return pd.user_documents_path() / "Dirigo"
 
 
-def load_toml(file_name: Path | str) -> dict:
+def load_toml(file_name: Path | str) -> dict[str, Any]:
     file_name = Path(file_name)
     if not file_name.exists():
         raise FileNotFoundError(f"Can not find TOML file: {file_name}")
@@ -74,7 +75,7 @@ def load_signal_offset(
     try:
         return np.loadtxt(path, delimiter=',', dtype=np.float64, skiprows=1)
     except FileNotFoundError:
-        return None
+        return np.array(0)
 
 
 def load_gradient_calibration(
@@ -84,44 +85,63 @@ def load_gradient_calibration(
 
 
 
-@dataclass
-class SystemConfig: # TODO, redesign this class
-    """
-    Simple data class to hold system configuration categories.
+class SystemConfig: 
+    def __init__(self, data: dict[str, dict]):
+        self._data = data
+        
+    @cached_property
+    def laser_scanning_optics(self) -> dict[str, Any]:
+        return self._data["laser_scanning_optics"]
     
-    All fields are technically optional.
-    """
-    laser_scanning_optics: Optional[dict] = None
-    camera_optics: Optional[dict] = None
-    detectors: Optional[dict] = None
-    digitizer: Optional[dict] = None
-    stages: Optional[dict] = None
-    objective_z_scanner: Optional[dict] = None
-    encoders: Optional[dict] = None
-    fast_raster_scanner: Optional[dict] = None 
-    slow_raster_scanner: Optional[dict] = None
-    frame_grabber: Optional[dict] = None
-    line_scan_camera: Optional[dict] = None
-    illuminator: Optional[dict] = None
+    @cached_property
+    def camera_optics(self) -> dict[str, Any]:
+        return self._data["camera_optics"]
+    
+    @cached_property
+    def digitizer(self) -> dict[str, Any]:
+        return self._data["digitizer"]
+    
+    @cached_property
+    def detectors(self) -> dict[str, Any]:
+        return self._data["detectors"]
+    
+    @cached_property
+    def objective_z_scanner(self) -> dict[str, Any]:
+        return self._data["objective_z_scanner"]
+
+    @cached_property
+    def stages(self) -> dict[str, Any]:
+        return self._data["stages"]
+    
+    @cached_property
+    def line_scan_camera(self) -> dict[str, Any]:
+        return self._data["line_scan_camera"]
+    
+    @cached_property
+    def illuminator(self) -> dict[str, Any]:
+        return self._data["illuminator"]
+    
+    @cached_property
+    def frame_grabber(self) -> dict[str, Any]:
+        return self._data["frame_grabber"]
+    
+    @cached_property
+    def encoders(self) -> dict[str, Any]:
+        return self._data["encoders"]
+
+    @cached_property
+    def fast_raster_scanner(self) -> dict[str, Any]:
+        return self._data["fast_raster_scanner"]
+    
+    @cached_property
+    def slow_raster_scanner(self) -> dict[str, Any]:
+        return self._data["slow_raster_scanner"]
 
     @classmethod
     def from_toml(cls, toml_path: Path) -> 'SystemConfig':
         toml_data = load_toml(toml_path)
-        return cls(
-            laser_scanning_optics=toml_data.get("laser_scanning_optics"),
-            camera_optics=toml_data.get("camera_optics"),
-            detectors=toml_data.get("detectors"),
-            digitizer=toml_data.get("digitizer"),
-            stages=toml_data.get("stages"),
-            objective_z_scanner=toml_data.get("objective_z_scanner"),
-            encoders=toml_data.get("encoders"),
-            fast_raster_scanner=toml_data.get("fast_raster_scanner"),
-            slow_raster_scanner=toml_data.get("slow_raster_scanner"),
-            frame_grabber=toml_data.get("frame_grabber"),
-            line_scan_camera=toml_data.get("line_scan_camera"),
-            illuminator=toml_data.get("illuminator")
-        )
-    
-    def to_dict(self):
-        return asdict(self)
+        return cls(toml_data)
+
+    def to_dict(self) -> dict[str, dict[str, Any]]:
+        return self._data # should this be a (deep) copy?
     

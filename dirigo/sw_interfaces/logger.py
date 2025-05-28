@@ -31,14 +31,13 @@ class Logger(Worker):
         self.save_path = io.data_path()
         self.save_path.mkdir(parents=True, exist_ok=True)
         
-        self.frames_per_file: int = None
-        # Track frames/buffers saved
+        self.frames_per_file: int = 1
 
     @abstractmethod
     def save_data(self, data: np.ndarray):
         """Save an increment of data"""
         pass
 
-    def _receive_product(self, block = True, timeout = None) -> AcquisitionProduct | ProcessorProduct:
-        return super()._receive_product(block, timeout)
+    # def _receive_product(self, block = True, timeout = None) -> AcquisitionProduct | ProcessorProduct:
+    #     return super()._receive_product(block, timeout)
 

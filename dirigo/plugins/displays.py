@@ -5,9 +5,10 @@ import numpy as np
 from numba import njit, prange, types
 
 from dirigo.sw_interfaces.worker import EndOfStream
-from dirigo.sw_interfaces.processor import Processor
-from dirigo.sw_interfaces.acquisition import Acquisition
+from dirigo.sw_interfaces.processor import Processor, ProcessorProduct
+from dirigo.sw_interfaces.acquisition import Acquisition, AcquisitionProduct
 from dirigo.sw_interfaces.display import Display, ColorVector, DisplayChannel, DisplayPixelFormat
+from dirigo.plugins.acquisitions import FrameAcquisition, LineAcquisition
 
 
 sigs = [
@@ -49,7 +50,7 @@ def additive_display_kernel(data: np.ndarray, luts: np.ndarray, gamma_lut: np.nd
     for yi in prange(Ny):
         for xi in prange(Nx):
 
-            r, g, b = 0, 0, 0  # Typing these as uint32 for some reason triggers a conversion to float64 which can't be used to index
+            r, g, b = 0, 0, 0 
             for ci in range(Nc):
                 lut_index = data[yi, xi, ci]
                 r += luts[ci, lut_index, 0]
@@ -73,6 +74,8 @@ def default_colormap_lists(nchannels: int) -> list[str]:
         return ['cyan', 'magenta', 'yellow']
     elif nchannels == 4:
         return ['cyan', 'magenta', 'yellow', 'gray']
+    else:
+        raise ValueError("No default colormaps set yet for >4 channels")
 
 
 class FrameDisplay(Display):
@@ -83,6 +86,7 @@ class FrameDisplay(Display):
                  display_pixel_format = DisplayPixelFormat.RGB24,
                  **kwargs):
         super().__init__(upstream, **kwargs)
+        self._acquisition: FrameAcquisition | LineAcquisition 
 
         self._prev_data = None # None indicates that no data has been acquired yet
         self._prev_position = None
@@ -114,14 +118,19 @@ class FrameDisplay(Display):
             )
             self.display_channels.append(dc)
 
-        if hasattr(self._acquisition.spec, 'lines_per_frame'):
+        if isinstance(self._acquisition, FrameAcquisition):
             n_lines = self._acquisition.spec.lines_per_frame
         else:
             # fall-back when processing LineAcquisition as a frame
             n_lines = self._acquisition.spec.lines_per_buffer  
         shape = (n_lines, self._acquisition.spec.pixels_per_line, bpp)
         self.init_product_pool(n=3, shape=shape)
-        
+    
+    def _receive_product(self, 
+                         block: bool = True, 
+                         timeout: float | None = None
+                         ) -> AcquisitionProduct | ProcessorProduct:
+        return super()._receive_product(block, timeout) # type: ignore
 
     def run(self):
         try:
@@ -134,7 +143,7 @@ class FrameDisplay(Display):
                         if isinstance(product.positions, np.ndarray):
                             current_positions = product.positions[-1,:] # use final position only
                         elif isinstance(product.positions, tuple):
-                            current_positions = product.positions
+                            current_positions = np.array(product.positions)
 
                         if (self._prev_position is not None):
 
@@ -199,7 +208,11 @@ class FrameDisplay(Display):
 
     def _apply_display_kernel(self, average_frame, luts, display_frame):
         additive_display_kernel(average_frame, luts, self.gamma_lut, display_frame)
-                     
+    
+    @property
+    def pixel_size(self): # TODO, don't think this should be here
+        return self._acquisition.spec.pixel_size
+                  
     @property
     def n_frame_average(self) -> int:
         return self._n_frame_average
