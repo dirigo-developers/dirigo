@@ -295,10 +295,10 @@ class GalvoScannerViaNI(GalvoScanner):
             t1 = np.arange(F, F2 - 0.5/waveform_length, 1/waveform_length) # flyback (negative acceleration)
             t2 = np.arange(t1[-1] + 1/waveform_length, 1 - 0.5/waveform_length, 1/waveform_length) # flyback (positive acceleration)
 
-            parts = (
-                A/F * t0,
-                -k*t1**2/2 - k*F**2/2 + k*F*t1 + A/F*t1,
-                k*t2**2/2 + A*t2/F - k*t2 + k/2 - A/F
+            parts = (                                       # Smooth raster:
+                A/F * t0,                                   # linear part
+                -k*t1**2/2 - k*F**2/2 + k*F*t1 + A/F*t1,    # flyback I  (-accel)
+                k*t2**2/2 + A*t2/F - k*t2 + k/2 - A/F       # flyback II (+accel)
             )
             waveform = np.concatenate(parts, axis=0) - A/2 # minus A/2 to center around 0 degrees (rather than 0 to +A)
 
@@ -658,8 +658,9 @@ class SlowGalvoScannerViaNI(GalvoScannerViaNI, SlowRasterScanner):
                 if not isinstance(periods_per_frame, int) or periods_per_frame < 1:
                     raise ValueError("Periods per frame must be a positive integer")
                 
-                # TODO, 2 or 1 periods of buffer?
-                rearm_time = units.Time(2 / self._fast_scanner.frequency) # Use equivalent of 1 period of time as buffer
+                n_periods = self._fast_scanner.frequency / self.frequency
+                rearm_periods = int(self._fast_scanner.frequency_error * n_periods) + 1
+                rearm_time = units.Time(rearm_periods / self._fast_scanner.frequency) 
 
                 self._fclock_task = nidaqmx.Task("Frame clock")
 

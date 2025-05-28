@@ -161,18 +161,10 @@ class Stage(HardwareInterface):
 class LinearStage(Stage):
     VALID_AXES = {'x', 'y', 'z'}
     
-    # Thoughts on scrapping this?
-    # def __init__(self, limits: dict, **kwargs):
-    #     super().__init__(**kwargs)
-
-    #     # Validate limits
-    #     self._validate_limits_dict(limits)
-    #     self._limits = dirigo.PositionRange(**limits)
-
-    # @property
-    # def position_limits(self) -> dirigo.PositionRange:
-    #     """Returns an object describing the stage spatial position limits."""
-    #     return self._limits
+    @property
+    @abstractmethod
+    def position(self) -> units.Position:
+        ...
     
     @abstractmethod 
     def move_to(self, position: units.Position, blocking: bool = False):
@@ -224,13 +216,13 @@ class MultiAxisStage(HardwareInterface):
 
     @property
     @abstractmethod
-    def x(self) -> None | LinearStage:
+    def x(self) -> LinearStage:
         """If available, returns reference to the X stage axis"""
         pass
     
     @property
     @abstractmethod
-    def y(self) -> None | LinearStage:
+    def y(self) -> LinearStage:
         """If available, returns reference to the Y stage axis"""
         pass
 

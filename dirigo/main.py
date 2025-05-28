@@ -48,22 +48,22 @@ class Dirigo:
         return set(_load_entry_points(group))
 
     @overload
-    def make(self, group: Literal["acquisition"], name: str = ..., *,
+    def make(self, group: Literal["acquisition"], name: str, *,
              spec: AcquisitionSpec | str | None = ...,
              **kw: Any) -> Acquisition: ...
     
     @overload
-    def make(self, group: Literal["processor"],  name: str = ..., *,
+    def make(self, group: Literal["processor"],  name: str, *,
              upstream: Acquisition | Processor, **kw: Any) -> Processor: ...
     
     @overload
-    def make(self, group: Literal["display"], name: str = ..., *,
+    def make(self, group: Literal["display"], name: str, *,
              upstream: Acquisition | Processor,
              pixel_format: DisplayPixelFormat = DisplayPixelFormat.RGB24,
              **kw: Any) -> Display: ...
     
     @overload
-    def make(self, group: Literal["logger"], name: str = ..., *,
+    def make(self, group: Literal["logger"], name: str, *,
              upstream: Acquisition | Processor, **kw: Any) -> Logger: ...
 
     def make(self, group: str, name: str, **kw: Any) -> _Worker:
@@ -113,6 +113,18 @@ class Dirigo:
             return obj
 
         raise PluginError(f"Unsupported plugin group '{group}'.")
+    
+    def make_acquisition(self, name: str, **kw: Any) -> Acquisition:
+        return self.make("acquisition", name, **kw)
+    
+    def make_processor(self, name: str, *, upstream, **kw: Any) -> Processor:
+        return self.make("processor", name, upstream=upstream, **kw)
+    
+    def make_display_processor(self, name: str, *, upstream, **kw: Any) -> Display:
+        return self.make("display", name, upstream=upstream, **kw)
+    
+    def make_logger(self, name: str, *, upstream, **kw: Any) -> Logger:
+        return self.make("logger", name, upstream=upstream, **kw)
 
     
 
@@ -120,10 +132,10 @@ if __name__ == "__main__":
 
     diri = Dirigo()
 
-    acquisition = diri.make("acquisition", "raster_frame")
-    processor   = diri.make("processor", "raster_frame", upstream=acquisition)
-    display     = diri.make("display", "frame", upstream=processor)
-    logger      = diri.make("logger", "tiff", upstream=processor)
+    acquisition = diri.make_acquisition("raster_frame")
+    processor   = diri.make_processor("raster_frame", upstream=acquisition)
+    display     = diri.make_display_processor("frame", upstream=processor)
+    logger      = diri.make_logger("tiff", upstream=processor)
 
     acquisition.start()
     acquisition.join(timeout=100.0)

@@ -28,8 +28,11 @@ class UnitQuantity(float):
     Attributes:
     - unit (str): The original unit of the quantity (e.g., "V", "mV").
     """
-    DIMENSIONAL_QUANTITY: tuple[str] = ('1', '1') # Interpret as unity over unity (ie dimensionless)
-    ALLOWED_UNITS_AND_MULTIPLIERS: Dict[str, float] = None  # Define allowed units and their factors in subclasses
+    unit: str 
+    __slots__ = ("unit",)
+
+    DIMENSIONAL_QUANTITY: tuple[str, str] = ('1', '1') # Interpret as unity over unity (ie dimensionless)
+    ALLOWED_UNITS_AND_MULTIPLIERS: Dict[str, float] = {"": 1.0}  # Define allowed units and their factors in subclasses
 
     def __new__(cls, quantity: str | float):
         """
@@ -374,7 +377,11 @@ class RangeWithUnits:
                        (min >= max).
         """
         # Case 1: The user gave us a single string that starts with ±
-        if max is None and isinstance(min, str) and min.strip().startswith("±"):
+        if max is None:
+            if not isinstance(min, str):
+                raise ValueError("`max` must be str")
+            if not min.strip().startswith("±"):
+                raise ValueError("RangeWithUnits must start with ±")
             # Attempt to parse something like "±5V" or "± 5 V"
             min_str, max_str = self._parse_plus_minus_string(min)
             self._min = self.UNIT_QUANTITY_CLASS(min_str)
@@ -551,7 +558,7 @@ class IntRange:
         else: 
             # unsigned data types ..
             if self.min == False and self.max == True:
-                return np.bool
+                return np.bool_
             elif self.max < 2**8:
                 return np.uint8
             elif self.max < 2**16:

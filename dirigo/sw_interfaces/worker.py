@@ -102,7 +102,7 @@ class Worker(threading.Thread, ABC):
     def _receive_product(self,
               block: bool = True,
               timeout: float | None = None
-              ) -> Product | None:
+              ) -> Product:
         """Wrapper around inbox.get()."""
 
         if self._stop_event.is_set():

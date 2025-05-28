@@ -178,6 +178,7 @@ class ResonantScanner(RasterScanner):
     """
     def __init__(self, 
                  frequency: str, 
+                 frequency_error: float,
                  response_time: str = None,
                  **kwargs):
         super().__init__(**kwargs)
@@ -188,6 +189,7 @@ class ResonantScanner(RasterScanner):
                              f"got {frequency_obj}")
 
         self._frequency = frequency_obj
+        self.frequency_error = frequency_error
 
         if response_time:
             response_time = units.Time(response_time)

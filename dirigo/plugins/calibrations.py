@@ -10,6 +10,7 @@ from dirigo import io
 from dirigo.sw_interfaces import Acquisition, Processor, Logger
 from dirigo.sw_interfaces.worker import EndOfStream
 from dirigo.plugins.acquisitions import FrameAcquisition
+from dirigo.plugins.processors import RasterFrameProcessor
 
 from dirigo.hw_interfaces import Digitizer, FastRasterScanner
 
@@ -85,7 +86,6 @@ class TriggerDelayCalibration(Acquisition):
                     
                 except EndOfStream:
                     self._frame_acquisition.join(1)
-                    self._frame_acquisition = None
                     time.sleep(self.spec.pause_time)
 
         finally:
@@ -100,6 +100,9 @@ class TriggerDelayCalibrationLogger(Logger):
         self._amplitudes = []
         self._frequencies = []
         self._phases = []
+    
+    def _receive_product(self) -> Processor.Product:
+        ...
         
     def run(self):
         try:
@@ -115,7 +118,6 @@ class TriggerDelayCalibrationLogger(Logger):
         except EndOfStream:
             self._publish(None) # pass sentinel
             self.save_data()
-            
 
     def save_data(self):
         amplitudes = np.unique(self._amplitudes)
@@ -178,6 +180,7 @@ class StageTranslationCalibration(Acquisition):
         self.digitizer_profile = self._frame_acquisition.digitizer_profile
         self.runtime_info = self._frame_acquisition.runtime_info
 
+        assert self.system_config.fast_raster_scanner is not None
         fast_axis = self.system_config.fast_raster_scanner['axis']
         if fast_axis == "x":
             self._fast_stage = self.hw.stages.x
@@ -233,9 +236,11 @@ class LineDistortionCalibrationLogger(Logger):
     def __init__(self, upstream: Processor):
         super().__init__(upstream)
         self._acq: StageTranslationCalibration
+        self._processor: RasterFrameProcessor
+
         self.basename = "line_distortion_calibration"
         self.filepath = io.config_path() / "optics" / (self.basename + ".csv")
-        self.data_filepath = io.data_path() /(self.basename + "_data.csv")
+        self.data_filepath = io.data_path() / (self.basename + "_data.csv")
 
     def run(self):
         self._frames, self._positions = [], [] # collect measurement frames/pos
@@ -279,7 +284,7 @@ class LineDistortionCalibrationLogger(Logger):
                 mov_patch = frame[(yc-yr):(yc+yr), m0:(m0 + self.PATCH)]
 
                 _, j = self.x_corr(ref_patch, mov_patch)
-                print(units.Position(j*spec.pixel_size))
+                print(units.Position(j * spec.pixel_size))
 
                 dx_observed[p_idx, f_idx] = j + dx_true
                 ref_patch_center = p0 + self.PATCH//2
@@ -323,12 +328,14 @@ class LineDistortionCalibrationLogger(Logger):
     def x_corr(cls, ref_frame: np.ndarray, moving_frame: np.ndarray):
         n_y, n_x = ref_frame.shape
 
-        xps = fft.rfft2(ref_frame, workers=-1) * np.conj(fft.rfft2(moving_frame, workers=-1))
+        R = fft.rfft2(ref_frame,    workers=-1)
+        M = fft.rfft2(moving_frame, workers=-1)
+        xps = R * np.conj(M)
         s = (n_y * cls.UPSAMPLE_Y, n_x * cls.UPSAMPLE_X)
         corr = fft.irfft2(xps / (np.abs(xps) + cls.EPS), s, workers=-1)
         arg_max = np.argmax(corr)
-        i = arg_max // corr.shape[1]
-        j = arg_max %  corr.shape[1]
+        i = int(arg_max // corr.shape[1])
+        j = int(arg_max %  corr.shape[1])
 
         if i > (s[0] // 2):  # Handle wrap-around for negative shifts
             i -= s[0]
@@ -428,6 +435,9 @@ class LineGradientCalibrationLogger(Logger):
         super().__init__(upstream)
         self.basename = "line_gradient"
         self.filepath = io.config_path() / "optics" / (self.basename + ".csv")
+        self.data_filepath = io.data_path() / (self.basename + "_data.csv")
+
+        self._acq: FrameAcquisition
 
     def run(self):
         self._frames = [] # collect measurement frames/pos
@@ -440,26 +450,39 @@ class LineGradientCalibrationLogger(Logger):
             self._publish(None) # forward sentinel
             self.save_data()
 
-    def save_data(self):
+    def save_data(self, data=None):
+        n_y, n_x, n_channels = self._frames[0].shape
         
         line_averages = []
         for i, buffer in enumerate(self._frames):
-            line_average = np.mean(buffer, axis=(0))
+            line_average = np.mean(buffer, axis=0)
             line_averages.append(line_average)
 
         line_averages = np.mean(
-            np.stack(line_averages),
+            np.stack(line_averages, axis=0),
             axis=0,
-            keepdims=True
         )
 
+        # Save gradient data
         hdr = str()
-        for i in range(signal_means.size):
+        for i in range(n_channels):
             hdr += f"Channel {i},"
 
         np.savetxt(
-            self.filepath, 
-            signal_means,
+            self.data_filepath, 
+            line_averages,
             delimiter=',',
             header=hdr[:-1]
         )
+
+        # Fit to polynomials
+        w = self._acq.spec.line_width
+        x = np.linspace(-w/2, w/2, n_x)
+        for c in range(n_channels):
+            pfit: Polynomial = Polynomial.fit(
+                x=x,
+                y=line_averages[c],
+                deg=2
+            )
+            c0, c1, c2 = pfit.convert().coef
+

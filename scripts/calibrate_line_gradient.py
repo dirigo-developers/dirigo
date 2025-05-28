@@ -13,9 +13,12 @@ diri = Dirigo()
 
 # Use default FrameAcquisition spec as basis for frame size, pixel size, etc
 spec = FrameAcquisition.get_specification()
-# strink frame height, so acquisition is essentially a line
-spec.frame_height = spec.line_width / 10 
-spec.pixel_height = spec.pixel_size / 10
+
+spec.bidirectional_scanning = False
+
+# strink frame height, so frame is essentially a line
+spec.frame_height = spec.frame_height / 100 
+spec.pixel_height = spec.pixel_height / 100
 
 
 acquisition = diri.make("acquisition", "raster_frame", spec=spec)

@@ -1,4 +1,4 @@
-from functools import cached_property
+from functools import lru_cache, cached_property
 import importlib.metadata as im
 from typing import Optional
 
@@ -14,6 +14,11 @@ from dirigo.hw_interfaces.illuminator import Illuminator
 
 
 
+@lru_cache
+def _eps(group: str) -> dict[str, im.EntryPoint]:
+    return {ep.name.lower(): ep for ep in im.entry_points().select(group=group)}
+
+
 class Hardware:
     """ 
     Loads hardware specified in system_config.toml and holds references to the 
@@ -24,50 +29,56 @@ class Hardware:
 
     # --- helper ---
     def _load(self, group: str, type_name: str, **kw):
+        """
+        Lazy-load the concrete driver class registered under *type_name*
+        in entry-point *group*, instantiate it with **kw, and return it.
+        """
         try:
-            cls = im.entry_points(group=group)[type_name.lower()].load()
+            cls = _eps(group)[type_name.lower()].load()   # import on demand
             return cls(**kw)
         except KeyError as e:
-            raise ValueError(f"No plugin '{type_name}' in entry-point group "
-                             f"'{group}'.") from e
+            raise ValueError(
+                f"No plugin '{type_name}' in entry-point group '{group}'. "
+                f"Available: {', '.join(_eps(group)) or 'none'}"
+            ) from e
         
     # --- hardward devices (lazy loading) ---
     @cached_property
-    def digitizer(self) -> Digitizer | None:
+    def digitizer(self) -> Digitizer:
         cfg = self._cfg.digitizer
-        return None if cfg is None else self._load(
-            "dirigo_digitizers", cfg["type"], **cfg)
+        assert cfg is not None
+        return self._load("dirigo_digitizers", cfg["type"], **cfg)
     
     @cached_property
-    def fast_raster_scanner(self) -> FastRasterScanner | None:
+    def fast_raster_scanner(self) -> FastRasterScanner:
         cfg = self._cfg.fast_raster_scanner
-        return None if cfg is None else self._load(
-            "dirigo_scanners", cfg["type"], **cfg)
+        assert cfg is not None
+        return self._load("dirigo_scanners", cfg["type"], **cfg)
 
     @cached_property
-    def slow_raster_scanner(self) -> SlowRasterScanner | None:
+    def slow_raster_scanner(self) -> SlowRasterScanner:
         cfg = self._cfg.slow_raster_scanner
-        return None if cfg is None else self._load(
-            "dirigo_scanners", cfg["type"],
+        assert cfg is not None
+        return self._load("dirigo_scanners", cfg["type"],
             fast_scanner=self.fast_raster_scanner, **cfg)
     
     @cached_property
-    def objective_z_scanner(self) -> ObjectiveZScanner | None:
+    def objective_z_scanner(self) -> ObjectiveZScanner:
         cfg = self._cfg.objective_z_scanner
-        return None if cfg is None else self._load(
-            "dirigo_scanners", cfg["type"], **cfg)
+        assert cfg is not None
+        return self._load("dirigo_scanners", cfg["type"], **cfg)
 
     @cached_property
-    def stages(self) -> MultiAxisStage | None:
+    def stages(self) -> MultiAxisStage:
         cfg = self._cfg.stages
-        return None if cfg is None else self._load(
-            "dirigo_stages", cfg["type"], **cfg)
+        assert cfg is not None
+        return self._load("dirigo_stages", cfg["type"], **cfg)
     
     @cached_property
-    def encoders(self) -> MultiAxisLinearEncoder | None:
+    def encoders(self) -> MultiAxisLinearEncoder:
         cfg = self._cfg.encoders
-        return None if cfg is None else self._load(
-            "dirigo_encoders", cfg["type"], **cfg)
+        assert cfg is not None
+        return self._load("dirigo_encoders", cfg["type"], **cfg)
 
     @cached_property
     def detectors(self) -> Optional[DetectorSet[Detector]]:
@@ -80,8 +91,7 @@ class Hardware:
             • None if the system-config omits the section entirely
         """
         cfg = self._cfg.detectors                         # a *table* or None
-        if cfg is None:
-            return None
+        assert cfg is not None
 
         dset = DetectorSet()
         for key, det_cfg in cfg.items():                  # preserves order in TOML
@@ -94,33 +104,35 @@ class Hardware:
         return dset
 
     @cached_property
-    def frame_grabber(self) -> FrameGrabber | None:
+    def frame_grabber(self) -> FrameGrabber:
         cfg = self._cfg.frame_grabber
-        return None if cfg is None else self._load(
-            "dirigo_frame_grabbers", cfg["type"], **cfg)
+        assert cfg is not None
+        return self._load("dirigo_frame_grabbers", cfg["type"], **cfg)
     
     @cached_property
-    def line_scan_camera(self) -> LineScanCamera | None:
+    def line_scan_camera(self) -> LineScanCamera: # this could just be camera
         cfg = self._cfg.line_scan_camera
-        return None if cfg is None else self._load(
-            "dirigo_line_scan_cameras", cfg["type"], 
+        assert cfg is not None
+        return self._load("dirigo_line_scan_cameras", cfg["type"], 
             frame_grabber=self.frame_grabber, **cfg)
     
     @cached_property
-    def illuminator(self) -> Illuminator | None:
+    def illuminator(self) -> Illuminator:
         cfg = self._cfg.illuminator
-        return None if cfg is None else self._load(
-            "dirigo_illuminators", cfg["type"], **cfg)
+        assert cfg is not None
+        return self._load("dirigo_illuminators", cfg["type"], **cfg)
 
     @cached_property
-    def laser_scanning_optics(self) -> LaserScanningOptics | None:
+    def laser_scanning_optics(self) -> LaserScanningOptics:
         cfg = self._cfg.laser_scanning_optics
-        return LaserScanningOptics(**cfg) if cfg else None
+        assert cfg is not None
+        return LaserScanningOptics(**cfg)
 
     @cached_property
-    def camera_optics(self) -> CameraOptics | None:
+    def camera_optics(self) -> CameraOptics:
         cfg = self._cfg.camera_optics
-        return CameraOptics(**cfg) if cfg else None
+        assert cfg is not None
+        return CameraOptics(**cfg)
         
     # --- conveniences ---
     @property
@@ -134,7 +146,7 @@ class Hardware:
         elif self._cfg.line_scan_camera:
             return 1 # monochrome only for now, but RGB cameras should be 3-channel
         else:
-            return None
+            raise RuntimeError("No channels available: lacking digitizer or camera")
         
     @property
     def nchannels_present(self) -> int:
@@ -147,5 +159,6 @@ class Hardware:
         elif self._cfg.line_scan_camera:
             return 1 # monochrome only for now, but RGB cameras should be 3-channel
         else:
-            return None
+            raise RuntimeError("No channels available: lacking digitizer or camera")
         
+    # TODO: add close all method

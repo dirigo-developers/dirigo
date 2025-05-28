@@ -1,4 +1,4 @@
-from typing import TYPE_CHECKING, Type
+from typing import TYPE_CHECKING, Type, List
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 
@@ -76,8 +76,9 @@ class Acquisition(AcquisitionWorker):
     """
     Dirigo interface for data acquisition worker thread.
     """
-    required_resources: tuple[Type[HardwareInterface]] = tuple() # The first object in the tuple should be the data capture device (digitizer, camera, etc)
-    optional_resources: tuple[Type[HardwareInterface]] = tuple()
+    required_resources: List[Type[HardwareInterface]] = [] # The first object in the tuple should be the data capture device (digitizer, camera, etc)
+    optional_resources: List[Type[HardwareInterface]] = []
+    spec_location: Path
     Spec: Type[AcquisitionSpec] = AcquisitionSpec
     Product = AcquisitionProduct
     
@@ -127,7 +128,7 @@ class Acquisition(AcquisitionWorker):
     def get_specification(cls, spec_name: str = "default") -> AcquisitionSpec:
         """Return the associated Specification object"""
         spec_fn = spec_name + ".toml"
-        spec = load_toml(cls.SPEC_LOCATION / spec_fn)
+        spec = load_toml(cls.spec_location / spec_fn)
         return cls.Spec(**spec)
     
     # ! Acquisition subclasses must implement a run() method.

@@ -85,7 +85,7 @@ def load_gradient_calibration(
 
 
 @dataclass
-class SystemConfig:
+class SystemConfig: # TODO, redesign this class
     """
     Simple data class to hold system configuration categories.
     
