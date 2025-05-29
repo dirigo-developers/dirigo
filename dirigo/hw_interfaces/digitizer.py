@@ -418,7 +418,7 @@ class Acquire(ABC):
     """Abstract base class for managing digitizer acquisitions and buffering."""
 
     def __init__(self):
-        self._channels: list[Channel]
+        self._channels: tuple[Channel, ...]
 
     @property
     def n_channels_enabled(self) -> int:
@@ -451,7 +451,7 @@ class Acquire(ABC):
         Use `trigger_delay_samples` for the same setting in terms of sample 
         clock periods. 
         """
-        pass
+        pass # TODO, is this really needed?
 
     @property
     @abstractmethod
@@ -646,7 +646,7 @@ class Digitizer(HardwareInterface):
     def __init__(self):
         self.profile: DigitizerProfile
         self.sample_clock: SampleClock
-        self.channels: list[Channel]
+        self.channels: tuple[Channel]
         self.trigger: Trigger
         self.acquire: Acquire
         self.aux_io: AuxillaryIO
