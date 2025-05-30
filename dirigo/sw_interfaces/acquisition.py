@@ -104,7 +104,7 @@ class Acquisition(AcquisitionWorker):
                 dev = getattr(self.hw, attr)        # instantiate lazily
             except Exception as exc:
                 raise RuntimeError(
-                    f"Failed to initialise required {iface.__name__}: {exc}"
+                    f"Failed to initialize required {iface.__name__}: {exc}"
                 ) from exc
             if dev is None:
                 raise RuntimeError(
@@ -119,7 +119,7 @@ class Acquisition(AcquisitionWorker):
                 # if the device is not in system_config.toml, then dev will be None (will not raise error)
             except Exception as exc:
                 raise RuntimeError(
-                    f"{self.__class__.__name__}: failed to initialise optional "
+                    f"{self.__class__.__name__}: failed to initialize optional "
                     f"{iface.__name__}: {exc}"
                 ) from exc
 

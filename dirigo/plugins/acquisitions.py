@@ -328,8 +328,10 @@ class LineAcquisition(SampleAcquisition):
                 )
 
         try:
-            while not self._stop_event.is_set() and \
-                digi.acquire.buffers_acquired < self.spec.buffers_per_acquisition:
+            bpa = self.spec.buffers_per_acquisition
+            while not self._stop_event.is_set():
+                if bpa != -1 and digi.acquire.buffers_acquired >= bpa: # bpa=-1 codes for infinite
+                    break
                 #print("Buffers acquired", digi.acquire.buffers_acquired)
                 acq_product = self.get_free_product()
                 digi.acquire.get_next_completed_buffer(acq_product)
@@ -341,7 +343,7 @@ class LineAcquisition(SampleAcquisition):
 
                 self._publish(acq_product)
 
-                print(f"Acquired {digi.acquire.buffers_acquired} of {self.spec.buffers_per_acquisition} "
+                print(f"Acquired {digi.acquire.buffers_acquired} {"" if bpa==-1 else f"of {bpa}"} "
                       f"Reading stage positions took: {1000*(float(t1)-t0):.3f} ms")
         finally:
             self.cleanup()
