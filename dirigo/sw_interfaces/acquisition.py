@@ -76,7 +76,7 @@ class Acquisition(AcquisitionWorker):
     """
     Dirigo interface for data acquisition worker thread.
     """
-    required_resources: List[Type[HardwareInterface]] = [] # The first object in the tuple should be the data capture device (digitizer, camera, etc)
+    required_resources: List[Type[HardwareInterface]] = [] # The first object should be the data capture device (digitizer, camera, etc)
     optional_resources: List[Type[HardwareInterface]] = []
     spec_location: Path
     Spec: Type[AcquisitionSpec] = AcquisitionSpec

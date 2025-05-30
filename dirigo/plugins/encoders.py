@@ -1,3 +1,5 @@
+from typing import Optional
+
 import numpy as np
 import nidaqmx
 from nidaqmx.constants import (
@@ -18,8 +20,8 @@ class LinearEncoderViaNI(LinearEncoder):
                  signal_a_channel: str, 
                  signal_b_channel: str,
                  distance_per_pulse: units.Position, 
-                 sample_clock_channel: str = None, 
-                 trigger_channel: str = None,
+                 sample_clock_channel: Optional[str] = None, 
+                 trigger_channel: Optional[str] = None,
                  timestamp_trigger_events: bool = False,
                  samples_per_channel: int = 4096, # Size of the buffer--set to 2X the expected number of samples to read at once
                  **kwargs):
@@ -53,8 +55,13 @@ class LinearEncoderViaNI(LinearEncoder):
         self._samples_per_channel = samples_per_channel
         self._timestamp_trigger_events = timestamp_trigger_events
 
-    def start_logging(self, initial_position: units.Position, expected_sample_rate: units.SampleRate):
+    def start_logging(self, 
+                      initial_position: units.Position, 
+                      expected_sample_rate: units.SampleRate | units.Frequency):
         """Sets up the counter input task and starts it."""
+        if self._sample_clock_channel is None:
+            raise RuntimeError("Sample clock channel not initialized")
+
         self._encoder_task = nidaqmx.Task() # TODO give it a name
 
         self._encoder_task.ci_channels.add_ci_lin_encoder_chan(
@@ -63,8 +70,8 @@ class LinearEncoderViaNI(LinearEncoder):
             initial_pos=initial_position
         )
 
-        self._encoder_task.ci_channels[0].ci_encoder_a_input_term = self._signal_a_channel
-        self._encoder_task.ci_channels[0].ci_encoder_b_input_term = self._signal_b_channel
+        self._encoder_task.ci_channels[0].ci_encoder_a_input_term = self._signal_a_channel # type: ignore
+        self._encoder_task.ci_channels[0].ci_encoder_b_input_term = self._signal_b_channel # type: ignore
 
         self._encoder_task.timing.cfg_samp_clk_timing(
             rate=expected_sample_rate * 1.1, # this is the max expected rate, provide 10% higher rate
@@ -97,7 +104,7 @@ class LinearEncoderViaNI(LinearEncoder):
             raise ValueError("Must read at least 1 sample.")
         # timestamp task returns period between trigger up edges
         print(f'Attempting to read {n} timestamps')
-        periods = np.array(self._timestamp_task.read(n))
+        periods = np.array(self._timestamp_task.read(n)) # type: ignore
         print("Min period:", periods.min())
 
         # convert periods to cumulative timestamps and add previous last timestampe
@@ -120,7 +127,6 @@ class LinearEncoderViaNI(LinearEncoder):
         # use angular encoder to trig out on every N pulses
         self._encoder_task.ci_channels.add_ci_ang_encoder_chan(
             counter=CounterRegistry.allocate_counter(),
-            name_to_assign_to_channel=f"{self.axis} encoder-derived trigger",
             decoding_type=EncoderType.X_1, # TODO make this adjustable
             zidx_enable=True,
             zidx_val=-pulses_per_trigger,
@@ -134,13 +140,13 @@ class LinearEncoderViaNI(LinearEncoder):
         
         self._encoder_task.export_signals.ctr_out_event_output_term = self._trigger_channel
         
-        self._encoder_task.ci_channels[0].ci_encoder_a_input_term = self._signal_a_channel
-        self._encoder_task.ci_channels[0].ci_encoder_b_input_term = self._signal_b_channel
+        self._encoder_task.ci_channels[0].ci_encoder_a_input_term = self._signal_a_channel # type: ignore
+        self._encoder_task.ci_channels[0].ci_encoder_b_input_term = self._signal_b_channel # type: ignore
 
         parts = self._encoder_task.channel_names[0].split('/')
         cizterm = f"/{parts[0]}/Ctr{parts[1][-1]}InternalOutput" # e.g. /Dev1/Ctr1InternalOutput
         validate_ni_channel(cizterm)
-        self._encoder_task.ci_channels[0].ci_encoder_z_input_term = cizterm
+        self._encoder_task.ci_channels[0].ci_encoder_z_input_term = cizterm # type: ignore
 
         # Creates a separate task that measures the time between edges of
         # the signal coming from 'DevX/CtrYInternalOutput'.
@@ -157,8 +163,9 @@ class LinearEncoderViaNI(LinearEncoder):
 
             # Set to the internal signal exported by ctr0/1.
             parts = self._encoder_task.channel_names[0].split('/')
-            self._timestamp_task.ci_channels[0].ci_period_term = f"/{parts[0]}/Ctr{parts[1][-1]}InternalOutput" # e.g. /Dev1/Ctr1InternalOutput
-
+            cpt = f"/{parts[0]}/Ctr{parts[1][-1]}InternalOutput" # e.g. /Dev1/Ctr1InternalOutput
+            self._timestamp_task.ci_channels[0].ci_period_term = cpt # type: ignore
+                
             self._timestamp_task.timing.cfg_implicit_timing(
                 sample_mode=AcquisitionType.CONTINUOUS,
                 samps_per_chan=self._samples_per_channel
@@ -182,22 +189,31 @@ class LinearEncoderViaNI(LinearEncoder):
 
 class MultiAxisLinearEncodersViaNI(MultiAxisLinearEncoder):
     """Container for a multi-axis set of linear position quadrature encoders."""
-    def __init__(self, x_config: dict = None, y_config: dict = None, 
-                 z_config: dict = None, **kwargs):
+    def __init__(self, 
+                 x_config: Optional[dict] = None, 
+                 y_config: Optional[dict] = None, 
+                 z_config: Optional[dict] = None, 
+                 **kwargs):
         self._x = LinearEncoderViaNI(axis='x', **x_config) if x_config else None
         self._y = LinearEncoderViaNI(axis='y', **y_config) if y_config else None
         self._z = LinearEncoderViaNI(axis='z', **z_config) if z_config else None
     
     @property
     def x(self) -> LinearEncoderViaNI:
+        if self._x is None:
+            raise RuntimeError("X encoder not initialized")
         return self._x
     
     @property
     def y(self) -> LinearEncoderViaNI:
+        if self._y is None:
+            raise RuntimeError("y encoder not initialized")
         return self._y
     
     @property
     def z(self) -> LinearEncoderViaNI:
+        if self._z is None:
+            raise RuntimeError("Z encoder not initialized")
         return self._z
     
     def start_logging(self, hw: Hardware):
@@ -206,16 +222,15 @@ class MultiAxisLinearEncodersViaNI(MultiAxisLinearEncoder):
         Expects to be passed a reference to the hardware container, needed to
         query runtime hardware settings.
         """
-        if self.x:
+        if self._x:
             initial_x = hw.stages.x.position
-            #print("initial x", initial_x, "moving", hw.stages.x.moving)
             self.x.start_logging(initial_x, hw.fast_raster_scanner.frequency)
-        if self.y:
+        if self._y:
             initial_y = hw.stages.y.position
-            #print("initial y", initial_y, "moving", hw.stages.y.moving)
             self.y.start_logging(initial_y, hw.fast_raster_scanner.frequency)
-        if self.z:
-            self.z.start_logging(hw.stages.z.position, hw.fast_raster_scanner.frequency)
+        if self._z:
+            initial_z = hw.objective_z_scanner.position # TODO not sure a quad encoder signal will ever be exposed here
+            self.z.start_logging(initial_z, hw.fast_raster_scanner.frequency)
     
     def read_positions(self, n) -> np.ndarray:
         """Reads n samples from each of the available encoders.
@@ -224,20 +239,20 @@ class MultiAxisLinearEncodersViaNI(MultiAxisLinearEncoder):
         Example: a 500-sample, X & Y encoder reading would have shape (500,2)
         """
         samples = []
-        if self.x:
+        if self._x:
             samples.append(self.x.read_positions(n))
-        if self.y:
+        if self._y:
             samples.append(self.y.read_positions(n))
-        if self.z:
+        if self._z:
             samples.append(self.z.read_positions(n))
 
         return np.copy(np.array(samples).T) # Return in dimensions: Samples, Axes
     
     def stop(self):
         """Stops all the available encoders."""
-        if self.x:
+        if self._x:
             self.x.stop()
-        if self.y:
+        if self._y:
             self.y.stop()
-        if self.z:
+        if self._z:
             self.z.stop()

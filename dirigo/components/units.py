@@ -1,9 +1,12 @@
 import math
 import re
-from typing import Dict
+from typing import TypeVar, Generic, Dict, Optional
 from dataclasses import dataclass
 
 import numpy as np
+
+
+T_UQ = TypeVar("T_UQ", bound="UnitQuantity")
 
 
 class UnitQuantity(float):
@@ -351,7 +354,7 @@ class AngularAcceleration(UnitQuantity):
     }
 
 
-class RangeWithUnits:
+class RangeWithUnits(Generic[T_UQ]):
     """
     Represents a range with associated units and supports unit conversion.
 
@@ -360,9 +363,9 @@ class RangeWithUnits:
     - max (UnitQuantity): Maximum value as a UnitQuantity.
     - unit (str): The base unit of the range.
     """
-    UNIT_QUANTITY_CLASS = UnitQuantity  # Define the UnitQuantity class to use in subclasses
+    UNIT_QUANTITY_CLASS: type[T_UQ] 
 
-    def __init__(self, min: str | float, max: str | float | None = None):
+    def __init__(self, min: str | float, max: Optional[str | float] = None):
         """
         Initialize the range.
 
@@ -423,16 +426,16 @@ class RangeWithUnits:
         return (min_str, max_str)
 
     @property
-    def min(self) -> UnitQuantity:
+    def min(self) -> T_UQ:
         """Get the minimum value in the base unit."""
         return self._min
 
     @property
-    def max(self) -> UnitQuantity:
+    def max(self) -> T_UQ:
         """Get the maximum value in the base unit."""
         return self._max
 
-    def within_range(self, value: UnitQuantity) -> bool:
+    def within_range(self, value: T_UQ) -> bool:
         """
         Check whether a UnitQuantity is within the range.
 
@@ -453,7 +456,7 @@ class RangeWithUnits:
         return float(self._min) <= normalized_value <= float(self._max)
 
     @property
-    def range(self) -> UnitQuantity:
+    def range(self) -> T_UQ:
         """Get the range as the difference between max and min."""
         return self.UNIT_QUANTITY_CLASS(str(float(self.max) - float(self.min)) + " " + self.unit)
 
@@ -476,7 +479,7 @@ class RangeWithUnits:
         return {"min": self.min, "max": self.max}
 
 
-class AngleRange(RangeWithUnits):
+class AngleRange(RangeWithUnits[Angle]):
     """
     Describes a range of angles with units (e.g., radians, degrees).
     """
@@ -493,35 +496,35 @@ class AngleRange(RangeWithUnits):
         return self.max * 180 / math.pi
     
 
-class VoltageRange(RangeWithUnits):
+class VoltageRange(RangeWithUnits[Voltage]):
     """
     Represents a range of voltages with units (e.g., V, mV, kV).
     """
     UNIT_QUANTITY_CLASS = Voltage
         
 
-class PositionRange(RangeWithUnits):
+class PositionRange(RangeWithUnits[Position]):
     """
     Represents a position range with units (e.g. m, mm, μm, nm, km)
     """
     UNIT_QUANTITY_CLASS = Position
 
 
-class TimeRange(RangeWithUnits):
+class TimeRange(RangeWithUnits[Time]):
     """
     Represents a time/duration range with units (e.g. s, ms, μs, ns, min, hr, days)
     """
     UNIT_QUANTITY_CLASS = Time
     
 
-class FrequencyRange(RangeWithUnits):
+class FrequencyRange(RangeWithUnits[Frequency]):
     """
     Represents a position range with units (e.g. Hz, kHz, MHz, GHz)
     """
     UNIT_QUANTITY_CLASS = Frequency
 
 
-class SampleRateRange(RangeWithUnits):
+class SampleRateRange(RangeWithUnits[SampleRate]):
     """
     Represents a position range with units (e.g. S/s, kS/s, MS/s, GS/s)
     """

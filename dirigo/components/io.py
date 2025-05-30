@@ -61,12 +61,13 @@ def load_line_distortion_calibration(
 
 def load_stage_scanner_angle(
         path: Path = config_path() / "optics/stage_scanner_angle.csv"
-    ):
+    ) -> units.Angle:
     try:
         data = np.loadtxt(path, delimiter=',', dtype=np.float64, skiprows=1)
         return units.Angle(float(data))
     except FileNotFoundError:
-        return None
+        # If not calibrated, then return 0 angle (no error axis error)
+        return units.Angle(float(data))
 
 
 def load_signal_offset(

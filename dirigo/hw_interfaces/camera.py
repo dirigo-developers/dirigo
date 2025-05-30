@@ -23,7 +23,7 @@ class FrameGrabber(HardwareInterface):
         pass
 
     @abstractmethod
-    def serial_read(self):
+    def serial_read(self, nbytes: Optional[int] = None) -> str:
         pass
 
     @property
@@ -64,6 +64,8 @@ class FrameGrabber(HardwareInterface):
 
     @property
     def bytes_per_buffer(self):
+        if self.roi_height is None or self.roi_width is None:
+            raise RuntimeError("ROI height or width not initialized")
         return self.roi_height * self.roi_width * self.bytes_per_pixel
 
     @abstractmethod
@@ -97,17 +99,17 @@ class Camera(HardwareInterface):
     # frame rate / interval
 
     @property
-    def pixel_size(self):
+    def pixel_size(self) -> units.Position:
         return self._pixel_size
 
     @property
     @abstractmethod
-    def integration_time(self):
+    def integration_time(self) -> units.Time:
         pass
     
     @integration_time.setter
     @abstractmethod
-    def integration_time(self, new_value):
+    def integration_time(self, new_value: units.Time):
         pass
 
     @property

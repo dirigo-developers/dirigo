@@ -132,10 +132,12 @@ if __name__ == "__main__":
 
     diri = Dirigo()
 
-    acquisition = diri.make_acquisition("raster_frame")
-    processor   = diri.make_processor("raster_frame", upstream=acquisition)
-    display     = diri.make_display_processor("frame", upstream=processor)
-    logger      = diri.make_logger("tiff", upstream=processor)
+    # acquisition = diri.make_acquisition("raster_frame")
+    # processor   = diri.make_processor("raster_frame", upstream=acquisition)
+    # display     = diri.make_display_processor("frame", upstream=processor)
+    # logger      = diri.make_logger("tiff", upstream=processor)
+
+    acquisition = diri.make_acquisition("line_scan_camera_strip")
 
     acquisition.start()
     acquisition.join(timeout=100.0)

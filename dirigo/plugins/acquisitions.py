@@ -297,7 +297,7 @@ class LineAcquisition(SampleAcquisition):
             digi.acquire.record_length,
             digi.acquire.n_channels_enabled
         )
-        self.init_product_pool(n=3, shape=shape, dtype=np.int16)
+        self.init_product_pool(n=4, shape=shape, dtype=np.int16)
 
         # Start scanner & digitizer
         if isinstance(self.hw.fast_raster_scanner, ResonantScanner):
@@ -493,8 +493,8 @@ class FrameAcquisitionSpec(LineAcquisitionSpec):
 
 
 class FrameAcquisition(LineAcquisition):
-    required_resources = (Digitizer, DetectorSet, FastRasterScanner, SlowRasterScanner)
-    optional_resources = (MultiAxisStage, ObjectiveZScanner)
+    required_resources = [Digitizer, DetectorSet, FastRasterScanner, SlowRasterScanner]
+    optional_resources = [MultiAxisStage, ObjectiveZScanner]
     spec_location = Path(user_config_dir("Dirigo")) / "acquisition/frame"
     Spec: Type[FrameAcquisitionSpec] = FrameAcquisitionSpec
 
