@@ -238,3 +238,8 @@ class Display(Worker):
     
     # def _receive_product(self, block = True, timeout = None) -> AcquisitionProduct | ProcessorProduct:
     #     return super()._receive_product(block, timeout)
+
+    @abstractmethod
+    def update_display(self, skip_when_acquisition_in_progress: bool = True):
+        """On demand reprocessing of the last acquired frame for display."""
+        pass

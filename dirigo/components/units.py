@@ -82,8 +82,8 @@ class UnitQuantity(float):
         # numeric value = int or float, w/ optional scientific‑notation exponent
         NUMERIC_VALUE = r"[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?"
 
-        # a “unit token” = letters (incl. Greek μ/µ) followed by optional ^digits exponent
-        UNIT_TOKEN = r"[A-Za-zμµ]+(?:\^\d+)?"
+        # a “unit token” = letters (incl. Greek μ, µ, Ω) followed by optional ^digits exponent
+        UNIT_TOKEN = r"[A-Za-zμµΩ]+(?:\^\d+)?"
 
         pattern = rf"""
             ^\s*                                # optional leading space

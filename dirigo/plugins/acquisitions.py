@@ -442,7 +442,7 @@ class FrameAcquisitionSpec(LineAcquisitionSpec):
     """Specifications for frame series acquisition"""
     MAX_PIXEL_HEIGHT_ADJUSTMENT = 0.01
     def __init__(self, 
-                 frame_height: str, 
+                 frame_height: str | units.Position, 
                  flyback_periods: int, 
                  pixel_height: str = "", # leave empty to set pxiel height = width
                  **kwargs):
