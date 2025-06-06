@@ -499,4 +499,5 @@ class LineCameraLineProcessor(Processor[LineCameraLineAcquisition]):
         """
         return units.IntRange(
             min=-2**(self._bits_precision-1), 
-            max=2**(s
+            max=2**(self._bits_precision-1) - 1
+        )
