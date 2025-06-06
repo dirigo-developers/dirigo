@@ -115,8 +115,8 @@ class SystemConfig:
         return self._data["stages"]
     
     @cached_property
-    def line_scan_camera(self) -> dict[str, Any]:
-        return self._data["line_scan_camera"]
+    def line_camera(self) -> dict[str, Any]:
+        return self._data["line_camera"]
     
     @cached_property
     def illuminator(self) -> dict[str, Any]:

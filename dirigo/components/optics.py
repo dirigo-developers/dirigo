@@ -74,6 +74,8 @@ class CameraOptics:
             raise ValueError("Magnification must be a float or an integer")
         self._magnification = float(magnification)
 
+        self.stage_camera_angle = units.Angle(0) # TODO load this from calibration
+
     @property
     def magnification(self) -> float:
         return self._magnification

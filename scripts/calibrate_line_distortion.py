@@ -14,7 +14,7 @@ TRANSLATION = "30 um"
 N_STEPS = 3
 
 # Plotting functions
-def check_calibration(file_path: str, ff: float) -> tuple:
+def check_calibration(file_path: str, ff: float):
 
     data = np.loadtxt(file_path, delimiter=',', dtype=np.float64, skiprows=1)
     ys = data[:,1:]
@@ -62,27 +62,27 @@ spec = StageTranslationCalibration.Spec(
 )
 
 name = "line_distortion_calibration"
-acquisition = diri.make("acquisition", "stage_translation_calibration", spec=spec)
-processor   = diri.make("processor", "raster_frame", upstream=acquisition)
-logger      = diri.make("logger", name, upstream=processor)
+acquisition = diri.make_acquisition("stage_translation_calibration", spec=spec)
+processor   = diri.make_processor("raster_frame", upstream=acquisition)
+logger      = diri.make_logger(name, upstream=processor)
 # also log raw frame data so we can reprocess later to check calibration
 raw_logger  = diri.make("logger", "tiff", upstream=acquisition)
 raw_logger.basename = name
-raw_logger.frames_per_file = float('inf')
+raw_logger.frames_per_file = -1
 
-# acquisition.start()
-# logger.join()
+acquisition.start()
+logger.join()
 
 # Check initial distortion
 check_calibration(logger.data_filepath, ff=spec.fill_fraction)
 
 
 # Check quality of correction using saved data and reprocessing frames
-loader    = diri.make("loader", "raw_raster_frame", 
+loader    = diri.make_loader("raw_raster_frame", 
                       file_path=io.data_path() / f"{name}.tif",
                       spec_class=StageTranslationCalibration.Spec)
-processor = diri.make("processor", "raster_frame", upstream=loader)
-logger    = diri.make("logger", name, upstream=processor)
+processor = diri.make_processor("raster_frame", upstream=loader)
+logger    = diri.make_logger(name, upstream=processor)
 
 loader.start()
 logger.join()

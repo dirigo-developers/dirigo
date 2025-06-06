@@ -9,6 +9,7 @@ from dirigo.sw_interfaces.worker import EndOfStream
 from dirigo.sw_interfaces.processor import Processor, ProcessorProduct
 from dirigo.sw_interfaces import Logger
 from dirigo.sw_interfaces.acquisition import Acquisition, AcquisitionProduct
+from dirigo.hw_interfaces import Digitizer
 from dirigo.plugins.acquisitions import FrameAcquisition, FrameAcquisitionSpec
 
 
@@ -99,7 +100,6 @@ class TiffLogger(Logger):
         # Create the writer object if necessary
         options = {
                 'photometric': 'minisblack',
-                'planarconfig': 'contig', # switch for single channel
                 'resolution': (self._x_dpi, self._y_dpi),
                 'contiguous': True
             }
@@ -116,6 +116,10 @@ class TiffLogger(Logger):
         else:
             options['contiguous'] = True 
 
+        if isinstance(self._acq.data_acquisition_device, Digitizer):
+            if len(self._acq.data_acquisition_device.channels) > 1:
+                options['planarconfig'] = 'contig'
+
         self._writer.write( 
                 frame.data, 
                 **options
@@ -123,8 +127,10 @@ class TiffLogger(Logger):
         self.frames_saved += 1
 
         # Accumulate timestamps & positions
-        self._timestamps.append(frame.timestamps)
-        self._positions.append(frame.positions)
+        if frame.timestamps is not None:
+            self._timestamps.append(frame.timestamps)
+        if frame.positions is not None:
+            self._positions.append(frame.positions)
 
         # when number of frames per file reached, close writer & write metadata
         if self.frames_saved % self.frames_per_file == 0:
@@ -192,7 +198,7 @@ class TiffLogger(Logger):
     @cached_property
     def _x_dpi(self) -> float:
         acq = self._acq 
-        fast_axis =  acq.hw.fast_raster_scanner.axis
+        fast_axis = acq.hw.fast_raster_scanner.axis
         return self._fast_axis_dpi if fast_axis == 'x' else self._slow_axis_dpi
     
     @cached_property
@@ -208,15 +214,26 @@ class TiffLogger(Logger):
         system_json = json.dumps(self._acq.system_config.to_dict())
         runtime_json = json.dumps(self._acq.runtime_info.to_dict())
         spec_json = json.dumps(self._acq.spec.to_dict())      
-        digi_json = json.dumps(self._acq.digitizer_profile.to_dict())
-
         temp_entry = b' \x00' # temp will be patched (overwrite) later
-        return [
-            (self.SYSTEM_CONFIG_TAG,     's',  0,  system_json,   True),
-            (self.RUNTIME_INFO_TAG,      's',  0,  runtime_json,  True),
-            (self.ACQUISITION_SPEC_TAG,  's',  0,  spec_json,     True),
-            (self.DIGITIZER_PROFILE_TAG, 's',  0,  digi_json,     True),
-            (self.TIMESTAMPS_TAG,        'B',  1,  temp_entry,    True),
-            (self.POSITIONS_TAG,         'B',  1,  temp_entry,    True)
-        ]
+
+        if isinstance(self._acq.data_acquisition_device, Digitizer):
+            digi_json = json.dumps(self._acq.digitizer_profile.to_dict())
+            return [
+                (self.SYSTEM_CONFIG_TAG,     's',  0,  system_json,   True),
+                (self.RUNTIME_INFO_TAG,      's',  0,  runtime_json,  True),
+                (self.ACQUISITION_SPEC_TAG,  's',  0,  spec_json,     True),
+                (self.DIGITIZER_PROFILE_TAG, 's',  0,  digi_json,     True),
+                (self.TIMESTAMPS_TAG,        'B',  1,  temp_entry,    True),
+                (self.POSITIONS_TAG,         'B',  1,  temp_entry,    True)
+            ]
+        else:
+            #cam_json = json.dumps(self._acq.camera_profile.to_dict()) # TODO make camera profile & to_dict()
+            return [
+                (self.SYSTEM_CONFIG_TAG,     's',  0,  system_json,   True),
+                (self.RUNTIME_INFO_TAG,      's',  0,  runtime_json,  True),
+                (self.ACQUISITION_SPEC_TAG,  's',  0,  spec_json,     True),
+                #(self.CAMERA_PROFILE_TAG,    's',  0,  cam_json,      True),
+                (self.TIMESTAMPS_TAG,        'B',  1,  temp_entry,    True),
+                (self.POSITIONS_TAG,         'B',  1,  temp_entry,    True)
+            ]
 

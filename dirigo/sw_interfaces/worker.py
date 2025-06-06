@@ -118,6 +118,7 @@ class Worker(threading.Thread, ABC):
         product = self._inbox.get(block=block, timeout=timeout)
         
         if product is None:
+            print("Got a None")
             raise EndOfStream
 
         if not isinstance(product, Product):

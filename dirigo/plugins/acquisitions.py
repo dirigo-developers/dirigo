@@ -9,22 +9,83 @@ from dataclasses import dataclass, asdict
 from platformdirs import user_config_dir
 import numpy as np
 
-from dirigo.components import units
+from dirigo.components import units, io
 from dirigo.sw_interfaces.worker import EndOfStream, Product
-from dirigo.sw_interfaces.acquisition import Acquisition, AcquisitionProduct
+from dirigo.hw_interfaces.hw_interface import NoBuffers
+from dirigo.sw_interfaces.acquisition import Acquisition, AcquisitionSpec, AcquisitionProduct
 from dirigo.hw_interfaces.detector import DetectorSet, Detector
 from dirigo.hw_interfaces.digitizer import Digitizer, DigitizerProfile
 from dirigo.hw_interfaces.scanner import (
     FastRasterScanner, SlowRasterScanner, GalvoScanner, ResonantScanner,
     ObjectiveZScanner
 )
+from dirigo.hw_interfaces.camera import LineCamera
+from dirigo.hw_interfaces.illuminator import Illuminator
+from dirigo.hw_interfaces.encoder import MultiAxisLinearEncoder
 from dirigo.hw_interfaces.stage import MultiAxisStage
-    
+
+from dirigo_e2v_line_camera.dirigo_e2v_line_camera import TriggerModes # TODO write Dirigo-specific enum for trigger modes
+
 
 TWO_PI = 2 * math.pi 
 
 
-class SampleAcquisitionSpec(Acquisition.Spec):
+# ---------- Runtime objects ----------
+@dataclass
+class LineAcquisitionRuntimeInfo:
+    """
+    Makes runtime LineAcquisition info and parameters available.
+    (Experimental) 
+    """
+    scanner_amplitude: units.Angle
+    digitizer_bit_depth: int
+    digitizer_trigger_delay: int
+
+    @classmethod
+    def from_acquisition(cls, acquisition: "LineAcquisition"):
+        return cls(
+            scanner_amplitude=acquisition.hw.fast_raster_scanner.amplitude,
+            digitizer_bit_depth=acquisition.hw.digitizer.bit_depth,
+            digitizer_trigger_delay=acquisition.hw.digitizer.acquire.trigger_delay_samples
+        )
+    
+    @classmethod
+    def from_dict(cls, d: dict):
+        return cls(
+            scanner_amplitude=units.Angle(d['scanner_amplitude']),
+            digitizer_bit_depth=int(d['digitizer_bit_depth']),
+            digitizer_trigger_delay=int(d['digitizer_trigger_delay'])
+        )
+    
+    def to_dict(self) -> dict:
+        """Make dictionary for serialization."""
+        return asdict(self)
+
+
+@dataclass
+class CameraAcquisitionRuntimeInfo:
+    camera_bit_depth: int
+
+    @classmethod
+    def from_acquisition(cls, acq: "LineCameraAcquisition"):
+        return cls(
+            camera_bit_depth=acq.hw.line_camera.bit_depth,
+        )
+
+    @classmethod
+    def from_dict(cls, d: dict):
+        return cls(
+            camera_bit_depth=int(d['camera_bit_depth']),
+        )
+    
+    def to_dict(self) -> dict:
+        """Make dictionary for serialization."""
+        return asdict(self)
+
+
+
+# ---------- 0-D acquisitions ----------
+class SampleAcquisitionSpec(AcquisitionSpec):
     def __init__(
             self,
             record_length: int,
@@ -70,8 +131,9 @@ class SampleAcquisition(Acquisition):
     spec_location = Path() # TODO
     Spec: Type[SampleAcquisitionSpec] = SampleAcquisitionSpec
 
-    def __init__(self, hw, system_config, spec):
-        super().__init__(hw, system_config, spec) # sets up thread, inbox, stores hw, checks resources
+    def __init__(self, hw, system_config, spec, 
+                 thread_name: str = "Sample acquisition"):
+        super().__init__(hw, system_config, spec, thread_name) # sets up thread, inbox, stores hw, checks resources
         self.spec: SampleAcquisitionSpec # to refine type hints    
         self.active = threading.Event()  # to indicate data acquisition occuring
 
@@ -127,13 +189,143 @@ class SampleAcquisition(Acquisition):
         return super().get_specification(spec_name) # type: ignore
 
 
+class LineCameraAcquisitionSpec(AcquisitionSpec):
+    """Specification for a line scan camera acquisition.
+    
+    Note: not meant to convey spatial/spectral semantics. Use subclasses
+    LineCameraLineAcquisition for one or more physical lines or 
+    LineCameraSpectrumAcquisition for one or more spectral measurements
+    """
+    def __init__(self,
+                 integration_time: units.Time | str, # e.g. "1 ms"
+                 line_period: units.Time | str, # TODO allow either line_rate or line_period
+                 pixels_per_line: int,
+                 lines_per_buffer: int,
+                 buffers_per_acquisition: int = 1, # -1 codes for unlimited
+                 roi_start_pixel: int = 0,
+                 **kwargs
+                 ):
+        super().__init__()
+
+        self.integration_time = units.Time(integration_time)
+        self.line_period = units.Time(line_period)
+        if not isinstance(roi_start_pixel, int) or roi_start_pixel < 0:
+            raise ValueError("ROI start pixel must be an integer > 0")
+        self.roi_start_pixel = roi_start_pixel
+        if not isinstance(pixels_per_line, int):
+            raise ValueError("Pixel per line must be an integer")
+        self.pixels_per_line = pixels_per_line
+        if not isinstance(lines_per_buffer, int):
+            raise ValueError("Lines per buffer must be an integer")
+        self.lines_per_buffer = lines_per_buffer
+        if not isinstance(buffers_per_acquisition, int):
+            raise ValueError("Buffers per acquisition must be an integer")
+        self.buffers_per_acquisition = buffers_per_acquisition
+
+
+class LineCameraAcquisition(Acquisition):
+    """
+    Base acquisition class for a line-scan camera (i.e. linear array sensor)
+    
+    Use subclasses to provide spatial/spectral semantics.
+    """
+    required_resources = [LineCamera,]
+    spec_location = io.config_path() / "acquisitions/line_camera"
+    Spec = LineCameraAcquisitionSpec
+
+    def __init__(self, hw, system_config, spec,
+                 thread_name: str = "Line-scan camera acquisition"):
+        super().__init__(hw, system_config, spec, thread_name) # sets up thread, inbox, stores hw, checks resources
+        self.spec: LineCameraAcquisitionSpec
+
+        # Set line camera properties
+        self.configure_camera()
+        self.hw.frame_grabber.prepare_buffers(nbuffers=4)
+
+        self.runtime_info = CameraAcquisitionRuntimeInfo.from_acquisition(self)
+        self.camera_profile = [] # TODO need to fix this
+
+        self.active = threading.Event()  # to indicate data acquisition occuring
+
+    def configure_camera(self, trigger_mode: str = "free run"):
+        """Configure camera and framegrabber."""
+        grabber = self.hw.frame_grabber
+        cam = self.hw.line_camera
+
+        cam.integration_time = self.spec.integration_time
+
+        if trigger_mode == "free run":
+            cam.trigger_mode = TriggerModes.FREE_RUN
+            cam.line_period = self.spec.line_period
+        elif trigger_mode == "external trigger":
+            cam.trigger_mode = TriggerModes.EXTERNAL_TRIGGER
+            # there's no definite line period for external triggering
+        else:
+            raise ValueError(f"Unsupported trigger mode: {trigger_mode}")
+        # TODO add profile settings: gain, offsets, etc.
+
+        # set ROI size based on Spec
+        grabber.roi_left = self.spec.roi_start_pixel
+        grabber.roi_width = self.spec.pixels_per_line
+        self.hw.frame_grabber.lines_per_buffer = self.spec.lines_per_buffer
+
+    @property
+    def line_rate(self) -> units.Frequency:
+        """Inverse line period (if provided)"""
+        return units.Frequency(1 / self.spec.line_period)
+    
+    def _get_free_product(self) -> AcquisitionProduct:
+        return super()._get_free_product() # type: ignore
+
+    def run(self):
+        # Set up acquisition buffer pool
+        shape = self.hw.frame_grabber._buffers[0].buffer.shape # TODO add some sort of shape/dtype to API for framegrabber
+        dtype = self.hw.frame_grabber._buffers[0].buffer.dtype
+        self.init_product_pool(n=4, shape=shape, dtype=dtype) 
+
+        self.hw.frame_grabber.start()
+        self.active.set() # signals active recording
+
+        try:
+            acq_product = self._get_free_product()
+
+            bpa = self.spec.buffers_per_acquisition
+            while not self._stop_event.is_set():
+                # for finite acquisition, stop when recorded set number of buffers
+                if bpa != -1 and self.hw.frame_grabber.buffers_acquired >= bpa: # bpa != -1 codes for finite
+                    break 
+
+                try:               
+                    self._get_buffer_data(acq_product=acq_product)
+                    self._publish(acq_product)
+                    print("Published a buffer")
+
+                    acq_product = self._get_free_product() # Get a fresh buffer
+
+                except NoBuffers:
+                    time.sleep(0.001)
+            
+        finally:
+            self.cleanup()
+
+    def _get_buffer_data(self, acq_product):
+        # Shadow this in subclasses to add metadata to acquisition product (ie positions, timestamps, etc)
+        self.hw.frame_grabber.get_next_completed_buffer(acq_product)
+
+    def cleanup(self):
+        self.hw.frame_grabber.stop()
+        self._publish(None) # sentinel that shuts down downstream Workers
+        
+
+
+# ---------- 1-D acquisitions ----------
 class LineAcquisitionSpec(SampleAcquisitionSpec): 
     """Specification for a point-scanned line acquisition"""
     MAX_PIXEL_SIZE_ADJUSTMENT = 0.01
     def __init__(
         self,
-        line_width: str,
-        pixel_size: str,
+        line_width: units.Position | str,
+        pixel_size: units.Position | str,
         lines_per_buffer: int,
         bidirectional_scanning: bool = False,
         pixel_time: Optional[str] = None, # e.g. "1 μs"
@@ -198,47 +390,17 @@ class LineAcquisitionSpec(SampleAcquisitionSpec):
         return round(self.line_width / self.pixel_size)
 
 
-@dataclass
-class LineAcquisitionRuntimeInfo:
-    """
-    Makes runtime LineAcquisition info and parameters available.
-    (Experimental) 
-    """
-    scanner_amplitude: units.Angle
-    digitizer_bit_depth: int
-    digitizer_trigger_delay: int
-
-    @classmethod
-    def from_acquisition(cls, acquisition: "LineAcquisition"):
-        return cls(
-            scanner_amplitude=acquisition.hw.fast_raster_scanner.amplitude,
-            digitizer_bit_depth=acquisition.hw.digitizer.bit_depth,
-            digitizer_trigger_delay=acquisition.hw.digitizer.acquire.trigger_delay_samples
-        )
-    
-    @classmethod
-    def from_dict(cls, d: dict):
-        return cls(
-            scanner_amplitude=units.Angle(d['scanner_amplitude']),
-            digitizer_bit_depth=int(d['digitizer_bit_depth']),
-            digitizer_trigger_delay=int(d['digitizer_trigger_delay'])
-        )
-    
-    def to_dict(self) -> dict:
-        """Make dictionary for serialization."""
-        return asdict(self)
-
-
 class LineAcquisition(SampleAcquisition):
     required_resources = [Digitizer, DetectorSet, FastRasterScanner]
     optional_resources = [MultiAxisStage, ObjectiveZScanner]
     spec_location = Path(user_config_dir("Dirigo")) / "acquisition/line"
     Spec: Type[LineAcquisitionSpec] = LineAcquisitionSpec
     
-    def __init__(self, hw, system_config, spec):
+    def __init__(self, hw, system_config, spec,
+                 thread_name: str = "Line acquisition"):
         """Initialize a line acquisition worker."""
         # Tip: since this method runs on main thread, limit to HW init tasks that will return fast, prepend slower tasks to run method
-        super().__init__(hw, system_config, spec) # sets up thread, inbox, stores hw, checks resources
+        super().__init__(hw, system_config, spec, thread_name) # sets up thread, inbox, stores hw, checks resources
         self.spec: LineAcquisitionSpec # to refine type hints  
 
         # for brevity
@@ -333,7 +495,7 @@ class LineAcquisition(SampleAcquisition):
                 if bpa != -1 and digi.acquire.buffers_acquired >= bpa: # bpa=-1 codes for infinite
                     break
                 #print("Buffers acquired", digi.acquire.buffers_acquired)
-                acq_product = self.get_free_product()
+                acq_product = self._get_free_product()
                 digi.acquire.get_next_completed_buffer(acq_product)
 
                 if self.hw.stages or self.hw.objective_z_scanner:
@@ -374,12 +536,14 @@ class LineAcquisition(SampleAcquisition):
         """Subclasses can override this method to provide position readout from
         stages or linear position encoders."""
         positions = []
-        if self.hw.stages:
+        try:
             positions.append(self.hw.stages.x.position)
             positions.append(self.hw.stages.y.position)
+        except (KeyError, AttributeError): pass
 
-        if self.hw.objective_z_scanner:
+        try:
             positions.append(self.hw.objective_z_scanner.position)
+        except (KeyError, AttributeError): pass
         
         return tuple(positions) if len(positions) else None
 
@@ -440,6 +604,87 @@ class LineAcquisition(SampleAcquisition):
         return super().get_specification(spec_name) # type: ignore
 
 
+class LineCameraLineAcquisitionSpec(LineCameraAcquisitionSpec):
+    def __init__(self, 
+                 line_width: units.Position | str,
+                 pixel_size: units.Position | str,  
+                 integration_time: units.Time | str,
+                 line_period: units.Time | str,
+                 lines_per_buffer: int,               
+                 **kwargs):
+        """
+        Specify a line scan camera 1-D line acquisition.
+        Note: `line_width` will be adjusted such that it is divisible by `pixel_size`
+        """
+        self.pixel_size = units.Position(pixel_size)
+
+        lw = units.Position(line_width)
+        pixels_per_line = round(lw / self.pixel_size)
+        self.line_width = units.Position(pixels_per_line * self.pixel_size)
+
+        super().__init__(
+            integration_time=integration_time,
+            line_period=line_period,
+            pixels_per_line=pixels_per_line,
+            lines_per_buffer=lines_per_buffer,
+            **kwargs
+        )
+
+
+class LineCameraLineAcquisition(LineCameraAcquisition):
+    """
+    """
+    required_resources = [LineCamera, Illuminator, MultiAxisLinearEncoder] # encoder may be optional
+    spec_location = io.config_path() / "acquisition/line_camera_line"
+    Spec = LineCameraLineAcquisitionSpec
+
+    def __init__(self, hw, system_config, spec,
+                 thread_name: str = "Line scan camera line acquisition"):
+        super().__init__(hw, system_config, spec, thread_name) # sets up thread, inbox, stores hw, checks resources
+        self.spec: LineCameraLineAcquisitionSpec
+
+    def configure_camera(self, trigger_mode: str = "external trigger"):
+        """Configure camera and framegrabber."""
+        super().configure_camera(trigger_mode) # sets integration time, trigger mode, lines per buffer, etc.
+
+        # set ROI size based on line spec, assumed ROI centered in array
+        obj_pixel_size = self.hw.line_camera.pixel_size / self.hw.camera_optics.magnification
+        roi_width = round(self.spec.line_width / obj_pixel_size)
+        self.hw.frame_grabber.roi_width = roi_width
+        self.hw.frame_grabber.roi_left = (self.hw.frame_grabber.pixels_width - roi_width) // 2
+
+    @property
+    def axis(self) -> str:
+        """Axis of the array of pixels"""
+        return self.hw.line_camera.axis
+
+    # run() - unchanged from base class, but shadow _get_buffer_data to add functionality
+
+    def _get_buffer_data(self, acq_product: AcquisitionProduct):
+        self.hw.frame_grabber.get_next_completed_buffer(acq_product)
+        acq_product.positions = self._read_positions()
+    
+    def _read_positions(self):
+        """ Read positions, if stage/z scanner available. """
+        positions = []
+        try:
+            positions.append(self.hw.stages.x.position)
+            positions.append(self.hw.stages.y.position)
+        except (KeyError, AttributeError): pass
+
+        try:
+            positions.append(self.hw.objective_z_scanner.position)
+        except (KeyError, AttributeError): pass
+        
+        return tuple(positions) if len(positions) else None
+
+    def cleanup(self):
+        super().cleanup()
+
+
+
+# ---------- 2-D acquisitions ----------
+# (for 2-D line camera acquisitions, see separate package "dirigo-strip-acquisition")
 class FrameAcquisitionSpec(LineAcquisitionSpec):
     """Specifications for frame series acquisition"""
     MAX_PIXEL_HEIGHT_ADJUSTMENT = 0.01
@@ -542,7 +787,8 @@ class FrameAcquisition(LineAcquisition):
     def get_specification(cls, spec_name = "default") -> FrameAcquisitionSpec:
         return super().get_specification(spec_name) # type: ignore
         
-        
+
+# ---------- 3-D acquisitions ----------
 class StackAcquisitionSpec(FrameAcquisitionSpec):
     def __init__(self, 
                  lower_limit: str | units.Position, 

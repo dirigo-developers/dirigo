@@ -16,3 +16,8 @@ class HardwareInterface(ABC):
             return cls.attr_name
         # fallback: FastRasterScanner -> fast_raster_scanner
         return re.sub(r'(?<!^)(?=[A-Z])', '_', cls.__name__).lower()
+    
+
+class NoBuffers(Exception):
+    """Raised by HardWareInterface when no buffers are available."""
+    pass

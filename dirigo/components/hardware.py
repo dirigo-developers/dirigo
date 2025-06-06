@@ -9,7 +9,7 @@ from dirigo.hw_interfaces.digitizer import Digitizer
 from dirigo.hw_interfaces.stage import MultiAxisStage
 from dirigo.hw_interfaces.encoder import MultiAxisLinearEncoder
 from dirigo.hw_interfaces.scanner import FastRasterScanner, SlowRasterScanner, ObjectiveZScanner
-from dirigo.hw_interfaces.camera import FrameGrabber, LineScanCamera
+from dirigo.hw_interfaces.camera import FrameGrabber, LineCamera
 from dirigo.hw_interfaces.illuminator import Illuminator
 
 
@@ -42,6 +42,9 @@ class Hardware:
                 f"Available: {', '.join(_eps(group)) or 'none'}"
             ) from e
         
+    def exists(self, resource_attribute_name: str) -> bool:
+        return resource_attribute_name in self.__dict__
+    
     # --- hardward devices (lazy loading) ---
     @cached_property
     def digitizer(self) -> Digitizer:
@@ -110,10 +113,10 @@ class Hardware:
         return self._load("dirigo_frame_grabbers", cfg["type"], **cfg)
     
     @cached_property
-    def line_scan_camera(self) -> LineScanCamera: # this could just be camera
-        cfg = self._cfg.line_scan_camera
+    def line_camera(self) -> LineCamera: # this could just be camera
+        cfg = self._cfg.line_camera
         assert cfg is not None
-        return self._load("dirigo_line_scan_cameras", cfg["type"], 
+        return self._load("dirigo_line_cameras", cfg["type"], 
             frame_grabber=self.frame_grabber, **cfg)
     
     @cached_property
@@ -143,7 +146,7 @@ class Hardware:
         """
         if self._cfg.digitizer:
             return sum([channel.enabled for channel in self.digitizer.channels])
-        elif self._cfg.line_scan_camera:
+        elif self._cfg.line_camera:
             return 1 # monochrome only for now, but RGB cameras should be 3-channel
         else:
             raise RuntimeError("No channels available: lacking digitizer or camera")
@@ -156,7 +159,7 @@ class Hardware:
         """
         if self._cfg.digitizer:
             return len(self.digitizer.channels)
-        elif self._cfg.line_scan_camera:
+        elif self._cfg.line_camera:
             return 1 # monochrome only for now, but RGB cameras should be 3-channel
         else:
             raise RuntimeError("No channels available: lacking digitizer or camera")

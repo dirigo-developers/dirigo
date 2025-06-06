@@ -6,12 +6,12 @@ from pathlib import Path
 from dirigo import io
 from dirigo.components.hardware import Hardware
 from dirigo.sw_interfaces import Acquisition, Processor, Display, Logger
-from dirigo.sw_interfaces.acquisition import AcquisitionSpec
+from dirigo.sw_interfaces.acquisition import AcquisitionSpec, Loader
 from dirigo.sw_interfaces.display import DisplayPixelFormat
 from dirigo.plugins.displays import FrameDisplay
 
 
-_Worker = Acquisition | Processor | Display | Logger
+_Worker = Acquisition | Loader | Processor | Display | Logger
 
 
 class PluginError(RuntimeError):
@@ -52,6 +52,10 @@ class Dirigo:
              spec: AcquisitionSpec | str | None = ...,
              **kw: Any) -> Acquisition: ...
     
+    @overload
+    def make(self, group: Literal["loader"], name: str, *,
+             file_path: Path) -> Loader: ...
+
     @overload
     def make(self, group: Literal["processor"],  name: str, *,
              upstream: Acquisition | Processor, **kw: Any) -> Processor: ...
@@ -117,6 +121,9 @@ class Dirigo:
     def make_acquisition(self, name: str, **kw: Any) -> Acquisition:
         return self.make("acquisition", name, **kw)
     
+    def make_loader(self, name: str, file_path: Path, **kw: Any) -> Loader:
+        return self.make("loader", name, file_path=file_path)
+    
     def make_processor(self, name: str, *, upstream, **kw: Any) -> Processor:
         return self.make("processor", name, upstream=upstream, **kw)
     
@@ -137,7 +144,8 @@ if __name__ == "__main__":
     # display     = diri.make_display_processor("frame", upstream=processor)
     # logger      = diri.make_logger("tiff", upstream=processor)
 
-    acquisition = diri.make_acquisition("line_scan_camera_strip")
+    acquisition = diri.make_acquisition("line_camera_strip")
+    raw_logger  = diri.make_logger("tiff", upstream=acquisition)
 
     acquisition.start()
     acquisition.join(timeout=100.0)

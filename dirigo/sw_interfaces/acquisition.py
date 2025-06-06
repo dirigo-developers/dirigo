@@ -68,7 +68,7 @@ class AcquisitionWorker(Worker):
             )
             self._product_pool.put(acquisition_product)
 
-    def get_free_product(self) -> AcquisitionProduct:
+    def _get_free_product(self) -> AcquisitionProduct:
         return self._product_pool.get()
 
 
@@ -135,12 +135,18 @@ class Acquisition(AcquisitionWorker):
 
     @property
     def data_acquisition_device(self):
-        """Returns handle to the hardware resource actually acquiring data."""
+        """
+        Returns handle to the hardware resource actually acquiring data.
+
+        Either class Digitizer, FrameGrabber, or Camera
+        """
         acq_device = self.required_resources[0].__name__
         if acq_device == "Digitizer":
             return self.hw.digitizer
-        elif acq_device == "LineScanCamera":
-            return self.hw.line_scan_camera
+        elif acq_device == "FrameGrabber":
+            return self.hw.frame_grabber
+        elif acq_device == "Camera":
+            return self.hw.camera
         else:
             raise RuntimeError(f"Invalid data capture device: {acq_device}")
     

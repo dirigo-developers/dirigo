@@ -8,12 +8,13 @@ from scipy import fft
 
 from dirigo.components import units
 from dirigo.components import io
-from dirigo.sw_interfaces.worker import EndOfStream, Product
-from dirigo.sw_interfaces.processor import Processor
-from dirigo.sw_interfaces.acquisition import AcquisitionProduct
+from dirigo.sw_interfaces.worker import EndOfStream
+from dirigo.sw_interfaces.processor import Processor, ProcessorProduct
+from dirigo.sw_interfaces.acquisition import Acquisition, AcquisitionProduct
 from dirigo.plugins.acquisitions import (
     LineAcquisitionSpec, LineAcquisition, 
-    FrameAcquisitionSpec, FrameAcquisition
+    FrameAcquisitionSpec, FrameAcquisition,
+    LineCameraLineAcquisitionSpec, LineCameraLineAcquisition
 )
 
 
@@ -137,7 +138,7 @@ def compute_cross_power_spectrum(F: np.ndarray):
     return xps
 
 
-class RasterFrameProcessor(Processor):
+class RasterFrameProcessor(Processor[Acquisition]):
     def __init__(self, 
                  upstream: LineAcquisition | FrameAcquisition, # and subclasses: FrameAcquisition, StackAcquisition, etc.
                  bits_precision: int = 16):
@@ -209,7 +210,7 @@ class RasterFrameProcessor(Processor):
 
         self._scaling_factor = 2 ** (
             self._bits_precision - runtime_info.digitizer_bit_depth
-        )                   # should we bit shift instead of scale by multiply?
+        )
 
         # Try loading gradient calibration
         try:
@@ -228,6 +229,7 @@ class RasterFrameProcessor(Processor):
 
                 with self._receive_product() as acq_prod:
                     proc_product = self._get_free_product() # Check out a product from the pool
+                    # TODO, following could be factored out into a private method to improve clarity
                     t0 = time.perf_counter()
 
                     # If array of timestamps are assigned (default is None)
@@ -377,3 +379,124 @@ class RasterFrameProcessor(Processor):
             max=2**(self._bits_precision-1) - 1
         )
 
+
+
+
+class LineCameraLineProcessor(Processor[LineCameraLineAcquisition]):
+    def __init__(self, 
+                 upstream,
+                 bits_precision: int = 16):
+        """
+        Initialize a camera line processor worker for the Acquisition worker.
+        """
+        super().__init__(upstream)
+        self._spec: LineCameraLineAcquisitionSpec
+        self._acq: LineCameraLineAcquisition
+        
+        camera_profile = self._acq.camera_profile # TODO, do we need this?
+        system_config = self._acq.system_config
+        runtime_info = self._acq.runtime_info
+
+        # Compute shape & datatype. Pre-allocate Products
+        if (bits_precision % 2) or not (8 <= bits_precision <= 16):
+            raise ValueError("Bits precision must be even integer between 8 and 16")
+        self._bits_precision = int(bits_precision)
+        n_lines = self._spec.lines_per_buffer
+        n_channels = 1
+        self.processed_shape = (n_lines, self._spec.pixels_per_line, n_channels)
+        dtype = np.uint16 if bits_precision > 8 else np.uint8 # TODO, ok to assume cameras alwasy produce uint16 data?
+
+        self.init_product_pool(n=4, shape=self.processed_shape, dtype=dtype)
+
+        self._scaling_factor = 2 ** (
+            self._bits_precision - runtime_info.camera_bit_depth
+        )
+
+        # Load distortion calibration
+        try:
+            raise Exception # temporary
+            self._distortion_polynomial = io.load_line_distortion_calibration()
+        except:
+            self._distortion_polynomial = Polynomial([1])
+
+        # Load illumination calibration
+        try:
+            raise Exception # temporary
+            self._gradient = io.load_gradient_calibration()
+        except:
+            self._gradient = np.ones((self._spec.pixels_per_line,), np.float32)
+
+        self._buffers_processed = 0
+
+    def _receive_product(self, block: bool = True, timeout: float | None = None) -> AcquisitionProduct:
+        return super()._receive_product(block, timeout) # type: ignore
+    
+    def _product_stream(self): # TODO factor up into a base class
+        """Yield acquisition products until EndOfStream is raised."""
+        while True:
+            try:
+                with self._receive_product() as prod:
+                    yield prod
+            except EndOfStream:
+                break
+    
+    def run(self):
+        try:
+            for acq_prod in self._product_stream():
+                proc_product = self._get_free_product()
+                self._process_frame(acq_prod, proc_product)
+                self._publish(proc_product) 
+        finally: 
+            # always send sentinel to gracefully shutdown downstream Workers
+            self._publish(None)  
+
+    def _process_frame(self, 
+                       in_product: AcquisitionProduct, 
+                       out_product: ProcessorProduct) -> None:
+        """Actual processing work for each buffer/frame"""
+
+        resample_kernel(
+            raw_data=in_product.data, 
+            invert_mask=np.array([1], dtype=np.int16), # never invert
+            offset=np.array([0], dtype=np.int16), # no offsets
+            bit_shift=self._scaling_factor,
+            gradient=self._gradient,
+            resampled=out_product.data,
+            start_indices=self.start_indices, 
+            nsamples_to_sum=self.nsamples_to_sum
+        )
+        out_product.positions = in_product.positions
+
+        self._buffers_processed += 1
+        
+    @cached_property # these won't change over the course of the acquisition
+    def start_indices(self) -> np.ndarray:
+        """Returns array of the pixel start indexes for resampling (dewarping)"""
+        N_x = self._spec.pixels_per_line
+
+        x_sensor = np.arange(N_x+1) # sensor's coordinates (distorted relative to true spatial coordinates)
+
+        # Use distortion polynomial to correct spatial edges
+        int_p = self._distortion_polynomial.integ()
+        x = np.linspace(0, N_x, 1_000_000)
+        y = int_p(x)
+        x_space = np.interp(x_sensor, y, x)
+
+        x_space = x_space[np.newaxis, :]
+
+        return np.ceil(x_space).astype(np.int32)
+    
+    @cached_property
+    def nsamples_to_sum(self):
+        return np.abs(np.diff(self.start_indices, axis=1))
+    
+    @property
+    def data_range(self):
+        """
+        The data range after processing (resampling) has been performed.
+
+        May be higher than the native bit depth of the data capture device.
+        """
+        return units.IntRange(
+            min=-2**(self._bits_precision-1), 
+            max=2**(s

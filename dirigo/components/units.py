@@ -2,6 +2,7 @@ import math
 import re
 from typing import TypeVar, Generic, Dict, Optional
 from dataclasses import dataclass
+from collections import Counter
 
 import numpy as np
 
@@ -36,6 +37,16 @@ class UnitQuantity(float):
 
     DIMENSIONAL_QUANTITY: tuple[str, str] = ('1', '1') # Interpret as unity over unity (ie dimensionless)
     ALLOWED_UNITS_AND_MULTIPLIERS: Dict[str, float] = {"": 1.0}  # Define allowed units and their factors in subclasses
+
+    # Global dimension registry
+    _dimension_registry: dict[tuple[str, str], type["UnitQuantity"]] = {}
+
+    def __init_subclass__(cls, *, register=True, **kw):
+        """Register every concrete subclass by its dimensional signature"""
+        super().__init_subclass__(**kw)
+
+        if cls is not UnitQuantity and register:     # skips the abstract base
+            UnitQuantity._dimension_registry[cls.DIMENSIONAL_QUANTITY] = cls
 
     def __new__(cls, quantity: str | float):
         """
@@ -188,16 +199,51 @@ class UnitQuantity(float):
         returning a new instance of the same subclass with the same unit.
         """
         if isinstance(other, UnitQuantity):
+
             if self.DIMENSIONAL_QUANTITY == other.DIMENSIONAL_QUANTITY:
-                return float(self) / float(other) # allow division by SAME unit type
+                # division by same units results in unitless quantity
+                return float(self) / float(other) 
             else:
-                return NotImplemented # Don't allow mixed unit division
+                # division by different unit quantities requires some unit algebra
+                n0, d0 = Counter(self.DIMENSIONAL_QUANTITY[0]), Counter(self.DIMENSIONAL_QUANTITY[1])
+                n1, d1 = Counter(other.DIMENSIONAL_QUANTITY[0]), Counter(other.DIMENSIONAL_QUANTITY[1])
+                num, den = n0 + d1, d0 + n1
+                common = num & den
+                num, den = num - common, den - common
+
+                new_dim = (
+                    "".join(letter * n for letter, n in sorted(num.items())),
+                    "".join(letter * n for letter, n in sorted(den.items()))
+                )
+                target_cls = UnitQuantity._dimension_registry.get(new_dim)
+                if target_cls is not None:
+                    return target_cls(float(self )/ float(other))
+                else:
+                    # no appropriate UnitQuantity available
+                    return NotImplemented 
+                
         if isinstance(other, (int, float)):
             return type(self)(float(self) / other)
         return NotImplemented  # For any other type, we can't handle it
+    
+    def __rtruediv__(self, other):
+        """
+        Allow expressions like 1 / <UnitQuantity>.
+        If `other` is a dimension-less scalar, return the UnitQuantity whose
+        dimensional signature is the reciprocal of `self`.
+        """
+        if isinstance(other, (int, float)):               # dimension-less left operand
+            reciprocal_dim = (self.DIMENSIONAL_QUANTITY[1],
+                              self.DIMENSIONAL_QUANTITY[0])  # swap num/den
+            target_cls = UnitQuantity._dimension_registry.get(reciprocal_dim)
+            if target_cls is not None:
+                return target_cls(other / float(self))
+            # no matching UnitQuantity – fall back to plain float
+            return other / float(self)
+        return NotImplemented
 
 
-
+# ---------- Concrete unit quantity classes ----------
 class Voltage(UnitQuantity):
     """
     Represents a voltage value with units (e.g., V, mV, kV, etc.).
@@ -234,7 +280,9 @@ class Angle(UnitQuantity):
     """
     Represents an angular value with units (e.g. rad, deg).
     """
-    DIMENSIONAL_QUANTITY = ('1', '1') # Angle has no dimension
+    # ISO 80000 considers angle a base unit. Very helpful here to disambiguate 
+    # colliding dimensional quantities.
+    DIMENSIONAL_QUANTITY = ('Θ', '1') 
     ALLOWED_UNITS_AND_MULTIPLIERS = {
         "rad": 1,               # base unit: radians
         "mrad": 1e-3,           # millradians to radians
@@ -256,14 +304,13 @@ class Frequency(UnitQuantity):
     }
 
 
-class SampleRate(UnitQuantity):
+class SampleRate(Frequency, register=False):
     """
     Represents a samples per second rate value with units (e.g. S/s, kS/s, MS/s, GS/s).
 
     Dimensionally equivalent to Frequency, but with slight modification to unit
     labels to benefit specific situations (e.g. digitizer rate).
     """
-    DIMENSIONAL_QUANTITY = ('1', 'T')
     ALLOWED_UNITS_AND_MULTIPLIERS = {
         "S/s": 1,       # base unit: samples per second
         "kS/s": 1e3,    # kilo samples per second to samples per second
@@ -323,7 +370,7 @@ class AngularVelocity(UnitQuantity):
     """
     Represents an angular velocity value with units (e.g. rad/s, deg/s)
     """
-    DIMENSIONAL_QUANTITY = ('1', 'T')
+    DIMENSIONAL_QUANTITY = ('Θ', 'T')
     ALLOWED_UNITS_AND_MULTIPLIERS = {
         "rad/s": 1,             # base unit: radians per second
         "deg/s": math.pi / 180  # degrees per second to radians per second
@@ -347,7 +394,7 @@ class AngularAcceleration(UnitQuantity):
     """
     Represents an angular velocity value with units (e.g. rad/s, deg/s)
     """
-    DIMENSIONAL_QUANTITY = ('1', 'TT')
+    DIMENSIONAL_QUANTITY = ('Θ', 'TT')
     ALLOWED_UNITS_AND_MULTIPLIERS = {
         "rad/s^2": 1,               # base unit: radians per second squared
         "deg/s^2": math.pi / 180    # degrees per second squared to radians per second squared

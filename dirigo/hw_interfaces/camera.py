@@ -1,8 +1,9 @@
 from enum import Enum
-from abc import ABC, abstractmethod
-from typing import Optional
+from abc import abstractmethod
+from typing import Optional, Any, List
 
 from dirigo.components import units
+from dirigo.sw_interfaces.acquisition import AcquisitionProduct
 from dirigo.hw_interfaces.hw_interface import HardwareInterface
 
 
@@ -16,7 +17,8 @@ class FrameGrabber(HardwareInterface):
     attr_name = "frame_grabber"
 
     def __init__(self):
-        pass
+        self._buffers: List[Any] # TODO refine the buffer object typehint
+        self._camera: Optional['Camera'] = None
 
     @abstractmethod
     def serial_write(self, message):
@@ -34,12 +36,12 @@ class FrameGrabber(HardwareInterface):
 
     @property
     @abstractmethod
-    def roi_height(self):
+    def roi_height(self) -> int:
         pass
 
     @property
     @abstractmethod
-    def roi_width(self):
+    def roi_width(self) -> int:
         pass
 
     @roi_width.setter
@@ -49,7 +51,7 @@ class FrameGrabber(HardwareInterface):
 
     @property
     @abstractmethod
-    def roi_left(self):
+    def roi_left(self) -> int:
         pass
 
     @roi_left.setter
@@ -59,14 +61,24 @@ class FrameGrabber(HardwareInterface):
     
     @property
     @abstractmethod
-    def bytes_per_pixel(self):
+    def lines_per_buffer(self) -> int:
+        pass
+
+    @lines_per_buffer.setter
+    @abstractmethod
+    def lines_per_buffer(self, lines: int):
+        pass
+
+    @property
+    @abstractmethod
+    def bytes_per_pixel(self) -> int:
         pass
 
     @property
     def bytes_per_buffer(self):
-        if self.roi_height is None or self.roi_width is None:
-            raise RuntimeError("ROI height or width not initialized")
-        return self.roi_height * self.roi_width * self.bytes_per_pixel
+        if self.lines_per_buffer is None or self.roi_width is None:
+            raise RuntimeError("Lines per buffer or ROI width not initialized")
+        return self.lines_per_buffer * self.roi_width * self.bytes_per_pixel
 
     @abstractmethod
     def prepare_buffers(self, nbuffers: int):
@@ -80,9 +92,19 @@ class FrameGrabber(HardwareInterface):
     def stop(self):
         pass
 
+    @abstractmethod
+    def get_next_completed_buffer(self, product: AcquisitionProduct) -> None:
+        pass
+
     @property
     @abstractmethod
     def buffers_acquired(self) -> int:
+        pass
+
+    @property
+    @abstractmethod
+    def data_range(self) -> units.IntRange:
+        """ Returns the range of values returned by the frame grabber. """
         pass
 
 
@@ -90,7 +112,9 @@ class Camera(HardwareInterface):
     attr_name = "camera"
     def __init__(self, frame_grabber: Optional[FrameGrabber], 
                  pixel_size: str, **kwargs):
-        self._frame_grabber = frame_grabber 
+        self._frame_grabber = frame_grabber
+        if self._frame_grabber is not None:
+            self._frame_grabber._camera = self # give the frame grabber reference to camera
         self._pixel_size = units.Position(pixel_size)
 
     # essential parameters
@@ -124,12 +148,12 @@ class Camera(HardwareInterface):
 
     @property
     @abstractmethod
-    def bit_depth(self):
+    def bit_depth(self) -> int:
         pass
     
     @bit_depth.setter
     @abstractmethod
-    def bit_depth(self, new_value):
+    def bit_depth(self, new_value: int):
         pass
 
     @property
@@ -163,8 +187,8 @@ class Camera(HardwareInterface):
         pass
 
 
-class LineScanCamera(Camera):
-    attr_name = "line_scan_camera"
+class LineCamera(Camera):
+    attr_name = "line_camera"
     VALID_AXES = {'x', 'y'}
 
     def __init__(self, axis: str, **kwargs):

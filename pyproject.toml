@@ -32,6 +32,7 @@ raw_raster_frame = "dirigo.plugins.loaders:RawRasterFrameLoader"
 
 [project.entry-points."dirigo_processors"]
 raster_frame = "dirigo.plugins.processors:RasterFrameProcessor"
+line_camera_line = "dirigo.plugins.processors:LineCameraLineProcessor"
 
 [project.entry-points."dirigo_displays"] # e.g. display processors
 frame = "dirigo.plugins.displays:FrameDisplay"

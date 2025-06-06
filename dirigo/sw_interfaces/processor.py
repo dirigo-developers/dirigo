@@ -1,13 +1,16 @@
 from typing import Optional, cast
 from abc import abstractmethod
-from typing import Self
+from typing import TypeVar, Generic, Self
 
 import numpy as np
 
 from dirigo.components import units 
 from dirigo.sw_interfaces.worker import Worker, Product
-from dirigo.sw_interfaces.acquisition import Acquisition, AcquisitionProduct, Loader
+from dirigo.sw_interfaces.acquisition import Acquisition, Loader
 
+
+
+U_co = TypeVar("U_co", bound="Acquisition | Processor", contravariant=True)
 
 
 class ProcessorProduct(Product):
@@ -34,13 +37,13 @@ class ProcessorProduct(Product):
         self.frequency: Optional[float] = frequency # should be in hertz
 
 
-class Processor(Worker):
+class Processor(Generic[U_co], Worker):
     """
     Dirigo interface for data processing worker thread.
     """
     Product = ProcessorProduct
 
-    def __init__(self, upstream: Acquisition | Self):
+    def __init__(self, upstream: U_co):
         """Stores the acquisition and spec in private attributes"""
         super().__init__(name="Processor")
         if isinstance(upstream, (Acquisition, Loader)):

@@ -62,27 +62,27 @@ class LinearEncoderViaNI(LinearEncoder):
         if self._sample_clock_channel is None:
             raise RuntimeError("Sample clock channel not initialized")
 
-        self._encoder_task = nidaqmx.Task() # TODO give it a name
+        self._logging_task = nidaqmx.Task() # TODO give it a name
 
-        self._encoder_task.ci_channels.add_ci_lin_encoder_chan(
+        self._logging_task.ci_channels.add_ci_lin_encoder_chan(
             counter=CounterRegistry.allocate_counter(),
             dist_per_pulse=self._distance_per_pulse,
             initial_pos=initial_position
         )
 
-        self._encoder_task.ci_channels[0].ci_encoder_a_input_term = self._signal_a_channel # type: ignore
-        self._encoder_task.ci_channels[0].ci_encoder_b_input_term = self._signal_b_channel # type: ignore
+        self._logging_task.ci_channels[0].ci_encoder_a_input_term = self._signal_a_channel # type: ignore
+        self._logging_task.ci_channels[0].ci_encoder_b_input_term = self._signal_b_channel # type: ignore
 
-        self._encoder_task.timing.cfg_samp_clk_timing(
+        self._logging_task.timing.cfg_samp_clk_timing(
             rate=expected_sample_rate * 1.1, # this is the max expected rate, provide 10% higher rate
             source=self._sample_clock_channel,
             sample_mode=AcquisitionType.CONTINUOUS,
             samps_per_chan=self._samples_per_channel
         )
 
-        self._reader = CounterReader(self._encoder_task.in_stream)
+        self._reader = CounterReader(self._logging_task.in_stream)
 
-        self._encoder_task.start()
+        self._logging_task.start()
 
     def read_positions(self, n: int):
         """Read n position samples from the task."""
@@ -122,31 +122,31 @@ class LinearEncoderViaNI(LinearEncoder):
             distance_per_trigger / self._distance_per_pulse
         )
 
-        self._encoder_task = nidaqmx.Task()
+        self._trigger_task = nidaqmx.Task()
 
         # use angular encoder to trig out on every N pulses
-        self._encoder_task.ci_channels.add_ci_ang_encoder_chan(
+        self._trigger_task.ci_channels.add_ci_ang_encoder_chan(
             counter=CounterRegistry.allocate_counter(),
             decoding_type=EncoderType.X_1, # TODO make this adjustable
             zidx_enable=True,
-            zidx_val=-pulses_per_trigger,
+            zidx_val=-pulses_per_trigger-1,
             zidx_phase=EncoderZIndexPhase.AHIGH_BHIGH,
             units=AngleUnits.TICKS,
             pulses_per_rev=1_000_000, # set this to an abritrary high value
-            initial_angle=-pulses_per_trigger
+            initial_angle=-pulses_per_trigger-1
         )
 
-        self._encoder_task.export_signals.ctr_out_event_output_behavior = ExportAction.PULSE
+        self._trigger_task.export_signals.ctr_out_event_output_behavior = ExportAction.PULSE
         
-        self._encoder_task.export_signals.ctr_out_event_output_term = self._trigger_channel
+        self._trigger_task.export_signals.ctr_out_event_output_term = self._trigger_channel
         
-        self._encoder_task.ci_channels[0].ci_encoder_a_input_term = self._signal_a_channel # type: ignore
-        self._encoder_task.ci_channels[0].ci_encoder_b_input_term = self._signal_b_channel # type: ignore
+        self._trigger_task.ci_channels[0].ci_encoder_a_input_term = self._signal_a_channel # type: ignore
+        self._trigger_task.ci_channels[0].ci_encoder_b_input_term = self._signal_b_channel # type: ignore
 
-        parts = self._encoder_task.channel_names[0].split('/')
+        parts = self._trigger_task.channel_names[0].split('/')
         cizterm = f"/{parts[0]}/Ctr{parts[1][-1]}InternalOutput" # e.g. /Dev1/Ctr1InternalOutput
         validate_ni_channel(cizterm)
-        self._encoder_task.ci_channels[0].ci_encoder_z_input_term = cizterm # type: ignore
+        self._trigger_task.ci_channels[0].ci_encoder_z_input_term = cizterm # type: ignore
 
         # Creates a separate task that measures the time between edges of
         # the signal coming from 'DevX/CtrYInternalOutput'.
@@ -162,7 +162,7 @@ class LinearEncoderViaNI(LinearEncoder):
             )
 
             # Set to the internal signal exported by ctr0/1.
-            parts = self._encoder_task.channel_names[0].split('/')
+            parts = self._trigger_task.channel_names[0].split('/')
             cpt = f"/{parts[0]}/Ctr{parts[1][-1]}InternalOutput" # e.g. /Dev1/Ctr1InternalOutput
             self._timestamp_task.ci_channels[0].ci_period_term = cpt # type: ignore
                 
@@ -174,12 +174,18 @@ class LinearEncoderViaNI(LinearEncoder):
             self._last_timestamp = 0.0
             self._timestamp_task.start()
 
-        self._encoder_task.start()
+        self._trigger_task.start()
 
     def stop(self):
-        self._encoder_task.stop()
-        CounterRegistry.free_counter(self._encoder_task.channel_names[0])
-        self._encoder_task.close()
+        if hasattr(self, '_trigger_task'):
+            self._trigger_task.stop()
+            CounterRegistry.free_counter(self._trigger_task.channel_names[0])
+            self._trigger_task.close()
+        if hasattr(self, '_logging_task'):
+            self._logging_task.stop()
+            CounterRegistry.free_counter(self._logging_task.channel_names[0])
+            self._logging_task.close()
+
 
         if self._timestamp_trigger_events:
             self._timestamp_task.stop()
@@ -216,21 +222,21 @@ class MultiAxisLinearEncodersViaNI(MultiAxisLinearEncoder):
             raise RuntimeError("Z encoder not initialized")
         return self._z
     
-    def start_logging(self, hw: Hardware):
+    def start_logging(self, initial_position: list[units.Position], line_rate: units.Frequency):
         """Starts logging on all available encoders.
         
         Expects to be passed a reference to the hardware container, needed to
         query runtime hardware settings.
         """
         if self._x:
-            initial_x = hw.stages.x.position
-            self.x.start_logging(initial_x, hw.fast_raster_scanner.frequency)
+            initial_x = initial_position[0]
+            self.x.start_logging(initial_x, line_rate)
         if self._y:
-            initial_y = hw.stages.y.position
-            self.y.start_logging(initial_y, hw.fast_raster_scanner.frequency)
+            initial_y = initial_position[1]
+            self.y.start_logging(initial_y, line_rate)
         if self._z:
-            initial_z = hw.objective_z_scanner.position # TODO not sure a quad encoder signal will ever be exposed here
-            self.z.start_logging(initial_z, hw.fast_raster_scanner.frequency)
+            initial_z = initial_position[2] # TODO not sure if need (will we have z-axis encoders to meaure?)
+            self.z.start_logging(initial_z, line_rate)
     
     def read_positions(self, n) -> np.ndarray:
         """Reads n samples from each of the available encoders.
