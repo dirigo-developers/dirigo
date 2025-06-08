@@ -238,9 +238,12 @@ class LineCameraAcquisition(Acquisition):
         super().__init__(hw, system_config, spec, thread_name) # sets up thread, inbox, stores hw, checks resources
         self.spec: LineCameraAcquisitionSpec
 
-        # Set line camera properties
-        self.configure_camera()
+        # Set line camera properties (related to spec)
+        self.configure_camera() # TODO, should it be configure frame grabber?
         self.hw.frame_grabber.prepare_buffers(nbuffers=4)
+
+        # Load camera profile (device-specific)
+        self.hw.line_camera.load_profile()
 
         self.runtime_info = CameraAcquisitionRuntimeInfo.from_acquisition(self)
         self.camera_profile = [] # TODO need to fix this
@@ -648,7 +651,7 @@ class LineCameraLineAcquisition(LineCameraAcquisition):
         super().configure_camera(trigger_mode) # sets integration time, trigger mode, lines per buffer, etc.
 
         # set ROI size based on line spec, assumed ROI centered in array
-        obj_pixel_size = self.hw.line_camera.pixel_size / self.hw.camera_optics.magnification
+        obj_pixel_size = self.hw.line_camera.pixel_size / self.hw.camera_optics.magnification # TODO, switch if object pixel size already set
         roi_width = round(self.spec.line_width / obj_pixel_size)
         self.hw.frame_grabber.roi_width = roi_width
         self.hw.frame_grabber.roi_left = (self.hw.frame_grabber.pixels_width - roi_width) // 2

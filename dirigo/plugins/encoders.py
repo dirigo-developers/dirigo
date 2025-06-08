@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Optional, Literal
 
 import numpy as np
 import nidaqmx
@@ -65,6 +65,7 @@ class LinearEncoderViaNI(LinearEncoder):
         self._logging_task = nidaqmx.Task() # TODO give it a name
 
         self._logging_task.ci_channels.add_ci_lin_encoder_chan(
+            decoding_type=EncoderType.X_2,
             counter=CounterRegistry.allocate_counter(),
             dist_per_pulse=self._distance_per_pulse,
             initial_pos=initial_position
@@ -79,6 +80,8 @@ class LinearEncoderViaNI(LinearEncoder):
             sample_mode=AcquisitionType.CONTINUOUS,
             samps_per_chan=self._samples_per_channel
         )
+        # self._logging_task.timing.samp_clk_dig_fltr_enable          = True
+        # self._logging_task.timing.samp_clk_dig_fltr_min_pulse_width = 2e-6
 
         self._reader = CounterReader(self._logging_task.in_stream)
 
@@ -113,27 +116,30 @@ class LinearEncoderViaNI(LinearEncoder):
         
         return timestamps
     
-    def start_triggering(self, distance_per_trigger: units.Position):
-        """
-        """
+    def start_triggering(self, 
+                         distance_per_trigger: units.Position,
+                         direction: Literal['forward', 'reverse']
+                         ) -> None:
+        
         # Calculate the number of encoder pulses per output trigger
         # Example: Thorlabs MLS203 (100nm/pulse) & triggering at each 1um: = 10
         pulses_per_trigger = round(
-            distance_per_trigger / self._distance_per_pulse
+            distance_per_trigger / (self._distance_per_pulse)
         )
 
         self._trigger_task = nidaqmx.Task()
 
         # use angular encoder to trig out on every N pulses
+        a = -pulses_per_trigger-1 if direction == "forward" else pulses_per_trigger
         self._trigger_task.ci_channels.add_ci_ang_encoder_chan(
-            counter=CounterRegistry.allocate_counter(),
-            decoding_type=EncoderType.X_1, # TODO make this adjustable
-            zidx_enable=True,
-            zidx_val=-pulses_per_trigger-1,
-            zidx_phase=EncoderZIndexPhase.AHIGH_BHIGH,
-            units=AngleUnits.TICKS,
-            pulses_per_rev=1_000_000, # set this to an abritrary high value
-            initial_angle=-pulses_per_trigger-1
+            counter         = CounterRegistry.allocate_counter(),
+            decoding_type   = EncoderType.X_1,      # TODO make this adjustable
+            zidx_enable     = True,
+            zidx_val        = a,
+            zidx_phase      = EncoderZIndexPhase.AHIGH_BHIGH,
+            units           = AngleUnits.TICKS,
+            pulses_per_rev  = 1_000_000, # set this to an abritrary high value
+            initial_angle   = a
         )
 
         self._trigger_task.export_signals.ctr_out_event_output_behavior = ExportAction.PULSE
@@ -145,7 +151,7 @@ class LinearEncoderViaNI(LinearEncoder):
 
         parts = self._trigger_task.channel_names[0].split('/')
         cizterm = f"/{parts[0]}/Ctr{parts[1][-1]}InternalOutput" # e.g. /Dev1/Ctr1InternalOutput
-        validate_ni_channel(cizterm)
+        # validate_ni_channel(cizterm)
         self._trigger_task.ci_channels[0].ci_encoder_z_input_term = cizterm # type: ignore
 
         # Creates a separate task that measures the time between edges of
@@ -164,6 +170,7 @@ class LinearEncoderViaNI(LinearEncoder):
             # Set to the internal signal exported by ctr0/1.
             parts = self._trigger_task.channel_names[0].split('/')
             cpt = f"/{parts[0]}/Ctr{parts[1][-1]}InternalOutput" # e.g. /Dev1/Ctr1InternalOutput
+            #cpt = "/Dev1/PFI11"
             self._timestamp_task.ci_channels[0].ci_period_term = cpt # type: ignore
                 
             self._timestamp_task.timing.cfg_implicit_timing(
@@ -182,15 +189,21 @@ class LinearEncoderViaNI(LinearEncoder):
             CounterRegistry.free_counter(self._trigger_task.channel_names[0])
             self._trigger_task.close()
         if hasattr(self, '_logging_task'):
+            i = self._logging_task.in_stream.total_samp_per_chan_acquired
+            print(f"Stopping logging task after reading {i} samples")
             self._logging_task.stop()
             CounterRegistry.free_counter(self._logging_task.channel_names[0])
             self._logging_task.close()
-
-
-        if self._timestamp_trigger_events:
+        if hasattr(self, '_timestamp_task'):
+            ts = self._timestamp_task.read(self._timestamp_task.in_stream.total_samp_per_chan_acquired)
+            # print(f"N timestamps: {len(ts)}, min: {min(ts)}, max: {max(ts)}")
+            for i,x in enumerate(ts): 
+                if x < 0.0001: 
+                    print(i+1)
             self._timestamp_task.stop()
             CounterRegistry.free_counter(self._timestamp_task.channel_names[0])
             self._timestamp_task.close()
+
 
 
 class MultiAxisLinearEncodersViaNI(MultiAxisLinearEncoder):

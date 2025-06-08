@@ -1,4 +1,5 @@
-from abc import ABC, abstractmethod
+from abc import abstractmethod
+from typing import Literal
 
 import numpy as np
 
@@ -46,7 +47,9 @@ class LinearEncoder(HardwareInterface):
         pass
 
     @abstractmethod
-    def start_triggering(self, distance_per_trigger: units.Position):
+    def start_triggering(self, 
+                         distance_per_trigger: units.Position, 
+                         direction: Literal['forward', 'reverse']):
         """Start encoder-derived trigger output."""
         pass
 
@@ -64,20 +67,29 @@ class MultiAxisLinearEncoder(HardwareInterface):
 
     @property
     @abstractmethod
-    def x(self) -> None | LinearEncoder:
-        """If available, returns reference to the X axis encoder."""
+    def x(self) -> LinearEncoder:
+        """
+        Returns reference to the X axis encoder. Raises RuntimeException if 
+        not available.
+        """
         pass
     
     @property
     @abstractmethod
-    def y(self) -> None | LinearEncoder:
-        """If available, returns reference to the Y axis encoder."""
+    def y(self) -> LinearEncoder:
+        """
+        Returns reference to the Y axis encoder. Raises RuntimeException if 
+        not available.
+        """
         pass
 
     @property
     @abstractmethod
-    def z(self) -> None | LinearEncoder:
-        """If available, returns reference to the Z axis encoder."""
+    def z(self) -> LinearEncoder:
+        """
+        Returns reference to the Z axis encoder. Raises RuntimeException if 
+        not available.
+        """
         pass
 
     @abstractmethod

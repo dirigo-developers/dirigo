@@ -186,6 +186,10 @@ class Camera(HardwareInterface):
     def stop(self):
         pass
 
+    @abstractmethod
+    def load_profile(self):
+        pass
+
 
 class LineCamera(Camera):
     attr_name = "line_camera"
