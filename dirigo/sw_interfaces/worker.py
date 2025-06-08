@@ -1,7 +1,9 @@
 from abc import ABC, abstractmethod
 import threading
 import queue
+from typing import Optional
 
+import numpy as np
 
 
 class EndOfStream(Exception):
@@ -15,8 +17,9 @@ class Product:
     """
     __slots__ = ("_remaining", "_pool", "_lock")
 
-    def __init__(self, pool: queue.Queue):
+    def __init__(self, pool: queue.Queue, data: np.ndarray):
         self._pool = pool
+        self.data = data
         self._remaining: int = 0          # set automatically by Worker.publish
         self._lock = threading.Lock()
 
@@ -43,6 +46,8 @@ class Product:
 
 
 class Worker(threading.Thread, ABC):
+    Product = Product
+
     def __init__(self, name: str = "Worker"):
         """
         Sets up a worker Thread object with internal publisher-subscriber model.
@@ -60,13 +65,27 @@ class Worker(threading.Thread, ABC):
 
         # Pool for re-usable product objects
         self._product_pool = queue.Queue()
+        self._product_shape: Optional[tuple[int, ...]] = None
 
     @abstractmethod
     def run(self):
         pass
     
-    # often define init_product_pool (for workers creating something: 
-    # Acquisition, Processor, Display, but not Logger)
+    def _init_product_pool(self, n: int, shape: tuple[int, ...], dtype) -> None:
+        """Initialize the product pool. For Workers not producing products, pass"""
+        self._product_shape = shape
+        for _ in range(n):
+            aq_buf = self.Product(
+                pool=self._product_pool,
+                data=np.empty(shape, dtype) # pre-allocates for large buffers
+            )
+            self._product_pool.put(aq_buf)
+
+    @property
+    def product_shape(self) -> tuple[int, ...]:
+        if self._product_shape is None:
+            raise RuntimeError("Product pool is not initialized")
+        return self._product_shape
 
     def stop(self, blocking: bool = False):
         """Sets a flag to stop thread."""

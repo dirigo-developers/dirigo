@@ -53,20 +53,20 @@ class AcquisitionProduct(Product):
     # positions: tuple[float] | np.ndarray | None = None # should be one or more sets of coordinates (x,y)
     __slots__ = ("data", "timestamps", "positions")
     def __init__(self, pool, data: np.ndarray, timestamps = None, positions = None):
-        super().__init__(pool)
-        self.data = data
+        super().__init__(pool, data)
         self.timestamps = timestamps
         self.positions = positions
 
 
 class AcquisitionWorker(Worker):
-    def init_product_pool(self, n, shape, dtype):
-        for _ in range(n):
-            acquisition_product = AcquisitionProduct(
-                pool=self._product_pool,
-                data=np.empty(shape, dtype) # pre-allocates for large buffers
-            )
-            self._product_pool.put(acquisition_product)
+    Product = AcquisitionProduct
+    # def _init_product_pool(self, n, shape, dtype):
+    #     for _ in range(n):
+    #         acquisition_product = AcquisitionProduct(
+    #             pool=self._product_pool,
+    #             data=np.empty(shape, dtype) # pre-allocates for large buffers
+    #         )
+    #         self._product_pool.put(acquisition_product)
 
     def _get_free_product(self) -> AcquisitionProduct:
         return self._product_pool.get()
@@ -80,7 +80,6 @@ class Acquisition(AcquisitionWorker):
     optional_resources: List[Type[HardwareInterface]] = []
     spec_location: Path
     Spec: Type[AcquisitionSpec] = AcquisitionSpec
-    Product = AcquisitionProduct
     
     def __init__(self, 
                  hw: "Hardware", 

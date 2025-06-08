@@ -181,7 +181,7 @@ class RasterFrameProcessor(Processor[Acquisition]):
         self.signal_offset = np.round(io.load_signal_offset()).astype(np.int16)
 
         # Pre-allocate array for processed image
-        self.init_product_pool(n=4, shape=self.processed_shape, dtype=dt)
+        self._init_product_pool(n=4, shape=self.processed_shape, dtype=dt)
 
         # Trigger timing/delay
         self._fixed_trigger_delay = runtime_info.digitizer_trigger_delay
@@ -407,7 +407,7 @@ class LineCameraLineProcessor(Processor[LineCameraLineAcquisition]):
         self.processed_shape = (n_lines, self._spec.pixels_per_line, n_channels)
         dtype = np.uint16 if bits_precision > 8 else np.uint8 # TODO, ok to assume cameras alwasy produce uint16 data?
 
-        self.init_product_pool(n=4, shape=self.processed_shape, dtype=dtype)
+        self._init_product_pool(n=4, shape=self.processed_shape, dtype=dtype)
 
         if runtime_info.camera_bit_depth == 24: # RGB24
             d = 8

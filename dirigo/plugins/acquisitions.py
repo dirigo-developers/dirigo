@@ -284,7 +284,7 @@ class LineCameraAcquisition(Acquisition):
         # Set up acquisition buffer pool
         shape = self.hw.frame_grabber._buffers[0].buffer.shape # TODO add some sort of shape/dtype to API for framegrabber
         dtype = self.hw.frame_grabber._buffers[0].buffer.dtype
-        self.init_product_pool(n=4, shape=shape, dtype=dtype) 
+        self._init_product_pool(n=4, shape=shape, dtype=dtype) 
 
         self.hw.frame_grabber.start()
         self.active.set() # signals active recording
@@ -462,7 +462,7 @@ class LineAcquisition(SampleAcquisition):
             digi.acquire.record_length,
             digi.acquire.n_channels_enabled
         )
-        self.init_product_pool(n=4, shape=shape, dtype=np.int16)
+        self._init_product_pool(n=4, shape=shape, dtype=np.int16)
 
         # Start scanner & digitizer
         if isinstance(self.hw.fast_raster_scanner, ResonantScanner):

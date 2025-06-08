@@ -151,17 +151,15 @@ class DisplayChannel(): # should this be a ABC?
 
 
 class DisplayProduct(Product):
-    __slots__ = ("frame")
-    def __init__(self, pool, frame: np.ndarray):
-        super().__init__(pool)
-        self.frame = frame
-
+    pass
 
 
 class Display(Worker):
     """
     Dirigo interface for display processing.
     """
+    Product = DisplayProduct
+
     def __init__(self, 
                  upstream: Acquisition | Processor,
                  monitor_bit_depth: int = 8,
@@ -193,7 +191,7 @@ class Display(Worker):
 
     @property
     @abstractmethod
-    def n_frame_average(self) -> int:
+    def n_frame_average(self) -> int:       # TODO, does this need to be abstract?
         """The number of frames used in the rolling average.
         
         To enable averaging, set with an integer greater than 1. Setting 1 will
@@ -225,13 +223,13 @@ class Display(Worker):
         """
         return 2**(self._monitor_bit_depth + 4)
 
-    def init_product_pool(self, n, shape, dtype=np.uint8):
-        for _ in range(n):
-            prod = DisplayProduct(
-                pool=self._product_pool,
-                frame=np.empty(shape, dtype) # pre-allocates for large buffers
-            )
-            self._product_pool.put(prod)
+    # def _init_product_pool(self, n, shape, dtype=np.uint8):
+    #     for _ in range(n):
+    #         prod = DisplayProduct(
+    #             pool=self._product_pool,
+    #             frame=np.empty(shape, dtype) # pre-allocates for large buffers
+    #         )
+    #         self._product_pool.put(prod)
 
     def _get_free_product(self) -> DisplayProduct:
         return super()._get_free_product() # type: ignore

@@ -41,7 +41,7 @@ class RawRasterFrameLoader(Loader):
 
         with tifffile.TiffFile(self._file_path) as tif:   
 
-            self.init_product_pool(
+            self._init_product_pool(
                 n=4, 
                 shape=tif.pages[0].shape, 
                 dtype=tif.pages[0].dtype

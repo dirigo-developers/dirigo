@@ -29,8 +29,7 @@ class ProcessorProduct(Product):
                  positions = None,
                  phase = None,
                  frequency = None):
-        super().__init__(pool)
-        self.data = data
+        super().__init__(pool, data)
         self.timestamps = timestamps
         self.positions = positions
         self.phase: Optional[float] = phase # should be in radians
@@ -54,14 +53,6 @@ class Processor(Generic[U_co], Worker):
             self._spec = upstream._acq.spec
         else:
             raise ValueError("Upstream worker passed to Processor must be either an Acquisition or another Processor")
-    
-    def init_product_pool(self, n, shape, dtype) -> None:
-        for _ in range(n):
-            aq_buf = ProcessorProduct(
-                pool=self._product_pool,
-                data=np.empty(shape, dtype) # pre-allocates for large buffers
-            )
-            self._product_pool.put(aq_buf)
 
     def _get_free_product(self) -> ProcessorProduct:
         """Gets an available ProcessorProduct from the product pool."""

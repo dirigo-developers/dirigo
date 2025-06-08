@@ -36,6 +36,7 @@ line_camera_line = "dirigo.plugins.processors:LineCameraLineProcessor"
 
 [project.entry-points."dirigo_displays"] # e.g. display processors
 frame = "dirigo.plugins.displays:FrameDisplay"
+rgb_frame = "dirigo.plugins.displays:RGBFrameDisplay"
 
 [project.entry-points."dirigo_loggers"]
 tiff = "dirigo.plugins.loggers:TiffLogger"

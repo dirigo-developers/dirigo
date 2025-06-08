@@ -78,12 +78,109 @@ def default_colormap_lists(nchannels: int) -> list[str]:
         raise ValueError("No default colormaps set yet for >4 channels")
 
 
+class RGBFrameDisplay(Display):
+    """FrameDisplay simplified for 3 channel RGB"""
+    def __init__(self, 
+                 upstream: Acquisition | Processor, 
+                 pixel_format = DisplayPixelFormat.RGB24,
+                 **kwargs):
+        super().__init__(upstream, **kwargs)
+        #self._acquisition: FrameAcquisition | LineAcquisition 
+
+        self._prev_data = None # None indicates that no data has been acquired yet
+
+        if pixel_format == DisplayPixelFormat.RGB24:
+            bpp = 3
+            colormap_list = ['red', 'green', 'blue']
+        else:
+            bpp = 4
+            colormap_list = ['blue', 'green', 'red']
+
+        self._luts = np.zeros(shape=(3, self.data_range.range + 1, bpp), dtype=np.uint16)
+
+        self.display_channels: list[DisplayChannel] = []
+        for ci, colormap_name in enumerate(colormap_list):
+            dc = DisplayChannel(
+                lut_slice=self._luts[ci],
+                color_vector=ColorVector[colormap_name.upper()],
+                display_range=self.data_range,
+                pixel_format=pixel_format,
+                update_method=self.update_display,
+                gamma_lut_length=self.gamma_lut_length
+            )
+            self.display_channels.append(dc)
+
+        # Products will have the same spatial dimensions as upstream
+        n_lines = upstream.product_shape[0]
+        pixels_per_line = upstream.product_shape[1]
+        self._init_product_pool(n=4, shape=(n_lines, pixels_per_line, bpp), dtype=np.uint8)
+
+    def _receive_product(self) -> ProcessorProduct:
+        return super()._receive_product() # type: ignore
+    
+    def run(self):
+        pass
+
+    def _apply_display_kernel(self, image, luts, display_image):
+        additive_display_kernel(image, luts, self.gamma_lut, display_image)
+
+    @property
+    def gamma(self) -> float:
+        return self._gamma
+    
+    @gamma.setter
+    def gamma(self, new_gamma: float):
+        if not isinstance(new_gamma, float):
+            raise ValueError("Gamma must be set with a float value")
+        if not (0 < new_gamma <= 10):
+            raise ValueError("Gamma must be between 0.0 and 10.0")
+        self._gamma = new_gamma
+
+        # Generate gamma correction LUT
+        x = np.arange(self.gamma_lut_length) \
+            / (self.gamma_lut_length - 1) # TODO, not sure about the -1
+        
+        gamma_lut = (2**self._monitor_bit_depth - 1) * x**(self._gamma)
+        if self._monitor_bit_depth > 8:
+            self.gamma_lut = np.round(gamma_lut).astype(np.uint16)
+        else:
+            self.gamma_lut = np.round(gamma_lut).astype(np.uint8)
+
+    def update_display(self, skip_when_acquisition_in_progress: bool = True):
+        """
+        On demand reprocessing of the last acquired frame for display.
+        
+        Used when the acquisition is stopped and need to update the appearance  
+        of the last acquired frame.
+        """
+        if self.is_alive() and skip_when_acquisition_in_progress:
+            # Don't update if acquisition is in progress
+            return
+        
+        if self._prev_data is None:
+            # Don't update if no previous data exists
+            return
+        
+        disp_product = self._get_free_product()
+        self._apply_display_kernel(self._prev_data, self._luts, disp_product.frame)
+        self._publish(disp_product)
+
+    @property
+    def n_frame_average(self) -> int:       # TODO, cut this out
+        return 1
+
+    @n_frame_average.setter
+    def n_frame_average(self, frames: int):
+        pass
+
+
+
 class FrameDisplay(Display):
     """Worker to perform processing for display (blending, LUTs, etc)"""
 
     def __init__(self, 
                  upstream: Acquisition | Processor, 
-                 display_pixel_format = DisplayPixelFormat.RGB24,
+                 pixel_format = DisplayPixelFormat.RGB24,
                  **kwargs):
         super().__init__(upstream, **kwargs)
         self._acquisition: FrameAcquisition | LineAcquisition 
@@ -101,7 +198,7 @@ class FrameDisplay(Display):
         self._i: int = 0 # tracks rolling average index
         self._average_buffer_lock = threading.Lock()  # Add a lock for thread safety
 
-        bpp = 3 if display_pixel_format == DisplayPixelFormat.RGB24 else 4
+        bpp = 3 if pixel_format == DisplayPixelFormat.RGB24 else 4
         # LUTS: look-up tables (note it's plural). LUTs for each channel enabled for display.
         self._luts = np.zeros(shape=(self.nchannels, self.data_range.range + 1, bpp), dtype=np.uint16)
 
@@ -112,7 +209,7 @@ class FrameDisplay(Display):
                 lut_slice=self._luts[ci],
                 color_vector=ColorVector[colormap_name.upper()],
                 display_range=self.data_range,
-                pixel_format=display_pixel_format,
+                pixel_format=pixel_format,
                 update_method=self.update_display,
                 gamma_lut_length=self.gamma_lut_length
             )
@@ -124,7 +221,7 @@ class FrameDisplay(Display):
             # fall-back when processing LineAcquisition as a frame
             n_lines = self._acquisition.spec.lines_per_buffer  
         shape = (n_lines, self._acquisition.spec.pixels_per_line, bpp)
-        self.init_product_pool(n=3, shape=shape)
+        self._init_product_pool(n=4, shape=shape)
     
     def _receive_product(self, 
                          block: bool = True, 
