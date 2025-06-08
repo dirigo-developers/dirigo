@@ -3,7 +3,7 @@ from functools import cached_property
 
 import numpy as np
 from numpy.polynomial.polynomial import Polynomial
-from numba import njit, prange, int16, uint16, int32, int64, float32, complex64
+from numba import njit, prange, uint8, int16, uint16, int32, int64, float32, complex64
 from scipy import fft
 
 from dirigo.components import units
@@ -22,6 +22,7 @@ TWO_PI = 2 * np.pi
 
 sigs = [
     #buffer_data    invert_mask  offset    bit_shift  gradient     resampled (out)  start_indices  nsamples_to_sum
+    (uint8[:,:,:],  int16[:],    int16[:], int32,     float32[:],  uint16[:,:,:],   int32[:,:],    int32[:,:]),
     (int16[:,:,:],  int16[:],    int16[:], int32,     float32[:],  int16[:,:,:],    int32[:,:],    int32[:,:]),
     (uint16[:,:,:], int16[:],    int16[:], int32,     float32[:],  uint16[:,:,:],   int32[:,:],    int32[:,:])
 ]
@@ -408,9 +409,11 @@ class LineCameraLineProcessor(Processor[LineCameraLineAcquisition]):
 
         self.init_product_pool(n=4, shape=self.processed_shape, dtype=dtype)
 
-        self._scaling_factor = 2 ** (
-            self._bits_precision - runtime_info.camera_bit_depth
-        )
+        if runtime_info.camera_bit_depth == 24: # RGB24
+            d = 8
+        else:
+            d = runtime_info.camera_bit_depth
+        self._scaling_factor = 2 ** (self._bits_precision - d)
 
         # Load distortion calibration
         try:
