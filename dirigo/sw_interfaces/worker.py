@@ -26,10 +26,11 @@ class Product:
     def _add_consumers(self, n: int):
         """Add n consumer references. Called once by Worker.publish just before 
         the publish (fan-out)."""
-        self._remaining += n
-        if self._remaining < 1:
-            self._pool.put(self)
-            self._remaining = 0
+        with self._lock:
+            self._remaining += n
+            if self._remaining < 1:
+                self._pool.put(self)
+                self._remaining = 0
 
     def _release(self):
         with self._lock:
@@ -43,6 +44,12 @@ class Product:
     
     def __exit__(self, exc_type, exc_value, traceback):
         self._release()
+
+    def hold_once(self):
+        """Adds 1 to reference count, so the product will need to be context 
+        manager-entered again to release."""
+        with self._lock:
+            self._remaining += 1
 
 
 class Worker(threading.Thread, ABC):
