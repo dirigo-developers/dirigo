@@ -9,7 +9,6 @@ from nidaqmx.constants import (
 from nidaqmx.stream_readers import CounterReader
 
 from dirigo.components import units
-from dirigo.components.hardware import Hardware
 from dirigo.hw_interfaces.encoder import LinearEncoder, MultiAxisLinearEncoder
 from dirigo.plugins.scanners import CounterRegistry, validate_ni_channel
 
@@ -59,9 +58,6 @@ class LinearEncoderViaNI(LinearEncoder):
                       initial_position: units.Position, 
                       expected_sample_rate: units.SampleRate | units.Frequency):
         """Sets up the counter input task and starts it."""
-        if self._sample_clock_channel is None:
-            raise RuntimeError("Sample clock channel not initialized")
-
         self._logging_task = nidaqmx.Task() # TODO give it a name
 
         self._logging_task.ci_channels.add_ci_lin_encoder_chan(
@@ -76,7 +72,7 @@ class LinearEncoderViaNI(LinearEncoder):
 
         self._logging_task.timing.cfg_samp_clk_timing(
             rate=expected_sample_rate * 1.1, # this is the max expected rate, provide 10% higher rate
-            source=self._sample_clock_channel,
+            source=self.sample_clock_channel,
             sample_mode=AcquisitionType.CONTINUOUS,
             samps_per_chan=self._samples_per_channel
         )
@@ -86,6 +82,17 @@ class LinearEncoderViaNI(LinearEncoder):
         self._reader = CounterReader(self._logging_task.in_stream)
 
         self._logging_task.start()
+
+    @property
+    def sample_clock_channel(self) -> str:
+        if self._sample_clock_channel is None:
+            raise RuntimeError("Sample clock channel not initialized")
+        return self._sample_clock_channel
+    
+    @sample_clock_channel.setter
+    def sample_clock_channel(self, new_channel: str) -> None:
+        validate_ni_channel(new_channel)
+        self._sample_clock_channel = new_channel
 
     def read_positions(self, n: int):
         """Read n position samples from the task."""
@@ -188,21 +195,22 @@ class LinearEncoderViaNI(LinearEncoder):
             self._trigger_task.stop()
             CounterRegistry.free_counter(self._trigger_task.channel_names[0])
             self._trigger_task.close()
+            del self._trigger_task
         if hasattr(self, '_logging_task'):
             i = self._logging_task.in_stream.total_samp_per_chan_acquired
             print(f"Stopping logging task after reading {i} samples")
             self._logging_task.stop()
             CounterRegistry.free_counter(self._logging_task.channel_names[0])
             self._logging_task.close()
+            del self._logging_task
         if hasattr(self, '_timestamp_task'):
             ts = self._timestamp_task.read(self._timestamp_task.in_stream.total_samp_per_chan_acquired)
-            # print(f"N timestamps: {len(ts)}, min: {min(ts)}, max: {max(ts)}")
-            for i,x in enumerate(ts): 
-                if x < 0.0001: 
-                    print(i+1)
+            # for i,x in enumerate(ts): 
+            #     if x < 0.0001: print(i+1)
             self._timestamp_task.stop()
             CounterRegistry.free_counter(self._timestamp_task.channel_names[0])
             self._timestamp_task.close()
+            del self._timestamp_task
 
 
 

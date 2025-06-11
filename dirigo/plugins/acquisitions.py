@@ -316,10 +316,10 @@ class LineCameraAcquisition(Acquisition):
         self.hw.frame_grabber.get_next_completed_buffer(acq_product)
 
     def cleanup(self):
-        self.hw.frame_grabber.stop()
         self._publish(None) # sentinel that shuts down downstream Workers
+        self.hw.frame_grabber.stop()
         
-
+        
 
 # ---------- 1-D acquisitions ----------
 class LineAcquisitionSpec(SampleAcquisitionSpec): 

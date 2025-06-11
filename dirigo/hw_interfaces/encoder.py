@@ -38,6 +38,16 @@ class LinearEncoder(HardwareInterface):
         """Start encoder position logging."""
         pass
 
+    @property
+    @abstractmethod
+    def sample_clock_channel(self) -> str:
+        pass
+
+    @sample_clock_channel.setter
+    @abstractmethod
+    def sample_clock_channel(self, new_channel: str) -> None:
+        pass
+
     @abstractmethod
     def read_positions(self, nsamples: int) -> np.ndarray:
         pass

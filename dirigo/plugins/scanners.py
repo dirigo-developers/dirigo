@@ -243,7 +243,7 @@ class GalvoScannerViaNI(GalvoScanner):
 
     def park(self):
         """Positions the scanner at the angle limit minimum."""
-        analog_value = self.angle_limits.min * self._volts_per_radian
+        analog_value = units.Voltage(self.angle_limits.min * self._volts_per_radian)
         try:
             with nidaqmx.Task() as task: 
                 task.ao_channels.add_ao_voltage_chan(self._analog_control_channel)
@@ -264,7 +264,7 @@ class GalvoScannerViaNI(GalvoScanner):
     @cached_property
     def _volts_per_radian(self) -> float:
         """Scaling factor between analog control voltge and optical scan angle."""
-        return self._analog_control_range.range / self.angle_limits.range
+        return float(self._analog_control_range.range / self.angle_limits.range)
     
     def generate_waveform(self, 
                           sample_rate: units.SampleRate,

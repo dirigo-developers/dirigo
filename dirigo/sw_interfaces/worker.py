@@ -15,7 +15,7 @@ class Product:
     """
     Buffer that automatically returns to pool once released by all consumers.
     """
-    __slots__ = ("_remaining", "_pool", "_lock")
+    __slots__ = ("_remaining", "data", "_pool", "_lock")
 
     def __init__(self, pool: queue.Queue, data: np.ndarray):
         self._pool = pool

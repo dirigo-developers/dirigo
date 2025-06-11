@@ -91,10 +91,14 @@ class RGBFrameDisplay(Display):
 
         if pixel_format == DisplayPixelFormat.RGB24:
             bpp = 3
-            colormap_list = ['red', 'green', 'blue']
         else:
             bpp = 4
-            colormap_list = ['blue', 'green', 'red']
+
+        n_channels = upstream.product_shape[2]
+        if n_channels == 1:
+            colormap_list = ['gray']
+        elif n_channels == 3:
+            colormap_list = ['red', 'green', 'blue'] # may need to flip this
 
         self._luts = np.zeros(shape=(3, self.data_range.range + 1, bpp), dtype=np.uint16)
 
@@ -119,7 +123,23 @@ class RGBFrameDisplay(Display):
         return super()._receive_product() # type: ignore
     
     def run(self):
-        pass
+        try:
+            while True:
+                with self._receive_product() as product:
+                    display_product = self._get_free_product()
+
+                    self._apply_display_kernel(
+                        image           = product.data, 
+                        luts            = self._luts, 
+                        display_image   = display_product.data
+                    )
+
+                    self._publish(display_product)
+                    self._prev_data = product.data.copy()
+
+        except EndOfStream:
+            self._publish(None) # forward sentinel None
+
 
     def _apply_display_kernel(self, image, luts, display_image):
         additive_display_kernel(image, luts, self.gamma_lut, display_image)
@@ -221,7 +241,7 @@ class FrameDisplay(Display):
             # fall-back when processing LineAcquisition as a frame
             n_lines = self._acquisition.spec.lines_per_buffer  
         shape = (n_lines, self._acquisition.spec.pixels_per_line, bpp)
-        self._init_product_pool(n=4, shape=shape)
+        self._init_product_pool(n=4, shape=shape, dtype=np.uint8)
     
     def _receive_product(self, 
                          block: bool = True, 
@@ -290,7 +310,7 @@ class FrameDisplay(Display):
                         self._apply_display_kernel(
                             averaged_frame, 
                             self._luts, 
-                            disp_product.frame
+                            disp_product.data
                         )
 
                         self._publish(disp_product)
