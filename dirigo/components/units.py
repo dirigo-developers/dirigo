@@ -352,6 +352,21 @@ class Position(UnitQuantity):
     }
 
 
+class SpatialFrequency(UnitQuantity):
+    """
+    Represents a spatial frequency value with units (e.g. m⁻¹, cm⁻¹, mm⁻¹)
+    """
+    DIMENSIONAL_QUANTITY = ('1', 'L')
+    ALLOWED_UNITS_AND_MULTIPLIERS = {
+        "m⁻¹": 1,         # base unit: meters
+        "1/m": 1,         # alias
+        "cm⁻¹": 1e2,     # centimeters to meters
+        "1/cm": 1e2,     # alias
+        "mm⁻¹": 1e3,     # millimeters to meters
+        "1/mm": 1e3      # alias
+    }
+
+
 class Velocity(UnitQuantity):
     """
     Represents a velocity value with units (e.g. m/s, cm/s, mm/s, μm/s)
