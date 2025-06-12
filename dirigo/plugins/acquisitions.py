@@ -871,12 +871,12 @@ class StackAcquisition(Acquisition):
         """
         # Move to lower limit
         z_scanner = self.hw.objective_z_scanner
-        z = z_scanner.position
         self.hw.objective_z_scanner.move_to(self._depths[0])
         
         # spin until reach start position
-        while (z_scanner.position - z) - self._depths[0] > units.Position('1 um'):
-            time.sleep(0.01)
+        time.sleep(units.Time('10 ms'))
+        while self.hw.objective_z_scanner.moving:
+            time.sleep(units.Time('10 ms'))
 
         try:
             # Start child FrameAcquisition
@@ -896,7 +896,7 @@ class StackAcquisition(Acquisition):
 
                 if i < self.spec.depths_per_acquisition:
                     # Move Z scanner to next depth
-                    z_scanner.move_to(self._depths[i]-self._depths[i-1])
+                    z_scanner.move_to(self._depths[i])
 
                     # Wait for sacrificial frames
                     for _ in range(self.spec._sacrificial_frames_per_step):
@@ -905,10 +905,14 @@ class StackAcquisition(Acquisition):
         finally:
             self._frame_acquisition.stop()
             self._publish(None) # publish the sentinel
-            z_scanner.move_to(-self._depths[-1])
+            z_scanner.move_to(self._depths[0]) # move back to start
 
     @property
     def digitizer_profile(self) -> DigitizerProfile:
         return self.hw.digitizer.profile
+    
+    @property
+    def runtime_info(self) -> LineAcquisitionRuntimeInfo:
+        return self._frame_acquisition.runtime_info
 
             
