@@ -82,17 +82,11 @@ class RGBFrameDisplay(Display):
     """FrameDisplay simplified for 3 channel RGB"""
     def __init__(self, 
                  upstream: Acquisition | Processor, 
-                 pixel_format = DisplayPixelFormat.RGB24,
                  **kwargs):
         super().__init__(upstream, **kwargs)
         #self._acquisition: FrameAcquisition | LineAcquisition 
 
         self._prev_data = None # None indicates that no data has been acquired yet
-
-        if pixel_format == DisplayPixelFormat.RGB24:
-            bpp = 3
-        else:
-            bpp = 4
 
         n_channels = upstream.product_shape[2]
         if n_channels == 1:
@@ -100,6 +94,7 @@ class RGBFrameDisplay(Display):
         elif n_channels == 3:
             colormap_list = ['red', 'green', 'blue'] # may need to flip this
 
+        bpp = self.bits_per_pixel
         self._luts = np.zeros(shape=(3, self.data_range.range + 1, bpp), dtype=np.uint16)
 
         self.display_channels: list[DisplayChannel] = []
@@ -108,7 +103,7 @@ class RGBFrameDisplay(Display):
                 lut_slice=self._luts[ci],
                 color_vector=ColorVector[colormap_name.upper()],
                 display_range=self.data_range,
-                pixel_format=pixel_format,
+                pixel_format=self._pixel_format,
                 update_method=self.update_display,
                 gamma_lut_length=self.gamma_lut_length
             )
@@ -182,7 +177,7 @@ class RGBFrameDisplay(Display):
             return
         
         disp_product = self._get_free_product()
-        self._apply_display_kernel(self._prev_data, self._luts, disp_product.frame)
+        self._apply_display_kernel(self._prev_data, self._luts, disp_product.data)
         self._publish(disp_product)
 
     @property
@@ -200,7 +195,6 @@ class FrameDisplay(Display):
 
     def __init__(self, 
                  upstream: Acquisition | Processor, 
-                 pixel_format = DisplayPixelFormat.RGB24,
                  **kwargs):
         super().__init__(upstream, **kwargs)
         self._acquisition: FrameAcquisition | LineAcquisition 
@@ -218,7 +212,7 @@ class FrameDisplay(Display):
         self._i: int = 0 # tracks rolling average index
         self._average_buffer_lock = threading.Lock()  # Add a lock for thread safety
 
-        bpp = 3 if pixel_format == DisplayPixelFormat.RGB24 else 4
+        bpp = self.bits_per_pixel
         # LUTS: look-up tables (note it's plural). LUTs for each channel enabled for display.
         self._luts = np.zeros(shape=(self.nchannels, self.data_range.range + 1, bpp), dtype=np.uint16)
 
@@ -229,7 +223,7 @@ class FrameDisplay(Display):
                 lut_slice=self._luts[ci],
                 color_vector=ColorVector[colormap_name.upper()],
                 display_range=self.data_range,
-                pixel_format=pixel_format,
+                pixel_format=self._pixel_format,
                 update_method=self.update_display,
                 gamma_lut_length=self.gamma_lut_length
             )
@@ -380,7 +374,7 @@ class FrameDisplay(Display):
             return
         
         disp_product = self._get_free_product()
-        self._apply_display_kernel(self._prev_data, self._luts, disp_product.frame)
+        self._apply_display_kernel(self._prev_data, self._luts, disp_product.data)
         self._publish(disp_product)
 
 

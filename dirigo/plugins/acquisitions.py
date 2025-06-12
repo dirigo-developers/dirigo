@@ -907,4 +907,8 @@ class StackAcquisition(Acquisition):
             self._publish(None) # publish the sentinel
             z_scanner.move_to(-self._depths[-1])
 
+    @property
+    def digitizer_profile(self) -> DigitizerProfile:
+        return self.hw.digitizer.profile
+
             

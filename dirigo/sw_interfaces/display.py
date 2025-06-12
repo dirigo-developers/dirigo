@@ -163,7 +163,8 @@ class Display(Worker):
     def __init__(self, 
                  upstream: Acquisition | Processor,
                  monitor_bit_depth: int = 8,
-                 gamma: float = 1/2.2):
+                 gamma: float = 1/2.2,
+                 pixel_format: DisplayPixelFormat = DisplayPixelFormat.RGB24):
         """Instantiate with either an Acquisition or Processor"""
         super().__init__("Display Worker")
 
@@ -181,6 +182,10 @@ class Display(Worker):
             self._acquisition = upstream
         else:
             raise ValueError("Upstream Worker must be either an Acquisition or a Processor")
+        
+        if not isinstance(pixel_format, DisplayPixelFormat):
+            raise ValueError(f"Invalid pixel format: {pixel_format}")
+        self._pixel_format = pixel_format
 
         self.display_channels: list[DisplayChannel] = []
 
@@ -188,6 +193,10 @@ class Display(Worker):
     def nchannels(self):
         """Returns the number of channels expected from Acquisition or Processor."""
         return self._acquisition.hw.nchannels_enabled
+    
+    @property
+    def bits_per_pixel(self) -> int:
+        return 3 if self._pixel_format == DisplayPixelFormat.RGB24 else 4
 
     @property
     @abstractmethod

@@ -99,16 +99,7 @@ class Dirigo:
         autostart = kw.pop("autostart", True)
         autoconnect = kw.pop("autoconnect", True)
 
-        if group == "display":                       # built-in fast path
-            pixel_fmt = kw.pop("pixel_format", DisplayPixelFormat.RGB24)
-            disp = cls(upstream, pixel_fmt, **kw)
-            if autoconnect:
-                upstream.add_subscriber(disp)
-            if autostart:
-                disp.start()
-            return disp
-
-        if group in ("processor", "logger"):
+        if group in ("display", "processor", "logger"):
             obj = cls(upstream, **kw)
             if autoconnect:
                 upstream.add_subscriber(obj)
