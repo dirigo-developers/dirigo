@@ -1,4 +1,4 @@
-import time
+import time, threading
 from functools import cached_property
 
 import numpy as np
@@ -20,6 +20,7 @@ from dirigo.plugins.acquisitions import (
 
 TWO_PI = 2 * np.pi
 
+# ---------- Raster Frame Processor ----------
 sigs = [
     #buffer_data    invert_mask  offset    bit_shift  gradient     resampled (out)  start_indices  nsamples_to_sum
     (uint8[:,:,:],  int16[:],    int16[:], int32,     float32[:],  uint16[:,:,:],   int32[:,:],    int32[:,:]),
@@ -150,7 +151,7 @@ class RasterFrameProcessor(Processor[Acquisition]):
         bit precision, change the bits_precision argument.
         """
         super().__init__(upstream)
-        self._acq: LineAcquisition | FrameAcquisition
+        self._acquisition: LineAcquisition | FrameAcquisition
         self._spec: LineAcquisitionSpec | FrameAcquisitionSpec # to refine type hinting
         
         digitizer_profile = upstream.digitizer_profile
@@ -268,7 +269,7 @@ class RasterFrameProcessor(Processor[Acquisition]):
                     proc_product.timestamps = acq_prod.timestamps
                     proc_product.positions = acq_prod.positions
                     proc_product.phase = TWO_PI * self._trigger_error \
-                        / (self._acq.digitizer_profile.sample_clock.rate * avg_trig_period)
+                        / (self._acquisition.digitizer_profile.sample_clock.rate * avg_trig_period)
                     proc_product.frequency = float(self._fast_scanner_frequency)
 
                     self._publish(proc_product) # sends off to Logger and/or Display workers
@@ -286,7 +287,7 @@ class RasterFrameProcessor(Processor[Acquisition]):
         ff = self._spec.fill_fraction
 
         # Create a resampling function based on fast axis waveform type
-        if 'resonant' in self._acq.system_config.fast_raster_scanner['type'].lower():
+        if 'resonant' in self._acquisition.system_config.fast_raster_scanner['type'].lower():
             # image line should be taken from center of sinusoid sweep
             pixel_edges = np.linspace(ff, -ff, self._spec.pixels_per_line + 1) 
 
@@ -354,12 +355,12 @@ class RasterFrameProcessor(Processor[Acquisition]):
         phase = np.interp(scanner_amplitude, ampls, phases)
         frequency = np.interp(scanner_amplitude, ampls, freqs)
 
-        digitizer_rate = self._acq.digitizer_profile.sample_clock.rate
+        digitizer_rate = self._acquisition.digitizer_profile.sample_clock.rate
         return (phase / TWO_PI) * (digitizer_rate / frequency)
     
     @cached_property
     def _sample_clock_rate(self) -> units.SampleRate:
-        return self._acq.digitizer_profile.sample_clock.rate
+        return self._acquisition.digitizer_profile.sample_clock.rate
     
     @property
     def samples_per_period(self) -> float:
@@ -392,11 +393,11 @@ class LineCameraLineProcessor(Processor[LineCameraLineAcquisition]):
         """
         super().__init__(upstream)
         self._spec: LineCameraLineAcquisitionSpec
-        self._acq: LineCameraLineAcquisition
+        self._acquisition: LineCameraLineAcquisition
         
-        camera_profile = self._acq.camera_profile # TODO, do we need this?
-        system_config = self._acq.system_config
-        runtime_info = self._acq.runtime_info
+        camera_profile = self._acquisition.camera_profile # TODO, do we need this?
+        system_config = self._acquisition.system_config
+        runtime_info = self._acquisition.runtime_info
 
         # Compute shape & datatype. Pre-allocate Products
         if (bits_precision % 2) or not (8 <= bits_precision <= 16):
@@ -504,3 +505,138 @@ class LineCameraLineProcessor(Processor[LineCameraLineAcquisition]):
             min=-2**(self._bits_precision-1), 
             max=2**(self._bits_precision-1) - 1
         )
+
+
+
+# ---------- Rolling Average Processor ----------
+sigs = [
+#    ring_buffer       frame_index  averaged
+    (uint16[:,:,:,:],  int64,       uint16[:,:,:]),
+    (int16[:,:,:,:],   int64,       int16[:,:,:] ),
+]
+@njit(sigs, nogil=True, parallel=True, fastmath=True, cache=True)
+def _rolling_average_kernel(ring_buffer: np.ndarray, 
+                           frame_index: int, 
+                           averaged: np.ndarray) -> np.ndarray:
+    Nf, Ny, Nx, Nc = ring_buffer.shape
+    d = min(Nf, frame_index + 1)
+
+    for iy in prange(Ny):
+        for ix in prange(Nx):
+            for ic in range(Nc):
+                tmp = 0
+                for iframe in range(d):
+                    tmp += ring_buffer[iframe, iy, ix, ic]
+                averaged[iy, ix, ic] = tmp // d
+
+    return averaged
+
+
+class RollingAverageProcessor(Processor[RasterFrameProcessor]):
+    def __init__(self,
+                 upstream):
+        super().__init__(upstream)
+        self._data_range = upstream.data_range
+        self._acquisition: FrameAcquisition | LineAcquisition 
+
+        self._init_product_pool(
+            n       = 2, 
+            shape   = upstream.product_shape, 
+            dtype   = upstream.product_dtype
+        )
+        
+        pixel_size = self._acquisition.spec.pixel_size
+        self._reset_average_xy_cutoff_sqr = pixel_size ** 2 # TODO, may require some tuning to remove unwanted resets
+        self._reset_average_z_cutoff = pixel_size # TODO, dido
+
+        self._prev_position = None
+        self._n_frame_average = 1
+        self._average_buffer = None
+        self._i: int = 0 # tracks rolling average index
+        self._average_buffer_lock = threading.Lock() # Use lock for thread safety
+
+    @property
+    def n_frame_average(self) -> int:
+        return self._n_frame_average
+    
+    @n_frame_average.setter
+    def n_frame_average(self, n_frames: int):
+        if not isinstance(n_frames, int) or n_frames < 1:
+            raise ValueError("Rolling frame average must be an integer >= 1.")
+        with self._average_buffer_lock:
+            self._n_frame_average = n_frames
+            self._average_buffer = None # Triggers reset of the average buffer 
+
+    def _receive_product(self, 
+                         block: bool = True, 
+                         timeout: float | None = None
+                         ) -> AcquisitionProduct | ProcessorProduct:
+        return super()._receive_product(block, timeout) # type: ignore
+    
+    def run(self):
+        try:
+            while True:
+                with self._receive_product() as in_product:
+
+                    # Check whether position has changed
+                    if in_product.positions is not None:
+
+                        if isinstance(in_product.positions, np.ndarray):
+                            current_positions = in_product.positions[-1,:] # use final position only
+                        
+                        elif isinstance(in_product.positions, tuple):
+                            current_positions = np.array(in_product.positions)
+
+                        if (self._prev_position is not None):
+
+                            dr2 = (current_positions[0] - self._prev_position[0])**2  \
+                                + (current_positions[1] - self._prev_position[1])**2
+                            
+                            if dr2 > self._reset_average_xy_cutoff_sqr: 
+                                # if the Euclidean exceeds from last frame exceeds pixel size, then reset the rolling average index
+                                # Setting _i = 0, will cause this frame to be sliced into the ring buffer at the first position
+                                # and the averaging kernel will only average that 1 frame (effectively no averaging)
+                                # this allows reusing the _average_buffer object.
+                                self._i = 0
+
+                            elif len(current_positions) > 2: # Z axis also included
+                                dz = abs(current_positions[2] - self._prev_position[2])
+                                if dz > self._reset_average_z_cutoff:
+                                    # Similarly, reset _i if z position changes
+                                    self._i = 0
+                        
+                        self._prev_position = current_positions
+
+                    with self._average_buffer_lock:
+                        # _average_buffer is initially None. First frame establishes height, width, etc
+                        # Averaging can also be reset or changed by setting this to None, prompting reallocation
+                        if self._average_buffer is None:
+                            frame_shape = in_product.data.shape
+                            ring_frame_buffer_shape = (self.n_frame_average,) + frame_shape
+                            self._average_buffer = np.zeros(
+                                shape=ring_frame_buffer_shape, 
+                                dtype=self.data_range.recommended_dtype
+                            )
+                            self._i = 0
+
+                        a = self._i % self.n_frame_average
+                        self._average_buffer[a] = in_product.data
+
+                        out_product = self._get_free_product()
+
+                        _rolling_average_kernel(
+                            self._average_buffer, 
+                            self._i, 
+                            out_product.data
+                        )
+
+                        self._publish(out_product)
+                        
+                self._i += 1
+
+        except EndOfStream:
+            self._publish(None)
+
+    @property
+    def data_range(self) -> units.IntRange:
+        return self._data_range

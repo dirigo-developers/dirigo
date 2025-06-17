@@ -33,10 +33,23 @@ raw_raster_frame = "dirigo.plugins.loaders:RawRasterFrameLoader"
 [project.entry-points."dirigo_processors"]
 raster_frame = "dirigo.plugins.processors:RasterFrameProcessor"
 line_camera_line = "dirigo.plugins.processors:LineCameraLineProcessor"
+rolling_average = "dirigo.plugins.processors:RollingAverageProcessor"
+
+[project.entry-points."dirigo_color_vectors"]
+gray = "dirigo.plugins.displays:Gray"
+red = "dirigo.plugins.displays:Red"
+green = "dirigo.plugins.displays:Green"
+blue = "dirigo.plugins.displays:Blue"
+cyan = "dirigo.plugins.displays:Cyan"
+magenta = "dirigo.plugins.displays:Magenta"
+yellow = "dirigo.plugins.displays:Yellow"
+
+[project.entry-points."dirigo_transfer_functions"]
+gamma = "dirigo.plugins.displays:Gamma"
+inverted_gamma = "dirigo.plugins.displays:InvertedGamma"
 
 [project.entry-points."dirigo_displays"] # e.g. display processors
 frame = "dirigo.plugins.displays:FrameDisplay"
-rgb_frame = "dirigo.plugins.displays:RGBFrameDisplay"
 
 [project.entry-points."dirigo_loggers"]
 tiff = "dirigo.plugins.loggers:TiffLogger"

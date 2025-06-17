@@ -1,65 +1,17 @@
-from abc import abstractmethod
+from abc import ABC, abstractmethod
 from enum import Enum
-from typing import Callable
+from typing import Callable, Literal, Self, Tuple, ClassVar, Type, overload
+from importlib.metadata import entry_points
+
 
 import numpy as np
-from numba import njit, types
 
 from dirigo.components.units import IntRange
 from dirigo.sw_interfaces.worker import Worker, Product
-from dirigo.sw_interfaces.acquisition import Acquisition, AcquisitionProduct
-from dirigo.sw_interfaces.processor import Processor, ProcessorProduct
+from dirigo.sw_interfaces.acquisition import Acquisition
+from dirigo.sw_interfaces.processor import Processor
 
 
-
-
-sigs = [
-    (types.int16[:],  types.int64, types.int64, types.float64[:], types.uint16[:,:], types.int64),
-    (types.uint16[:], types.int64, types.int64, types.float64[:], types.uint16[:,:], types.int64)
-]
-@njit(sigs, cache=True)
-def _update_lut_kernel(input_values, display_min, display_max, colormap, lut, gamma_lut_length):
-    display_min_f32 = np.float32(display_min)
-    display_range = np.float32(display_max - display_min) # possibly needs to be a +1 here
-
-    max_output_value = np.float32(gamma_lut_length - 1)
-    
-    max0 = max_output_value * np.float32(colormap[0])
-    max1 = max_output_value * np.float32(colormap[1])
-    max2 = max_output_value * np.float32(colormap[2])
-
-    zero = np.float32(0.0)
-    one = np.float32(1.0)
-
-    for i in input_values:
-
-        y_norm = min(
-            max(i - display_min_f32, zero) / display_range, 
-            one
-        ) # y_norm will be 0.0 - 1.0
-
-        lut[i, 0] = int(max0 * y_norm)
-        lut[i, 1] = int(max1 * y_norm)
-        lut[i, 2] = int(max2 * y_norm)
-
-
-class ColorVector(Enum):
-    """Standard color names.
-    
-    Subclass this to inherit the standard names and add new ones.
-    """
-    GRAY =    (1.0, 1.0, 1.0)
-    RED =     (1.0, 0.0, 0.0)
-    GREEN =   (0.0, 1.0, 0.0)
-    BLUE =    (0.0, 0.0, 1.0)
-    CYAN =    (0.0, 1.0, 1.0)
-    MAGENTA = (1.0, 0.0, 1.0)
-    YELLOW =  (1.0, 1.0, 0.0)
-
-    @classmethod
-    def get_color_names(cls):
-        """Return a list of string of available color names."""
-        return [name.capitalize() for name in cls.__members__.keys()]
 
 
 class DisplayPixelFormat(Enum):
@@ -67,89 +19,126 @@ class DisplayPixelFormat(Enum):
     BGRX32  = 1     # blue, green, red, and 1 ignored, each 8 bits (PyQt/PySide)
 
 
-class DisplayChannel(): # should this be a ABC?
-    """Represents an individual channel to be processed for display."""
-    def __init__(self, lut_slice: np.ndarray, color_vector: ColorVector, 
-                 display_range: IntRange, update_method: Callable[[], None],
-                 pixel_format: DisplayPixelFormat, gamma_lut_length: int):
+# ---------- Color Vectors API ----------
+class ColorVector(ABC):
+    """
+    Abstract color vector for Dirigo's colormap processor.
 
-        if not isinstance(lut_slice, np.ndarray) or (lut_slice.base is None):
-            raise ValueError("`lut_slice` property must be a numpy slice.")
-        self._lut = lut_slice # reference to this channel's 'slice' of multichannel LUT
-        self._pixel_format = pixel_format
-        self._update_display_method = update_method
-        self._gamma_lut_length = gamma_lut_length
+    • Subclasses represent an RGB triplet (values 0.0-1.0).  
+    • Register concrete vectors via the ``dirigo_color_vectors`` entry-point
+      group. For example:
 
-        # Adjustable parameters (see getter/setters)
-        self._enabled = True
-        self._color_vector = color_vector
-        self._display_range = display_range 
+        [project.entry-points."dirigo_color_vectors"]
+        acridine_orange = my_plugin.colors:AcridineOrange
 
-        self._input_values = np.arange(
-            start=display_range.min, 
-            stop=display_range.max + 1, 
-            dtype=display_range.recommended_dtype
-        )
+    Minimal implementation needs to set class-level attributes: 
+        slug: short, unique identifier, 
+        label: human-readable label
+        rgb: tuple RGB triplet
+    """
+    # ---------- Required metadata ----------
+    #: Short, unique identifier (used internally / in URLs).
+    slug: ClassVar[str]
 
-        self._update_lut()
+    #: Human-readable label shown in GUIs.
+    label: ClassVar[str]
 
-    @property
-    def enabled(self) -> bool:
-        return self._enabled
+    # RGB triplet
+    rgb: ClassVar[Tuple[float, float, float]]
+
+    # ---------- Validation ----------
+    def __init_subclass__(cls):
+        super().__init_subclass__()
+        if not isinstance(cls.rgb, tuple) or len(cls.rgb) != 3:
+            raise TypeError(f"{cls.__name__}.rgb must be a 3-tuple")
+        if any(not (0.0 <= v <= 1.0) for v in cls.rgb):
+            raise ValueError(f"{cls.__name__}.rgb components must be in [0,1]")
+
+    # ---------- Helpers ----------
+    def __iter__(self):
+        """Allows tuple unpacking: r, g, b = vec."""
+        yield from self.rgb
+
+    # Pretty repr
+    def __repr__(self) -> str:  # pragma: no cover
+        r, g, b = self.rgb
+        return f"<{self.__class__.__name__} ({r:.3f}, {g:.3f}, {b:.3f})>"
+
+
+def load_color_vector(name: str) -> Type[ColorVector]:
+    """
+    Import and return the object registered under ``name`` in the
+    ``dirigo_color_vectors`` entry-point group.
+
+    Raises
+    ------
+    ValueError
+        If no matching entry-point exists.
+    """
+    eps = entry_points(group="dirigo_color_vectors", name=name)  # returns an iterable
+    try:
+        ep = next(iter(eps))                    # take the first (should be one)
+    except StopIteration:                       # nothing matched
+        raise ValueError(f"No entry point '{name}' in group '{"dirigo_color_vectors"}'")
+    return ep.load()                            # returns the object itself
+
+
+
+# ---------- Transfer Function API ----------
+class TransferFunction(ABC):
+    """
+    A parameterized tone / transfer function.
+
+    Concrete subclasses are small frozen dataclasses whose *fields* are the
+    parameters (e.g. gamma, alpha).  Those classes themselves are what you
+    register as entry points.
+
+        [project.entry-points."dirigo_transfer_functions"]
+        gamma           = dirigo.transfer_funcs:Gamma        # needs a γ value
+        invert_gamma    = dirigo.transfer_funcs:InvertGamma  # γ + invert flag
+
+    Users obtain *instances* via construction with named arguments:
+        tf = Gamma(gamma=2.2)          # instance
+    """
+
+    # ---------- Required metadata ----------
+    #: Short, unique identifier (used internally / in URLs).
+    slug:  ClassVar[str]
+
+    #: Human-readable label shown in GUIs.
+    label: ClassVar[str]
+
+    # Public convenience
+    @overload
+    def __call__(self, x: float) -> float: ...
     
-    @enabled.setter
-    def enabled(self, new_state: bool):
-        if not isinstance(new_state, bool):
-            raise ValueError("`enabled` property must be set with a boolean.")
-        self._enabled = new_state
-        self._update_lut()
+    @overload
+    def __call__(self, x: np.ndarray) -> np.ndarray: ...
 
-    @property
-    def color_vector(self) -> ColorVector:
-        return self._color_vector
+    def __call__(self, x: np.ndarray | float) -> np.ndarray | float:
+        """Vectorised evaluation"""
+        x_arr = np.asarray(x, dtype=np.float64)
+        y = self._f(x_arr)
+        return y if isinstance(x, np.ndarray) else float(y)  # keep scalar type
 
-    @color_vector.setter
-    def color_vector(self, color_vector: ColorVector):
-        if not isinstance(color_vector, ColorVector):
-            raise ValueError("`color_vector` property must be set with a ColorVector object.")
-        self._color_vector = color_vector
-        self._update_lut()
-
-    @property
-    def display_min(self) -> int:
-        return self._display_range.min
-
-    @display_min.setter
-    def display_min(self, value: int):
-        self._display_range.min = int(value)
-        self._update_lut()
-
-    @property
-    def display_max(self) -> int:
-        return self._display_range.max
-    
-    @display_max.setter
-    def display_max(self, value: int):
-        self._display_range.max = int(value)
-        self._update_lut()
-
-    def _update_lut(self):
-        if self._pixel_format == DisplayPixelFormat.RGB24:
-            colormap = self._color_vector.value if self.enabled else (0.0, 0.0, 0.0)
-        elif self._pixel_format == DisplayPixelFormat.BGRX32:
-            colormap = tuple(reversed(self._color_vector.value)) + (0.0,) if self.enabled else (0.0, 0.0, 0.0, 0.0)
-
-        _update_lut_kernel(
-            input_values=self._input_values,
-            display_min=self.display_min,
-            display_max=self.display_max,
-            colormap=np.array(colormap),
-            lut=self._lut,
-            gamma_lut_length=self._gamma_lut_length
-        )
-        self._update_display_method()
+    # Required method
+    @abstractmethod
+    def _f(self, x: np.ndarray) -> np.ndarray:
+        """Evaluate the transfer curve in [0,1] linear space."""
 
 
+def load_transfer_function(name: str, **params) -> TransferFunction:
+    eps = entry_points(group="dirigo_transfer_functions", name=name)  # returns an iterable
+    try:
+        ep = next(iter(eps))                    # take the first (should be one)
+    except StopIteration:                       # nothing matched
+        raise ValueError(f"No entry point '{name}' in group '{"dirigo_color_vectors"}'")
+    cls = ep.load()                            # returns the object itself
+    return cls(**params)     # instantiate with user-supplied kwargs
+
+
+
+# ---------- Display Worker API ----------
 class DisplayProduct(Product):
     pass
 
@@ -161,7 +150,7 @@ class Display(Worker):
     Product = DisplayProduct
 
     def __init__(self, 
-                 upstream: Acquisition | Processor,
+                 upstream: Acquisition | Processor | Self,
                  monitor_bit_depth: int = 8,
                  gamma: float = 1/2.2,
                  pixel_format: DisplayPixelFormat = DisplayPixelFormat.RGB24):
@@ -174,9 +163,9 @@ class Display(Worker):
         
         self.gamma = gamma # gamma setter will validate this
 
-        if isinstance(upstream, Processor): # TODO, refactor this into some sort of mixin (with Logger's corresponding block)
+        if isinstance(upstream, (Processor, Display)): # TODO, refactor this into some sort of mixin (with Logger's corresponding block)
             self._processor = upstream
-            self._acquisition = upstream._acq
+            self._acquisition = upstream._acquisition
         elif isinstance(upstream, Acquisition):
             self._processor = None
             self._acquisition = upstream
@@ -187,7 +176,7 @@ class Display(Worker):
             raise ValueError(f"Invalid pixel format: {pixel_format}")
         self._pixel_format = pixel_format
 
-        self.display_channels: list[DisplayChannel] = []
+        #self.display_channels: list[DisplayChannel] = []
 
     @property
     def nchannels(self):
@@ -195,23 +184,13 @@ class Display(Worker):
         return self._acquisition.hw.nchannels_enabled
     
     @property
-    def bits_per_pixel(self) -> int:
-        return 3 if self._pixel_format == DisplayPixelFormat.RGB24 else 4
-
-    @property
-    @abstractmethod
-    def n_frame_average(self) -> int:       # TODO, does this need to be abstract?
-        """The number of frames used in the rolling average.
-        
-        To enable averaging, set with an integer greater than 1. Setting 1 will
-        disable averaging.
+    def bits_per_pixel(self) -> Literal[3, 4]:
         """
-        pass
-
-    @n_frame_average.setter
-    @abstractmethod
-    def n_frame_average(self, frames: int):
-        pass
+        Returns the output bits per pixel:
+        3 for RGB   (tkinter-preferred)
+        4 for BGRX  (Qt-preferred)
+        """
+        return 3 if self._pixel_format == DisplayPixelFormat.RGB24 else 4
 
     @property
     def data_range(self) -> IntRange:
@@ -224,9 +203,9 @@ class Display(Worker):
             return self._acquisition.data_acquisition_device.data_range
         
     @property
-    def gamma_lut_length(self) -> int:
+    def tf_lut_length(self) -> int:
         """
-        To compute the gamma function, use a LUT of this length.
+        To compute final transfer function (e.g. gamma), use a LUT of this length.
         
         Default: 2^[monitor bit depth + 4]
         """

@@ -1,81 +1,250 @@
-import time
-import threading
+import time, threading
+from dataclasses import dataclass
+from typing import ClassVar, Tuple, Callable, Optional
 
 import numpy as np
-from numba import njit, prange, types
+from numba import njit, prange, types, uint8, int16, uint16, int64, float32
 
+from dirigo.components.units import IntRange
 from dirigo.sw_interfaces.worker import EndOfStream
 from dirigo.sw_interfaces.processor import Processor, ProcessorProduct
 from dirigo.sw_interfaces.acquisition import Acquisition, AcquisitionProduct
-from dirigo.sw_interfaces.display import Display, ColorVector, DisplayChannel, DisplayPixelFormat
+from dirigo.sw_interfaces.display import (
+    Display, ColorVector, TransferFunction, DisplayPixelFormat,
+    load_color_vector, load_transfer_function
+)
 from dirigo.plugins.acquisitions import FrameAcquisition, LineAcquisition
 
 
+
+
+# ---------- Standard Color Vectors (Concrete Classes) ----------
+class Gray(ColorVector):
+    """Grayscale color vector. Frequently used for single-channel display."""
+    slug = "gray"
+    label = "Gray"
+    rgb = (1.0, 1.0, 1.0)
+
+
+class Red(ColorVector):
+    """Red color vector."""
+    slug = "red"
+    label = "Red"
+    rgb = (1.0, 0.0, 0.0)
+
+
+class Green(ColorVector):
+    """Green color vector."""
+    slug = "green"
+    label = "Green"
+    rgb = (0.0, 1.0, 0.0)
+
+
+class Blue(ColorVector):
+    """Blue color vector."""
+    slug = "blue"
+    label = "Blue"
+    rgb = (0.0, 0.0, 1.0)
+
+
+class Cyan(ColorVector):
+    """Cyan color vector."""
+    slug = "cyan"
+    label = "Cyan"
+    rgb = (0.0, 1.0, 1.0)
+
+
+class Magenta(ColorVector):
+    """Magenta color vector."""
+    slug = "magenta"
+    label = "Magenta"
+    rgb = (1.0, 0.0, 1.0)
+
+
+class Yellow(ColorVector):
+    """Yellow color vector."""
+    slug = "yellow"
+    label = "Yellow"
+    rgb = (1.0, 1.0, 0.0)
+
+
+# ---------- Standard Transfer Functions (Concrete Classes) ----------
+@dataclass(frozen=True, slots=True)
+class Gamma(TransferFunction):
+    """
+    Standard power-law (linear->display) transfer.
+    gamma < 1 boosts mid-tones; gamma > 1 darkens.
+    """
+    gamma: float = 2.2
+
+    slug:  ClassVar[str] = "gamma"
+    label: ClassVar[str] = "Gamma"
+
+    def _f(self, x: np.ndarray) -> np.ndarray:
+        return np.power(x, 1.0 / self.gamma)
+
+
+@dataclass(frozen=True, slots=True)
+class InvertedGamma(TransferFunction):
+    """
+    Inverted contrast + power-law (linear->display) transfer.
+    gamma < 1 boosts mid-tones; gamma > 1 darkens.
+    """
+    gamma: float = 2.2
+
+    slug:  ClassVar[str] = "inverted_gamma"
+    label: ClassVar[str] = "Inverted gamma"
+
+    def _f(self, x: np.ndarray) -> np.ndarray:
+        return np.power(1 - x, 1.0 / self.gamma)
+
+# TODO add log transfer function
+
+
+
+# ---------- Display Channel API ----------
+UT = types.UniTuple
 sigs = [
-    (types.uint16[:,:,:,:], types.int64, types.uint16[:,:,:]),
-    (types.int16[:,:,:,:],  types.int64, types.int16[:,:,:] ),
+#   input_values  disp_min  disp_max  color_vector    lut          lut_max
+    (int16[:],    int64,    int64,    UT(float32,3),  uint16[:,:], int64),
+    (uint16[:],   int64,    int64,    UT(float32,3),  uint16[:,:], int64)
 ]
-@njit(sigs, nogil=True, parallel=True, fastmath=True, cache=True)
-def rolling_average_kernel(ring_buffer: np.ndarray, frame_index: int, averaged: np.ndarray) -> np.ndarray:
-    Nf, Ny, Nx, Nc = ring_buffer.shape
-    d = min(Nf, frame_index + 1)
+@njit(sigs, cache=True)
+def _update_lut_kernel(input_values: np.ndarray, 
+                       disp_min: int, 
+                       disp_max: int, 
+                       color_vector: Tuple[float, ...], 
+                       lut: np.ndarray, 
+                       lut_max: int):
+    """
+    JIT-compiled function for fast LUT recalculation.
 
-    for iy in prange(Ny):
-        for ix in prange(Nx):
-            for ic in range(Nc):
+    input_values: index of all the possible input values 
+    disp_min: value to set to minimum display level (everything below is clipped)
+    disp_max: value to set to maximum display level (everything above is clipped)
+    color_vector: tuple of floats for RGB hue
+    lut: array to place the new LUT data
+    lut_max: max **Value** of the LUT (should be numebr of entries in the final
+        transfer function LUT)
+    """
+    zero = np.float32(0.0)
+    one = np.float32(1.0)
 
-                tmp = 0
-                for iframe in range(d):
-                    tmp += ring_buffer[iframe, iy, ix, ic]
+    # cast integers to FP32
+    display_min_f32 = np.float32(disp_min)
+    display_range = np.float32(disp_max - disp_min) # possibly needs to be a +1 here
+    max_output_value = np.float32(lut_max - 1)
+    
+    max0 = max_output_value * np.float32(color_vector[0])
+    max1 = max_output_value * np.float32(color_vector[1])
+    max2 = max_output_value * np.float32(color_vector[2])
 
-                averaged[iy, ix, ic] = tmp // d
-
-    return averaged
-
-
-sigs = [
-    (types.int16[:,:,:],  types.uint16[:,:,:], types.uint8[:], types.uint8[:,:,:]),
-    (types.uint16[:,:,:], types.uint16[:,:,:], types.uint8[:], types.uint8[:,:,:]),
-    # Not implemented yet: >8bit gamma LUT (for HDR displays)
-]
-@njit(sigs, nogil=True, parallel=True, fastmath=True, cache=True)
-def additive_display_kernel(data: np.ndarray, luts: np.ndarray, gamma_lut: np.ndarray, image: np.ndarray) -> np.ndarray:
-    """Applies LUTs and blends channels additively."""
-    Ny, Nx, Nc = data.shape
-    bpp = luts.shape[2]
-    gamma_lut_length = gamma_lut.shape[0]
-
-    #image = np.zeros(shape=(Ny, Nx, bpp), dtype=np.uint8)
-
-    for yi in prange(Ny):
-        for xi in prange(Nx):
-
-            r, g, b = 0, 0, 0 
-            for ci in range(Nc):
-                lut_index = data[yi, xi, ci]
-                r += luts[ci, lut_index, 0]
-                g += luts[ci, lut_index, 1] 
-                b += luts[ci, lut_index, 2]
-            
-            # Gamma correct blended values and assign to output image 
-            image[yi, xi, 0] = gamma_lut[min(r, gamma_lut_length-1)]
-            image[yi, xi, 1] = gamma_lut[min(g, gamma_lut_length-1)]
-            image[yi, xi, 2] = gamma_lut[min(b, gamma_lut_length-1)]
-
-    return image
+    for i in input_values:
+        y_norm = min(                               # y_norm will be 0.0 - 1.0
+            max(i - display_min_f32, zero) / display_range, 
+            one
+        ) 
+        lut[i, 0] = int(max0 * y_norm)
+        lut[i, 1] = int(max1 * y_norm)
+        lut[i, 2] = int(max2 * y_norm)
 
 
-def default_colormap_lists(nchannels: int) -> list[str]:
-    if nchannels == 1:
-        return ['gray']
-    elif nchannels == 2:
-        return ['cyan', 'red']
-    elif nchannels == 3:
-        return ['cyan', 'magenta', 'yellow']
-    elif nchannels == 4:
-        return ['cyan', 'magenta', 'yellow', 'gray']
-    else:
-        raise ValueError("No default colormaps set yet for >4 channels")
+class DisplayChannel():
+    """Represents an individual channel to be processed for display."""
+    def __init__(self, 
+                 lut_slice: np.ndarray, 
+                 color_vector_name: str, 
+                 display_range: IntRange, 
+                 update_method: Callable[[], None],
+                 pixel_format: DisplayPixelFormat, 
+                 lut_max: int):
+        """
+        Sets up the display channel with required parameters and computes a LUT.
+        """
+
+        # Validators
+        if not isinstance(lut_slice, np.ndarray) or (lut_slice.base is None):
+            raise ValueError("``lut_slice`` property must be a numpy slice.")
+
+        self._lut = lut_slice # reference to this channel's 'slice' of multichannel LUT
+        self._pixel_format = pixel_format
+        self._update_display_method = update_method
+        self._lut_max = lut_max
+
+        # Adjustable parameters (see getter/setters)
+        self._enabled = True
+        self._color_vector = load_color_vector(color_vector_name)
+        self._display_range = display_range 
+
+        self._input_values = np.arange(
+            start=display_range.min, 
+            stop=display_range.max + 1, 
+            dtype=display_range.recommended_dtype
+        )
+
+        self._update_lut()
+
+    @property
+    def enabled(self) -> bool:
+        return self._enabled
+    
+    @enabled.setter
+    def enabled(self, new_state: bool):
+        if not isinstance(new_state, bool):
+            raise ValueError("``enabled`` must be set with a boolean.")
+        self._enabled = new_state
+        self._update_lut()
+
+    @property
+    def color_vector_name(self) -> str:
+        return self._color_vector.slug
+
+    @color_vector_name.setter
+    def color_vector_name(self, new_color_vector_name: str):
+        self._color_vector = load_color_vector(new_color_vector_name)
+        self._update_lut()
+
+    @property
+    def display_min(self) -> int:
+        return self._display_range.min
+
+    @display_min.setter
+    def display_min(self, value: int):
+        self._display_range.min = int(value)
+        self._update_lut()
+
+    @property
+    def display_max(self) -> int:
+        return self._display_range.max
+    
+    @display_max.setter
+    def display_max(self, value: int):
+        self._display_range.max = int(value)
+        self._update_lut()
+
+    def _update_lut(self):
+        # get the RGB triplet or BGRX quadruplet
+        if self._pixel_format == DisplayPixelFormat.RGB24:
+            if self.enabled:
+                color_vector = self._color_vector.rgb 
+            else:
+                color_vector = (0.0, 0.0, 0.0)
+        elif self._pixel_format == DisplayPixelFormat.BGRX32:
+            if self.enabled:
+                color_vector = tuple(reversed(self._color_vector.rgb)) + (0.0,)
+            else:
+                color_vector = (0.0, 0.0, 0.0, 0.0)
+
+        _update_lut_kernel(
+            input_values    = self._input_values,
+            disp_min        = self.display_min,
+            disp_max        = self.display_max,
+            color_vector    = color_vector,
+            lut             = self._lut,
+            lut_max         = self._lut_max
+        )
+        self._update_display_method()
+
 
 
 class RGBFrameDisplay(Display):
@@ -101,7 +270,7 @@ class RGBFrameDisplay(Display):
         for ci, colormap_name in enumerate(colormap_list):
             dc = DisplayChannel(
                 lut_slice=self._luts[ci],
-                color_vector=ColorVector[colormap_name.upper()],
+                color_vector=CVector[colormap_name.upper()],
                 display_range=self.data_range,
                 pixel_format=self._pixel_format,
                 update_method=self.update_display,
@@ -190,173 +359,127 @@ class RGBFrameDisplay(Display):
 
 
 
-class FrameDisplay(Display):
-    """Worker to perform processing for display (blending, LUTs, etc)"""
+# ---------- Standard Multichannel Frame Display ----------
+sigs = [
+#    data           luts           tf_lut    image
+    (int16[:,:,:],  uint16[:,:,:], uint8[:], uint8[:,:,:]),
+    (uint16[:,:,:], uint16[:,:,:], uint8[:], uint8[:,:,:]),
+]
+@njit(sigs, nogil=True, parallel=True, fastmath=True, cache=True)
+def _additive_blend_channels_kernel(data: np.ndarray, 
+                                    luts: np.ndarray,
+                                    tf_lut: np.ndarray, 
+                                    image: np.ndarray) -> np.ndarray:
+    """Applies LUTs and blends channels additively then applies a final 
+    transfer function."""
+    Ny, Nx, Nc = data.shape
+    tf_lut_length = tf_lut.shape[0]
 
-    def __init__(self, 
-                 upstream: Acquisition | Processor, 
+    for yi in prange(Ny):
+        for xi in prange(Nx):
+            r, g, b = 0, 0, 0 
+            for ci in range(Nc):
+                data_value = data[yi, xi, ci]
+                r += luts[ci, data_value, 0]
+                g += luts[ci, data_value, 1] 
+                b += luts[ci, data_value, 2]
+            image[yi, xi, 0] = tf_lut[min(r, tf_lut_length-1)]
+            image[yi, xi, 1] = tf_lut[min(g, tf_lut_length-1)]
+            image[yi, xi, 2] = tf_lut[min(b, tf_lut_length-1)]
+    return image
+
+
+def _default_colormap_lists(nchannels: int) -> list[str]:
+    if nchannels == 1:
+        return ['gray']
+    elif nchannels == 2:
+        return ['cyan', 'red']
+    elif nchannels == 3:
+        return ['cyan', 'magenta', 'yellow']
+    elif nchannels == 4:
+        return ['cyan', 'magenta', 'yellow', 'gray']
+    else:
+        raise ValueError("No default colormaps set yet for >4 channels")
+    
+
+class FrameDisplay(Display):
+    """
+    Multichannel frame display.
+    """
+    def __init__(self,
+                 upstream: Processor, # TODO type upstream
+                 color_vector_names: Optional[list[str]] = None,
+                 transfer_function_name: str= "gamma",
                  **kwargs):
         super().__init__(upstream, **kwargs)
-        self._acquisition: FrameAcquisition | LineAcquisition 
+        self._prev_data = None # stores last input for on-depand reprocessing adjustments
 
-        self._prev_data = None # None indicates that no data has been acquired yet
-        self._prev_position = None
-        
-        self._reset_average_xy_cutoff_sqr = self.pixel_size ** 2 # TODO, may require some tuning to remove unwanted resets
-        self._reset_average_z_cutoff = self.pixel_size # TODO, dido
-        # Either of these may need some cumulative measurement
-
-        # Frame averaging-related
-        self._n_frame_average = 1
-        self._average_buffer = None
-        self._i: int = 0 # tracks rolling average index
-        self._average_buffer_lock = threading.Lock()  # Add a lock for thread safety
+        if color_vector_names is None: # use some preset defaults
+            color_vector_names = _default_colormap_lists(self.nchannels)
+        else:
+            if len(color_vector_names) != self.nchannels:
+                raise ValueError("Mismatch between color vector arguments and physical input channels present")
 
         bpp = self.bits_per_pixel
-        # LUTS: look-up tables (note it's plural). LUTs for each channel enabled for display.
-        self._luts = np.zeros(shape=(self.nchannels, self.data_range.range + 1, bpp), dtype=np.uint16)
-
+        self._luts = np.zeros(
+            shape   = (self.nchannels, self.data_range.range, bpp), 
+            dtype   = np.uint16
+        )
+        
         self.display_channels: list[DisplayChannel] = []
-
-        for ci, colormap_name in enumerate(default_colormap_lists(self.nchannels)):
+        for ci, colormap_name in enumerate(color_vector_names):
             dc = DisplayChannel(
-                lut_slice=self._luts[ci],
-                color_vector=ColorVector[colormap_name.upper()],
-                display_range=self.data_range,
-                pixel_format=self._pixel_format,
-                update_method=self.update_display,
-                gamma_lut_length=self.gamma_lut_length
+                lut_slice           = self._luts[ci],
+                color_vector_name   = colormap_name,
+                display_range       = self.data_range,
+                pixel_format        = self._pixel_format,
+                update_method       = self.update_display,
+                lut_max             = self.tf_lut_length # TODO rename gamma
             )
             self.display_channels.append(dc)
 
-        if isinstance(self._acquisition, FrameAcquisition):
-            n_lines = self._acquisition.spec.lines_per_frame
-        else:
-            # fall-back when processing LineAcquisition as a frame
-            n_lines = self._acquisition.spec.lines_per_buffer  
-        shape = (n_lines, self._acquisition.spec.pixels_per_line, bpp)
-        self._init_product_pool(n=4, shape=shape, dtype=np.uint8)
+        shape = (*upstream.product_shape[:2], bpp)
+        self._init_product_pool(n=4, shape=shape, dtype=np.uint8) # TODO
+
+        # Make transfer function
+        self._transfer_function = load_transfer_function(transfer_function_name)
+        self._update_tf_lut()
+
+    def _update_tf_lut(self):
+        x = np.arange(self.tf_lut_length) \
+            / (self.tf_lut_length - 1)
+        self._tf_lut = np.array(
+            2**self._monitor_bit_depth * self._transfer_function(x),
+            dtype=np.uint8
+        )
     
-    def _receive_product(self, 
-                         block: bool = True, 
-                         timeout: float | None = None
-                         ) -> AcquisitionProduct | ProcessorProduct:
-        return super()._receive_product(block, timeout) # type: ignore
+    @property
+    def transfer_function_name(self) -> str:
+        return self._transfer_function.slug
+    
+    @transfer_function_name.setter
+    def transfer_function_name(self, new_transfer_function_name: str):
+        self._transfer_function = load_transfer_function(new_transfer_function_name)
+        self._update_tf_lut()
 
     def run(self):
         try:
             while True:
                 with self._receive_product() as product:
-
-                    # Check whether position has changed
-                    if product.positions is not None:
-
-                        if isinstance(product.positions, np.ndarray):
-                            current_positions = product.positions[-1,:] # use final position only
-                        elif isinstance(product.positions, tuple):
-                            current_positions = np.array(product.positions)
-
-                        if (self._prev_position is not None):
-
-                            dr2 = (current_positions[0] - self._prev_position[0])**2  \
-                                + (current_positions[1] - self._prev_position[1])**2
-                            
-                            if dr2 > self._reset_average_xy_cutoff_sqr: 
-                                # if the Euclidean exceeds from last frame exceeds pixel size, then reset the rolling average index
-                                # Setting _i = 0, will cause this frame to be sliced into the ring buffer at the first position
-                                # and the averaging kernel will only average that 1 frame (effectively no averaging)
-                                # this allows reusing the _average_buffer object.
-                                self._i = 0
-
-                            elif len(current_positions) > 2: # Z axis also included
-                                dz = abs(current_positions[2] - self._prev_position[2])
-                                if dz > self._reset_average_z_cutoff:
-                                    # Similarly, reset _i if z position changes
-                                    self._i = 0
-                        
-                        self._prev_position = current_positions
+                    display_product = self._get_free_product()
                     
-                    t0 = time.perf_counter()
-                    with self._average_buffer_lock:
-                        # _average_buffer is initially None and the first frame establishes height, width, etc
-                        # Averaging can also be reset or changed by setting this to None, prompting reallocation
-                        if self._average_buffer is None:
-                            frame_shape = product.data.shape
-                            ring_frame_buffer_shape = (self.n_frame_average,) + frame_shape
-                            self._average_buffer = np.zeros(
-                                shape=ring_frame_buffer_shape, 
-                                dtype=self.data_range.recommended_dtype
-                            )
-                            averaged_frame = np.zeros(
-                                shape=frame_shape,
-                                dtype=self.data_range.recommended_dtype
-                            )
-                            self._i = 0
-
-                        self._average_buffer[self._i % self.n_frame_average] = product.data
-
-                        disp_product = self._get_free_product()
-                        rolling_average_kernel(
-                            self._average_buffer, 
-                            self._i, 
-                            averaged_frame
-                        )
-                        self._apply_display_kernel(
-                            averaged_frame, 
-                            self._luts, 
-                            disp_product.data
-                        )
-
-                        self._publish(disp_product)
-                        self._prev_data = averaged_frame # store reference for use after thread finishes  
-
-                    t1 = time.perf_counter()
-                    self._i += 1
-                    #print(f"Channel display processing: {1000*(t1-t0):.3f}ms.")
+                    _additive_blend_channels_kernel(
+                        data    = product.data, 
+                        luts    = self._luts,   # LUT for each channel
+                        tf_lut  = self._tf_lut, # final output transfer function LUT
+                        image   = display_product.data
+                    )
+                   
+                    self._publish(display_product)
+                    self._prev_data = product.data.copy()
 
         except EndOfStream:
-            self._publish(None) # forward sentinel
-
-    def _apply_display_kernel(self, average_frame, luts, display_frame):
-        additive_display_kernel(average_frame, luts, self.gamma_lut, display_frame)
-    
-    @property
-    def pixel_size(self): # TODO, don't think this should be here
-        return self._acquisition.spec.pixel_size
-                  
-    @property
-    def n_frame_average(self) -> int:
-        return self._n_frame_average
-    
-    @n_frame_average.setter
-    def n_frame_average(self, n_frames: int):
-        if not isinstance(n_frames, int) or n_frames < 1:
-            raise ValueError("Rolling frame average must be an integer >= 1.")
-        with self._average_buffer_lock:
-            self._n_frame_average = n_frames
-            self._average_buffer = None # Triggers reset of the average buffer 
-
-    @property
-    def gamma(self) -> float:
-        return self._gamma
-    
-    @gamma.setter
-    def gamma(self, new_gamma: float):
-        if not isinstance(new_gamma, float):
-            raise ValueError("Gamma must be set with a float value")
-        if not (0 < new_gamma <= 10):
-            raise ValueError("Gamma must be between 0.0 and 10.0")
-        self._gamma = new_gamma
-
-        # Generate gamma correction LUT
-        x = np.arange(self.gamma_lut_length) \
-            / (self.gamma_lut_length - 1) # TODO, not sure about the -1
-        
-        gamma_lut = (2**self._monitor_bit_depth - 1) * x**(self._gamma)
-        if self._monitor_bit_depth > 8:
-            self.gamma_lut = np.round(gamma_lut).astype(np.uint16)
-        else:
-            self.gamma_lut = np.round(gamma_lut).astype(np.uint8)
+            self._publish(None) # forward sentinel None
 
     def update_display(self, skip_when_acquisition_in_progress: bool = True):
         """
@@ -373,8 +496,14 @@ class FrameDisplay(Display):
             # Don't update if no previous data exists
             return
         
-        disp_product = self._get_free_product()
-        self._apply_display_kernel(self._prev_data, self._luts, disp_product.data)
-        self._publish(disp_product)
+        display_product = self._get_free_product()
+        
+        _additive_blend_channels_kernel(
+            data    = self._prev_data, 
+            luts    = self._luts,   # LUT for each channel
+            tf_lut  = self._tf_lut, # final output transfer function LUT
+            image   = display_product.data
+        )
+        self._publish(display_product)
 
-
+            

@@ -78,13 +78,18 @@ class Worker(threading.Thread, ABC):
     def run(self):
         pass
     
-    def _init_product_pool(self, n: int, shape: tuple[int, ...], dtype) -> None:
+    def _init_product_pool(self, 
+                           n: int, 
+                           shape: tuple[int, ...], 
+                           dtype, 
+                           fill_value: int = 0) -> None:
         """Initialize the product pool. For Workers not producing products, pass"""
         self._product_shape = shape
+        self._product_dtype = dtype
         for _ in range(n):
             aq_buf = self.Product(
                 pool=self._product_pool,
-                data=np.empty(shape, dtype) # pre-allocates for large buffers
+                data=np.full(shape, fill_value, dtype) # pre-allocates for large buffers
             )
             self._product_pool.put(aq_buf)
 
@@ -93,6 +98,12 @@ class Worker(threading.Thread, ABC):
         if self._product_shape is None:
             raise RuntimeError("Product pool is not initialized")
         return self._product_shape
+    
+    @property
+    def product_dtype(self):
+        if self._product_dtype is None:
+            raise RuntimeError("Product pool is not initialized")
+        return self._product_dtype
 
     def stop(self, blocking: bool = False):
         """Sets a flag to stop thread."""
@@ -144,7 +155,7 @@ class Worker(threading.Thread, ABC):
         product = self._inbox.get(block=block, timeout=timeout)
         
         if product is None:
-            print("Got a None")
+            print(f"Shutting down thread: {self.__class__.__name__}")
             raise EndOfStream
 
         if not isinstance(product, Product):

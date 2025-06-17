@@ -56,6 +56,7 @@ class AcquisitionProduct(Product):
         super().__init__(pool, data)
         self.timestamps = timestamps
         self.positions = positions
+        self.data: np.ndarray
 
 
 class AcquisitionWorker(Worker):

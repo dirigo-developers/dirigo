@@ -34,6 +34,7 @@ class ProcessorProduct(Product):
         self.positions = positions
         self.phase: Optional[float] = phase # should be in radians
         self.frequency: Optional[float] = frequency # should be in hertz
+        self.data: np.ndarray
 
 
 class Processor(Generic[U_co], Worker):
@@ -46,11 +47,11 @@ class Processor(Generic[U_co], Worker):
         """Stores the acquisition and spec in private attributes"""
         super().__init__(name="Processor")
         if isinstance(upstream, (Acquisition, Loader)):
-            self._acq = upstream
+            self._acquisition = upstream
             self._spec = upstream.spec
         elif isinstance(upstream, Processor):
-            self._acq = upstream._acq
-            self._spec = upstream._acq.spec
+            self._acquisition = upstream._acquisition
+            self._spec = upstream._acquisition.spec
         else:
             raise ValueError("Upstream worker passed to Processor must be either an Acquisition or another Processor")
 

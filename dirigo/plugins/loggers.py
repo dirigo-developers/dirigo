@@ -116,8 +116,8 @@ class TiffLogger(Logger):
         else:
             options['contiguous'] = True 
 
-        if isinstance(self._acq.data_acquisition_device, Digitizer):
-            if len(self._acq.data_acquisition_device.channels) > 1:
+        if isinstance(self._acquisition.data_acquisition_device, Digitizer):
+            if len(self._acquisition.data_acquisition_device.channels) > 1:
                 options['planarconfig'] = 'contig'
 
         self._writer.write( 
@@ -176,7 +176,7 @@ class TiffLogger(Logger):
     # An alternative would be to pass resolution (and other metadata) in the queue
     @property
     def _fast_axis_dpi(self) -> float:
-        acq = self._acq 
+        acq = self._acquisition 
         spec: FrameAcquisitionSpec = acq.spec
         
         pixel_width_inches = ((spec.pixel_size * 1000) / 25.4)
@@ -184,7 +184,7 @@ class TiffLogger(Logger):
         
     @property
     def _slow_axis_dpi(self) -> float:
-        acq = self._acq
+        acq = self._acquisition
         spec: FrameAcquisitionSpec = acq.spec
 
         if hasattr(spec, 'pixel_height'):
@@ -197,27 +197,27 @@ class TiffLogger(Logger):
     
     @cached_property
     def _x_dpi(self) -> float:
-        acq = self._acq 
+        acq = self._acquisition 
         fast_axis = acq.hw.fast_raster_scanner.axis
         return self._fast_axis_dpi if fast_axis == 'x' else self._slow_axis_dpi
     
     @cached_property
     def _y_dpi(self) -> float:
-        acq = self._acq
+        acq = self._acquisition
         slow_axis =  acq.hw.slow_raster_scanner.axis
         return self._slow_axis_dpi if slow_axis == 'y' else self._fast_axis_dpi
 
     @cached_property
     def _extra_tags(self) -> list:
-        self._acq: FrameAcquisition
+        self._acquisition: FrameAcquisition
         
-        system_json = json.dumps(self._acq.system_config.to_dict())
-        runtime_json = json.dumps(self._acq.runtime_info.to_dict())
-        spec_json = json.dumps(self._acq.spec.to_dict())      
+        system_json = json.dumps(self._acquisition.system_config.to_dict())
+        runtime_json = json.dumps(self._acquisition.runtime_info.to_dict())
+        spec_json = json.dumps(self._acquisition.spec.to_dict())      
         temp_entry = b' \x00' # temp will be patched (overwrite) later
 
-        if isinstance(self._acq.data_acquisition_device, Digitizer):
-            digi_json = json.dumps(self._acq.digitizer_profile.to_dict())
+        if isinstance(self._acquisition.data_acquisition_device, Digitizer):
+            digi_json = json.dumps(self._acquisition.digitizer_profile.to_dict())
             return [
                 (self.SYSTEM_CONFIG_TAG,     's',  0,  system_json,   True),
                 (self.RUNTIME_INFO_TAG,      's',  0,  runtime_json,  True),

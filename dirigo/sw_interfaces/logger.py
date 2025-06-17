@@ -6,7 +6,7 @@ from dirigo import io
 from dirigo.sw_interfaces.worker import Worker
 from dirigo.sw_interfaces.acquisition import Acquisition, AcquisitionProduct 
 from dirigo.sw_interfaces.processor import Processor, ProcessorProduct
-
+from dirigo.sw_interfaces.display import Display
 
 
 class Logger(Worker):
@@ -18,12 +18,12 @@ class Logger(Worker):
         """Instantiate with either an upstream Acquisition or Processor"""
         super().__init__("Logger") # sets up the thread and the publisher-subcriber interface
         
-        if isinstance(upstream, Processor): 
+        if isinstance(upstream, (Processor, Display)): 
             self._processor = upstream
-            self._acq = upstream._acq
+            self._acquisition = upstream._acquisition
         elif isinstance(upstream, Acquisition):
             self._processor = None
-            self._acq = upstream
+            self._acquisition = upstream
         else:
             raise ValueError("Upstream Worker must be either an Acquisition or a Processor")
 
