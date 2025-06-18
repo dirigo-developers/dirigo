@@ -102,7 +102,7 @@ class InvertedGamma(TransferFunction):
 
 
 
-# ---------- Display Channel API ----------
+# ---------- Display Channel API (additive single-hue channels) ----------
 UT = types.UniTuple
 sigs = [
 #   input_values  disp_min  disp_max  color_vector    lut          lut_max
@@ -246,117 +246,8 @@ class DisplayChannel():
         self._update_display_method()
 
 
-
-class RGBFrameDisplay(Display):
-    """FrameDisplay simplified for 3 channel RGB"""
-    def __init__(self, 
-                 upstream: Acquisition | Processor, 
-                 **kwargs):
-        super().__init__(upstream, **kwargs)
-        #self._acquisition: FrameAcquisition | LineAcquisition 
-
-        self._prev_data = None # None indicates that no data has been acquired yet
-
-        n_channels = upstream.product_shape[2]
-        if n_channels == 1:
-            colormap_list = ['gray']
-        elif n_channels == 3:
-            colormap_list = ['red', 'green', 'blue'] # may need to flip this
-
-        bpp = self.bits_per_pixel
-        self._luts = np.zeros(shape=(3, self.data_range.range + 1, bpp), dtype=np.uint16)
-
-        self.display_channels: list[DisplayChannel] = []
-        for ci, colormap_name in enumerate(colormap_list):
-            dc = DisplayChannel(
-                lut_slice=self._luts[ci],
-                color_vector=CVector[colormap_name.upper()],
-                display_range=self.data_range,
-                pixel_format=self._pixel_format,
-                update_method=self.update_display,
-                gamma_lut_length=self.gamma_lut_length
-            )
-            self.display_channels.append(dc)
-
-        # Products will have the same spatial dimensions as upstream
-        n_lines = upstream.product_shape[0]
-        pixels_per_line = upstream.product_shape[1]
-        self._init_product_pool(n=4, shape=(n_lines, pixels_per_line, bpp), dtype=np.uint8)
-
-    def _receive_product(self) -> ProcessorProduct:
-        return super()._receive_product() # type: ignore
-    
-    def run(self):
-        try:
-            while True:
-                with self._receive_product() as product:
-                    display_product = self._get_free_product()
-
-                    self._apply_display_kernel(
-                        image           = product.data, 
-                        luts            = self._luts, 
-                        display_image   = display_product.data
-                    )
-
-                    self._publish(display_product)
-                    self._prev_data = product.data.copy()
-
-        except EndOfStream:
-            self._publish(None) # forward sentinel None
-
-
-    def _apply_display_kernel(self, image, luts, display_image):
-        additive_display_kernel(image, luts, self.gamma_lut, display_image)
-
-    @property
-    def gamma(self) -> float:
-        return self._gamma
-    
-    @gamma.setter
-    def gamma(self, new_gamma: float):
-        if not isinstance(new_gamma, float):
-            raise ValueError("Gamma must be set with a float value")
-        if not (0 < new_gamma <= 10):
-            raise ValueError("Gamma must be between 0.0 and 10.0")
-        self._gamma = new_gamma
-
-        # Generate gamma correction LUT
-        x = np.arange(self.gamma_lut_length) \
-            / (self.gamma_lut_length - 1) # TODO, not sure about the -1
-        
-        gamma_lut = (2**self._monitor_bit_depth - 1) * x**(self._gamma)
-        if self._monitor_bit_depth > 8:
-            self.gamma_lut = np.round(gamma_lut).astype(np.uint16)
-        else:
-            self.gamma_lut = np.round(gamma_lut).astype(np.uint8)
-
-    def update_display(self, skip_when_acquisition_in_progress: bool = True):
-        """
-        On demand reprocessing of the last acquired frame for display.
-        
-        Used when the acquisition is stopped and need to update the appearance  
-        of the last acquired frame.
-        """
-        if self.is_alive() and skip_when_acquisition_in_progress:
-            # Don't update if acquisition is in progress
-            return
-        
-        if self._prev_data is None:
-            # Don't update if no previous data exists
-            return
-        
-        disp_product = self._get_free_product()
-        self._apply_display_kernel(self._prev_data, self._luts, disp_product.data)
-        self._publish(disp_product)
-
-    @property
-    def n_frame_average(self) -> int:       # TODO, cut this out
-        return 1
-
-    @n_frame_average.setter
-    def n_frame_average(self, frames: int):
-        pass
-
+# ---------- Colormapped Channel API (single-channel) ----------
+# like viridis false-coloring TODO
 
 
 # ---------- Standard Multichannel Frame Display ----------
@@ -513,4 +404,9 @@ class FrameDisplay(Display):
         _additive_blend_channels_kernel(
             data    = self._prev_data, 
             luts    = self._luts,   # LUT for each channel
-            tf_lut  = self._tf_lut
+            tf_lut  = self._tf_lut, # final output transfer function LUT
+            image   = display_product.data
+        )
+        self._publish(display_product)
+
+            
