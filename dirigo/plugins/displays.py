@@ -301,19 +301,20 @@ class FrameDisplay(Display):
                  upstream: Processor, # TODO type upstream
                  color_vector_names: Optional[list[str]] = None,
                  transfer_function_name: str= "gamma",
-                 **kwargs):
+                 **kwargs): # pixel_format, monitor_bit_depth
         super().__init__(upstream, **kwargs)
         self._prev_data = None # stores last input for on-depand reprocessing adjustments
 
+        nchannels = upstream.product_shape[2]
         if color_vector_names is None: # use some preset defaults
-            color_vector_names = _default_colormap_lists(self.nchannels)
+            color_vector_names = _default_colormap_lists(nchannels)
         else:
-            if len(color_vector_names) != self.nchannels:
+            if len(color_vector_names) != nchannels:
                 raise ValueError("Mismatch between color vector arguments and physical input channels present")
 
         bpp = self.bits_per_pixel
         self._luts = np.zeros(
-            shape   = (self.nchannels, self.data_range.range, bpp), 
+            shape   = (nchannels, self.data_range.range, bpp), 
             dtype   = np.uint16
         )
         

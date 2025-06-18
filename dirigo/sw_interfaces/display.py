@@ -157,7 +157,6 @@ class Display(Worker):
     def __init__(self, 
                  upstream: Acquisition | Processor | Self,
                  monitor_bit_depth: int = 8,
-                 #gamma: float = 1/2.2,
                  pixel_format: DisplayPixelFormat = DisplayPixelFormat.RGB24):
         """Instantiate with either an Acquisition or Processor"""
         super().__init__("Display Worker")

@@ -118,6 +118,11 @@ class Dirigo:
     def make_processor(self, name: str, *, upstream, **kw: Any) -> Processor:
         return self.make("processor", name, upstream=upstream, **kw)
     
+    @overload
+    def make_display_processor(self, name: Literal["frame"], *,                 # type: ignore
+                               upstream: Acquisition | Processor, **kw
+                               ) -> FrameDisplay: ...
+        
     def make_display_processor(self, name: str, *, upstream, **kw: Any) -> Display:
         return self.make("display", name, upstream=upstream, **kw)
     
