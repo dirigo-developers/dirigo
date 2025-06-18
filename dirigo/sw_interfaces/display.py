@@ -65,6 +65,11 @@ class ColorVector(ABC):
         return f"<{self.__class__.__name__} ({r:.3f}, {g:.3f}, {b:.3f})>"
 
 
+def get_available_color_vector_names() -> list[str]:
+    eps = entry_points(group="dirigo_color_vectors")
+    return list(eps.names)
+
+
 def load_color_vector(name: str) -> Type[ColorVector]:
     """
     Import and return the object registered under ``name`` in the
@@ -152,7 +157,7 @@ class Display(Worker):
     def __init__(self, 
                  upstream: Acquisition | Processor | Self,
                  monitor_bit_depth: int = 8,
-                 gamma: float = 1/2.2,
+                 #gamma: float = 1/2.2,
                  pixel_format: DisplayPixelFormat = DisplayPixelFormat.RGB24):
         """Instantiate with either an Acquisition or Processor"""
         super().__init__("Display Worker")
@@ -161,7 +166,7 @@ class Display(Worker):
             raise ValueError("Unsupported monitor bit depth")
         self._monitor_bit_depth = monitor_bit_depth
         
-        self.gamma = gamma # gamma setter will validate this
+        #self.gamma = gamma # gamma setter will validate this
 
         if isinstance(upstream, (Processor, Display)): # TODO, refactor this into some sort of mixin (with Logger's corresponding block)
             self._processor = upstream

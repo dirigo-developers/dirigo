@@ -1,4 +1,4 @@
-import time, threading
+import copy
 from dataclasses import dataclass
 from typing import ClassVar, Tuple, Callable, Optional
 
@@ -75,13 +75,13 @@ class Gamma(TransferFunction):
     Standard power-law (linear->display) transfer.
     gamma < 1 boosts mid-tones; gamma > 1 darkens.
     """
-    gamma: float = 2.2
+    gamma: float = 0.45
 
     slug:  ClassVar[str] = "gamma"
     label: ClassVar[str] = "Gamma"
 
     def _f(self, x: np.ndarray) -> np.ndarray:
-        return np.power(x, 1.0 / self.gamma)
+        return x ** self.gamma
 
 
 @dataclass(frozen=True, slots=True)
@@ -90,13 +90,13 @@ class InvertedGamma(TransferFunction):
     Inverted contrast + power-law (linear->display) transfer.
     gamma < 1 boosts mid-tones; gamma > 1 darkens.
     """
-    gamma: float = 2.2
+    gamma: float = 0.45
 
     slug:  ClassVar[str] = "inverted_gamma"
     label: ClassVar[str] = "Inverted gamma"
 
     def _f(self, x: np.ndarray) -> np.ndarray:
-        return np.power(1 - x, 1.0 / self.gamma)
+        return (1 - x) ** self.gamma
 
 # TODO add log transfer function
 
@@ -174,7 +174,7 @@ class DisplayChannel():
         # Adjustable parameters (see getter/setters)
         self._enabled = True
         self._color_vector = load_color_vector(color_vector_name)
-        self._display_range = display_range 
+        self._display_range = copy.copy(display_range)
 
         self._input_values = np.arange(
             start=display_range.min, 
@@ -442,15 +442,17 @@ class FrameDisplay(Display):
         self._init_product_pool(n=4, shape=shape, dtype=np.uint8) # TODO
 
         # Make transfer function
+        self._monitor_levels = 2 ** self._monitor_bit_depth
+        self._monitor_levels_minus_one = self._monitor_levels - 1
         self._transfer_function = load_transfer_function(transfer_function_name)
+        self._x = np.arange(self.tf_lut_length, dtype=np.float32) / (self.tf_lut_length - 1)
+            
         self._update_tf_lut()
 
     def _update_tf_lut(self):
-        x = np.arange(self.tf_lut_length) \
-            / (self.tf_lut_length - 1)
         self._tf_lut = np.array(
-            2**self._monitor_bit_depth * self._transfer_function(x),
-            dtype=np.uint8
+            np.round(self._monitor_levels_minus_one *self._transfer_function(self._x)), 
+            dtype = np.uint8
         )
     
     @property
@@ -458,8 +460,18 @@ class FrameDisplay(Display):
         return self._transfer_function.slug
     
     @transfer_function_name.setter
-    def transfer_function_name(self, new_transfer_function_name: str):
-        self._transfer_function = load_transfer_function(new_transfer_function_name)
+    def transfer_function_name(self, value: str | tuple[str, float]):
+        if isinstance(value, tuple):
+            name, param = value
+            kwargs = {"value": param}
+        else:
+            name = value
+            kwargs = {}
+
+        self._transfer_function = load_transfer_function(
+            name    = name,
+            params  = kwargs
+        )
         self._update_tf_lut()
 
     def run(self):
@@ -501,9 +513,4 @@ class FrameDisplay(Display):
         _additive_blend_channels_kernel(
             data    = self._prev_data, 
             luts    = self._luts,   # LUT for each channel
-            tf_lut  = self._tf_lut, # final output transfer function LUT
-            image   = display_product.data
-        )
-        self._publish(display_product)
-
-            
+            tf_lut  = self._tf_lut
