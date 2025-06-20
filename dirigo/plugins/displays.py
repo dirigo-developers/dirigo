@@ -140,7 +140,7 @@ def _update_lut_kernel(input_values: np.ndarray,
     max2 = max_output_value * np.float32(color_vector[2])
 
     for i in input_values:
-        y_norm = min(                               # y_norm will be 0.0 - 1.0
+        y_norm = min(                                 # y_norm will be 0.0 - 1.0
             max(i - display_min_f32, zero) / display_range, 
             one
         ) 
@@ -224,17 +224,15 @@ class DisplayChannel():
 
     def _update_lut(self):
         # get the RGB triplet or BGRX quadruplet
-        if self._pixel_format == DisplayPixelFormat.RGB24:
-            if self.enabled:
+        
+        if self.enabled:
+            if self._pixel_format == DisplayPixelFormat.RGB24:
                 color_vector = self._color_vector.rgb 
-            else:
-                color_vector = (0.0, 0.0, 0.0)
-        elif self._pixel_format == DisplayPixelFormat.BGRX32:
-            if self.enabled:
-                color_vector = tuple(reversed(self._color_vector.rgb)) + (0.0,)
-            else:
-                color_vector = (0.0, 0.0, 0.0, 0.0)
-
+            elif self._pixel_format == DisplayPixelFormat.BGRX32:
+                color_vector = tuple(reversed(self._color_vector.rgb))
+        else:
+            color_vector = (0.0, 0.0, 0.0)
+        
         _update_lut_kernel(
             input_values    = self._input_values,
             disp_min        = self.display_min,

@@ -120,7 +120,10 @@ class Dirigo:
     
     @overload
     def make_display_processor(self, name: Literal["frame"], *,                 # type: ignore
-                               upstream: Acquisition | Processor, **kw
+                               upstream: Acquisition | Processor,
+                               pixel_format: DisplayPixelFormat = DisplayPixelFormat.RGB24,
+                               color_vector_names: Optional[list[str]] = None,
+                               transfer_function_name: Optional[str] = None
                                ) -> FrameDisplay: ...
         
     def make_display_processor(self, name: str, *, upstream, **kw: Any) -> Display:
@@ -134,6 +137,7 @@ class Dirigo:
 if __name__ == "__main__":
 
     diri = Dirigo()
+
 
     acquisition = diri.make_acquisition("raster_frame")
     processor   = diri.make_processor("raster_frame", upstream=acquisition)
