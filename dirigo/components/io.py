@@ -67,7 +67,7 @@ def load_stage_scanner_angle(
         return units.Angle(float(data))
     except FileNotFoundError:
         # If not calibrated, then return 0 angle (no error axis error)
-        return units.Angle(float(data))
+        return units.Angle("0 deg")
 
 
 def load_signal_offset(
