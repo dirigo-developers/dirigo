@@ -21,6 +21,7 @@ from dirigo.plugins.acquisitions import (
 TWO_PI = 2 * np.pi
 
 # ---------- Raster Frame Processor ----------
+# TODO, make resampled (out) int16 for all (might want this if offset brings some pixel values < 0)
 sigs = [
     #buffer_data    invert_mask  offset    bit_shift  gradient     resampled (out)  start_indices  nsamples_to_sum
     (uint8[:,:,:],  int16[:],    int16[:], int32,     float32[:],  uint16[:,:,:],   int32[:,:],    int32[:,:]),
@@ -58,15 +59,15 @@ def resample_kernel(raw_data: np.ndarray,
     
     # Main loop over slow-axis pixels
     for si in prange(Ns): 
-        fwd_rvs = si % Ndirections # 0 => forward, 1 => reverse (if Ndirections=2)
-        ri = si // Ndirections # record index 
-        stride = 1 - 2 * fwd_rvs # +1 if forward, -1 if reverse
+        fwd_rvs     = si % Ndirections # 0 => forward, 1 => reverse (if Ndirections=2)
+        ri          = si // Ndirections # record index 
+        stride      = 1 - 2 * fwd_rvs # +1 if forward, -1 if reverse
 
         # Loop over fast-axis pixels
         for fi in range(Nf): 
-            Nsum = nsamples_to_sum[fwd_rvs, fi]
-            sf = scaling_factor[fwd_rvs, fi]
-            start = start_indices[fwd_rvs, fi]
+            Nsum    = nsamples_to_sum[fwd_rvs, fi]
+            sf      = scaling_factor[fwd_rvs, fi]
+            start   = start_indices[fwd_rvs, fi]
 
             tmp_values = np.zeros(Nchannels, dtype=np.int32)
 
