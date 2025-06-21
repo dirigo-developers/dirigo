@@ -21,12 +21,11 @@ from dirigo.plugins.acquisitions import (
 TWO_PI = 2 * np.pi
 
 # ---------- Raster Frame Processor ----------
-# TODO, make resampled (out) int16 for all (might want this if offset brings some pixel values < 0)
 sigs = [
     #buffer_data    invert_mask  offset    bit_shift  gradient     resampled (out)  start_indices  nsamples_to_sum
-    (uint8[:,:,:],  int16[:],    int16[:], int32,     float32[:],  uint16[:,:,:],   int32[:,:],    int32[:,:]),
-    (int16[:,:,:],  int16[:],    int16[:], int32,     float32[:],  int16[:,:,:],    int32[:,:],    int32[:,:]),
-    (uint16[:,:,:], int16[:],    int16[:], int32,     float32[:],  uint16[:,:,:],   int32[:,:],    int32[:,:])
+    (uint8[:,:,:],  int16[:],    int16[:], int32,     float32[:],  int16[:,:,:],   int32[:,:],    int32[:,:]),
+    (int16[:,:,:],  int16[:],    int16[:], int32,     float32[:],  int16[:,:,:],   int32[:,:],    int32[:,:]),
+    (uint16[:,:,:], int16[:],    int16[:], int32,     float32[:],  int16[:,:,:],   int32[:,:],    int32[:,:])
 ]
 @njit(sigs, parallel=True, fastmath=True, nogil=True, cache=True)
 def resample_kernel(raw_data: np.ndarray, 
@@ -387,8 +386,7 @@ class RasterFrameProcessor(Processor[Acquisition]):
 
 class LineCameraLineProcessor(Processor[LineCameraLineAcquisition]):
     def __init__(self, 
-                 upstream,
-                 bits_precision: int = 16):
+                 upstream):
         """
         Initialize a camera line processor worker for the Acquisition worker.
         """
@@ -401,21 +399,19 @@ class LineCameraLineProcessor(Processor[LineCameraLineAcquisition]):
         runtime_info = self._acquisition.runtime_info
 
         # Compute shape & datatype. Pre-allocate Products
-        if (bits_precision % 2) or not (8 <= bits_precision <= 16):
-            raise ValueError("Bits precision must be even integer between 8 and 16")
-        self._bits_precision = int(bits_precision)
         n_lines = self._spec.lines_per_buffer
-        n_channels = 1
+        n_channels = 1 # TODO fix for RGB
         self.processed_shape = (n_lines, self._spec.pixels_per_line, n_channels)
-        dtype = np.uint16 if bits_precision > 8 else np.uint8 # TODO, ok to assume cameras alwasy produce uint16 data?
 
-        self._init_product_pool(n=4, shape=self.processed_shape, dtype=dtype)
+        self._init_product_pool(n=4, shape=self.processed_shape, dtype=np.int16)
 
         if runtime_info.camera_bit_depth == 24: # RGB24
-            d = 8
+            d = 8  # uint8
         else:
-            d = runtime_info.camera_bit_depth
-        self._scaling_factor = 2 ** (self._bits_precision - d)
+            d = runtime_info.camera_bit_depth  # unsigned integer
+        # scaling factor: factor to take full-scale camera value (unsigned) to
+        # full-scale int16 (32768)
+        self._scaling_factor = 2 ** (15 - d)
 
         # Load distortion calibration
         try:
@@ -503,8 +499,8 @@ class LineCameraLineProcessor(Processor[LineCameraLineAcquisition]):
         May be higher than the native bit depth of the data capture device.
         """
         return units.IntRange(
-            min=-2**(self._bits_precision-1), 
-            max=2**(self._bits_precision-1) - 1
+            min=-2**15, 
+            max=2**15 - 1
         )
 
 
