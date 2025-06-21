@@ -1,6 +1,6 @@
 from functools import cached_property
 import json, struct
-from typing import Sequence, overload
+from typing import Sequence
 
 import tifffile
 import numpy as np
@@ -76,6 +76,10 @@ class TiffLogger(Logger):
         self.frames_saved = 0
         self.files_saved = 0
 
+        if upstream.product_shape[2] == 3 and upstream.product_dtype == np.uint8:
+            self._photometric = 'rgb'
+        else:
+            self._photometric = 'minisblack'
         self._timestamps = [] # accumulate as frames arrive from acquistion or processor
         self._positions = []
 
@@ -99,7 +103,7 @@ class TiffLogger(Logger):
 
         # Create the writer object if necessary
         options = {
-                'photometric': 'minisblack',
+                'photometric': self._photometric,
                 'resolution': (self._x_dpi, self._y_dpi),
                 'contiguous': True
             }
@@ -120,16 +124,13 @@ class TiffLogger(Logger):
             if len(self._acquisition.data_acquisition_device.channels) > 1:
                 options['planarconfig'] = 'contig'
 
-        self._writer.write( 
-                frame.data, 
-                **options
-            )
+        self._writer.write(frame.data, **options)
         self.frames_saved += 1
 
         # Accumulate timestamps & positions
-        if frame.timestamps is not None:
+        if hasattr(frame, 'timestamps') and frame.timestamps is not None:
             self._timestamps.append(frame.timestamps)
-        if frame.positions is not None:
+        if hasattr(frame, 'positions') and frame.positions is not None:
             self._positions.append(frame.positions)
 
         # when number of frames per file reached, close writer & write metadata
