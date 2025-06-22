@@ -8,6 +8,7 @@ from dirigo.components.hardware import Hardware
 from dirigo.sw_interfaces import Acquisition, Processor, Display, Logger
 from dirigo.sw_interfaces.acquisition import AcquisitionSpec, Loader
 from dirigo.sw_interfaces.display import DisplayPixelFormat
+from dirigo.plugins.processors import RollingAverageProcessor
 from dirigo.plugins.displays import FrameDisplay
 
 
@@ -114,6 +115,10 @@ class Dirigo:
     
     def make_loader(self, name: str, file_path: Path, **kw: Any) -> Loader:
         return self.make("loader", name, file_path=file_path)
+    
+    @overload
+    def make_processor(self, name: Literal["rolling_average"], *,               # type: ignore
+                       upstream: Acquisition | Processor) -> RollingAverageProcessor: ...
     
     def make_processor(self, name: str, *, upstream, **kw: Any) -> Processor:
         return self.make("processor", name, upstream=upstream, **kw)
