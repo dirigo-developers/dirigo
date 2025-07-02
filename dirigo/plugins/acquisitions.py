@@ -65,23 +65,37 @@ class LineAcquisitionRuntimeInfo:
 @dataclass
 class CameraAcquisitionRuntimeInfo:
     camera_bit_depth: int
+    frame_grabber_bytes_per_pixel: Optional[int] = None
 
     @classmethod
     def from_acquisition(cls, acq: "LineCameraAcquisition"):
+        fg_bpp: int | None = (
+            acq.hw.frame_grabber.bytes_per_pixel
+            if hasattr(acq.hw, "frame_grabber") and acq.hw.frame_grabber is not None
+            else None
+        )
+
         return cls(
             camera_bit_depth=acq.hw.line_camera.bit_depth,
+            frame_grabber_bytes_per_pixel=fg_bpp
         )
 
     @classmethod
     def from_dict(cls, d: dict):
         return cls(
             camera_bit_depth=int(d['camera_bit_depth']),
+            frame_grabber_bytes_per_pixel=(
+                int(d["frame_grabber_bytes_per_pixel"])
+                if d.get("frame_grabber_bytes_per_pixel") is not None
+                else None
+            )
         )
     
     def to_dict(self) -> dict:
         """Make dictionary for serialization."""
-        return asdict(self)
-
+        # keep it lean: drop keys whose value is still None
+        obj = asdict(self)
+        return {k: v for k, v in obj.items() if v is not None}
 
 
 # ---------- 0-D acquisitions ----------

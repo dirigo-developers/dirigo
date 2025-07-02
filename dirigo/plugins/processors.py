@@ -44,8 +44,9 @@ def resample_kernel(raw_data: np.ndarray,
     
     Ndirections is 1 (unidirectional) or 2 (bidirectional).
     """
-    Nrecords, Nsamples, Nchannels = raw_data.shape
-    Ns, Nf, Nc = resampled.shape # Acquisition must be in channel-minor order (interleaved)
+    Nrecords, Nsamples, Nc_in = raw_data.shape
+    Ns, Nf, Nc_out = resampled.shape # Acquisition must be in channel-minor order (interleaved)
+    # Nc_in may not be the same as Nc_out if there's a empty byte (e.g. BGRX format)
     Ndirections = start_indices.shape[0]
     
 
@@ -68,16 +69,16 @@ def resample_kernel(raw_data: np.ndarray,
             sf      = scaling_factor[fwd_rvs, fi]
             start   = start_indices[fwd_rvs, fi]
 
-            tmp_values = np.zeros(Nchannels, dtype=np.int32)
+            tmp_values = np.zeros(Nc_out, dtype=np.int32)
 
             # Step through the raw samples
             end = start + (Nsum * stride)
             for sample in range(start, end, stride):
-                for c in range(Nchannels):
+                for c in range(Nc_out):
                     tmp_values[c] += raw_data[ri, sample, c] - offset[c]
 
             # Store the average back into resampled
-            for c in range(Nchannels):
+            for c in range(Nc_out):
                 resampled[si, fi, c] = invert_mask[c] * (sf * tmp_values[c]) 
 
 
@@ -400,7 +401,7 @@ class LineCameraLineProcessor(Processor[LineCameraLineAcquisition]):
 
         # Compute shape & datatype. Pre-allocate Products
         n_lines = self._spec.lines_per_buffer
-        n_channels = 1 # TODO fix for RGB
+        n_channels = 3 if runtime_info.camera_bit_depth > 16 else 1
         self.processed_shape = (n_lines, self._spec.pixels_per_line, n_channels)
 
         self._init_product_pool(n=4, shape=self.processed_shape, dtype=np.int16)
@@ -456,10 +457,11 @@ class LineCameraLineProcessor(Processor[LineCameraLineAcquisition]):
                        out_product: ProcessorProduct) -> None:
         """Actual processing work for each buffer/frame"""
 
+        Nc = out_product.data.shape[2]
         resample_kernel(
             raw_data=in_product.data, 
-            invert_mask=np.array([1], dtype=np.int16), # never invert
-            offset=np.array([0], dtype=np.int16), # no offsets
+            invert_mask=np.ones(shape=(Nc,), dtype=np.int16), # never invert
+            offset=np.zeros(shape=(Nc,), dtype=np.int16), # no offsets
             bit_shift=self._scaling_factor,
             gradient=self._gradient,
             resampled=out_product.data,
