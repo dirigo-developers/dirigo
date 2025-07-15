@@ -30,6 +30,7 @@ class Logger(Worker):
         self.basename = basename
         self.save_path = io.data_path()
         self.save_path.mkdir(parents=True, exist_ok=True)
+        self.last_saved_file_path = None
         
         self.frames_per_file: int = 1
 

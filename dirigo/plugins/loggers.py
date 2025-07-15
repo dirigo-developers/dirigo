@@ -76,10 +76,14 @@ class TiffLogger(Logger):
         self.frames_saved = 0
         self.files_saved = 0
 
-        if upstream.product_shape[2] == 3 and upstream.product_dtype == np.uint8:
-            self._photometric = 'rgb'
-        else:
+        try:
+            if upstream.product_shape[2] == 3 and upstream.product_dtype == np.uint8:
+                self._photometric = 'rgb'
+            else:
+                self._photometric = 'minisblack'
+        except RuntimeError: # when product pool not yet initialized
             self._photometric = 'minisblack'
+
         self._timestamps = [] # accumulate as frames arrive from acquistion or processor
         self._positions = []
 

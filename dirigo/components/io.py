@@ -1,4 +1,3 @@
-from dataclasses import dataclass, asdict
 from pathlib import Path
 import tomllib
 from typing import Optional, Any
@@ -16,9 +15,6 @@ from dirigo.components import units
 def config_path() -> Path:
     return pd.user_config_path("Dirigo")
 
-def data_path() -> Path:
-    return pd.user_documents_path() / "Dirigo"
-
 
 def load_toml(file_name: Path | str) -> dict[str, Any]:
     file_name = Path(file_name)
@@ -30,6 +26,15 @@ def load_toml(file_name: Path | str) -> dict[str, Any]:
         toml_contents = tomllib.load(toml_file)
     return toml_contents
 
+
+try: 
+    d = load_toml(config_path() / "logging.toml")           # 1st choice: user-specified path
+    _data_path = Path(d['data_path'])
+except:
+    _data_path = pd.user_documents_path() / "Dirigo"        # Backup path
+    
+def data_path() -> Path:
+    return _data_path
 
 def load_scanner_calibration(
         path: Path = config_path() / "scanner/calibration.csv"
