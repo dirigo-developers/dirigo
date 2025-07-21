@@ -16,7 +16,7 @@ spec = FrameAcquisition.get_specification()
 
 spec.bidirectional_scanning = False
 
-# strink frame height, so frame is essentially a line
+# shrink frame height, so frame is essentially a line
 spec.frame_height = spec.frame_height / 100 
 spec.pixel_height = spec.pixel_height / 100
 

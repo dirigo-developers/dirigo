@@ -102,7 +102,7 @@ class TriggerDelayCalibrationLogger(Logger):
         self._phases = []
     
     def _receive_product(self) -> Processor.Product:
-        ...
+        return super()._receive_product(self) # type: ignore
         
     def run(self):
         try:
@@ -110,7 +110,7 @@ class TriggerDelayCalibrationLogger(Logger):
                 with self._receive_product() as product:
                     # store the amplitude/frequency/phase data
                     self._amplitudes.append(
-                        self._acq.hw.fast_raster_scanner.amplitude
+                        self._acquisition.hw.fast_raster_scanner.amplitude
                     )
                     self._frequencies.append(product.frequency)
                     self._phases.append(product.phase)
@@ -476,12 +476,12 @@ class LineGradientCalibrationLogger(Logger):
         )
 
         # Fit to polynomials
-        w = self._acq.spec.line_width
+        w = self._acquisition.spec.line_width
         x = np.linspace(-w/2, w/2, n_x)
         for c in range(n_channels):
             pfit: Polynomial = Polynomial.fit(
                 x=x,
-                y=line_averages[c],
+                y=line_averages[:,c],
                 deg=2
             )
             c0, c1, c2 = pfit.convert().coef

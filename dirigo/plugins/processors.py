@@ -217,7 +217,10 @@ class RasterFrameProcessor(Processor[Acquisition]):
 
         # Try loading gradient calibration
         try:
-            self._gradient = io.load_gradient_calibration()
+            if hasattr(self._spec, "frame_height"):
+                raise Exception
+            else: # line acquisition
+                self._gradient = io.load_line_gradient_calibration()
         except:
             self._gradient = np.ones((self._spec.pixels_per_line,), np.float32)
 

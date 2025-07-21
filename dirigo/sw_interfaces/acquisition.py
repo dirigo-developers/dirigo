@@ -17,7 +17,7 @@ if TYPE_CHECKING:
 class AcquisitionSpec:
     """Base class for an acquisition specification ('spec')."""
 
-    def to_dict(self) -> dict:
+    def to_dict(self, skip: list[str]) -> dict:
         """Return a JSON-ready dict containing *public* instance fields."""
         def make_jsonable(obj):
             if obj is None or isinstance(obj, (bool, int, float, str)):
@@ -36,7 +36,7 @@ class AcquisitionSpec:
         return {
             name: make_jsonable(val)
             for name, val in self.__dict__.items()
-            if not name.startswith("_")
+            if not name.startswith("_") and name not in skip
         }
 
 

@@ -84,8 +84,8 @@ def load_signal_offset(
         return np.array(0)
 
 
-def load_gradient_calibration(
-        path: Path = config_path() / "optics/gradient_calibration.tif"
+def load_line_gradient_calibration(
+        path: Path = config_path() / "optics/line_gradient_calibration.tif"
     ):
     return tifffile.imread(path)
 
