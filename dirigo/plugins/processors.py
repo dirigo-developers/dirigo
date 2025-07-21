@@ -243,7 +243,7 @@ class RasterFrameProcessor(Processor[Acquisition]):
                         # Estimate scanner frequency from timestamps
                         avg_trig_period = np.mean(np.diff(acq_prod.timestamps))
                         self._fast_scanner_frequency = 1 / avg_trig_period
-                        #print("FAST SCANNER FREQ", self._fast_scanner_frequency)
+                        print("FAST SCANNER FREQ", self._fast_scanner_frequency)
 
                     # Measure phase from bidi data (in uni-directional, phase is not critical)
                     if self._spec.bidirectional_scanning:

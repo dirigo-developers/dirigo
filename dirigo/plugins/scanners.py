@@ -659,7 +659,7 @@ class SlowGalvoScannerViaNI(GalvoScannerViaNI, SlowRasterScanner):
                     raise ValueError("Periods per frame must be a positive integer")
                 
                 n_periods = self._fast_scanner.frequency / self.frequency
-                rearm_periods = int(self._fast_scanner.frequency_error * n_periods) + 1
+                rearm_periods = self._fast_scanner.frequency_error * n_periods
                 rearm_time = units.Time(rearm_periods / self._fast_scanner.frequency) 
 
                 self._fclock_task = nidaqmx.Task("Frame clock")
