@@ -3,14 +3,15 @@ from functools import cached_property
 from dataclasses import dataclass, asdict
 from pathlib import Path
 import math
-from typing import Literal, List, Optional
+from typing import Literal, List, Optional, TYPE_CHECKING
 import tomllib
 
 from platformdirs import user_config_dir
 
 from dirigo.components import units
 from dirigo.hw_interfaces.hw_interface import HardwareInterface
-from dirigo.sw_interfaces.acquisition import AcquisitionProduct
+if TYPE_CHECKING:
+    from dirigo.sw_interfaces.acquisition import AcquisitionProduct
 
 """
 Dirigo digitizer interface.
@@ -586,7 +587,7 @@ class Acquire(ABC):
         pass
 
     @abstractmethod
-    def get_next_completed_buffer(self, acq_buffer: AcquisitionProduct):
+    def get_next_completed_buffer(self, acq_buffer: "AcquisitionProduct"):
         """Retrieve the next completed data buffer.
 
         Args:
