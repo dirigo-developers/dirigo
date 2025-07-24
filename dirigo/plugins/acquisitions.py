@@ -40,13 +40,15 @@ class LineAcquisitionRuntimeInfo:
     scanner_amplitude: units.Angle
     digitizer_bit_depth: int
     digitizer_trigger_delay: int
+    stage_scanner_angle: Optional[units.Angle] = None
 
     @classmethod
     def from_acquisition(cls, acquisition: "LineAcquisition"):
         return cls(
             scanner_amplitude=acquisition.hw.fast_raster_scanner.amplitude,
             digitizer_bit_depth=acquisition.hw.digitizer.bit_depth,
-            digitizer_trigger_delay=acquisition.hw.digitizer.acquire.trigger_delay_samples
+            digitizer_trigger_delay=acquisition.hw.digitizer.acquire.trigger_delay_samples,
+            stage_scanner_angle=acquisition.hw.laser_scanning_optics.stage_scanner_angle
         )
     
     @classmethod
@@ -54,7 +56,8 @@ class LineAcquisitionRuntimeInfo:
         return cls(
             scanner_amplitude=units.Angle(d['scanner_amplitude']),
             digitizer_bit_depth=int(d['digitizer_bit_depth']),
-            digitizer_trigger_delay=int(d['digitizer_trigger_delay'])
+            digitizer_trigger_delay=int(d['digitizer_trigger_delay']),
+            stage_scanner_angle=units.Angle(d['stage_scanner_angle'])
         )
     
     def to_dict(self) -> dict:

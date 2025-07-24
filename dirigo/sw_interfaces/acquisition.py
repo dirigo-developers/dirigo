@@ -1,4 +1,4 @@
-from typing import TYPE_CHECKING, Type, List
+from typing import TYPE_CHECKING, Type, List, Optional
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 
@@ -17,7 +17,7 @@ if TYPE_CHECKING:
 class AcquisitionSpec:
     """Base class for an acquisition specification ('spec')."""
 
-    def to_dict(self, skip: list[str]) -> dict:
+    def to_dict(self, skip: Optional[list[str]] = None) -> dict:
         """Return a JSON-ready dict containing *public* instance fields."""
         def make_jsonable(obj):
             if obj is None or isinstance(obj, (bool, int, float, str)):
@@ -36,7 +36,7 @@ class AcquisitionSpec:
         return {
             name: make_jsonable(val)
             for name, val in self.__dict__.items()
-            if not name.startswith("_") and name not in skip
+            if not name.startswith("_") and (not skip or name not in skip)
         }
 
 

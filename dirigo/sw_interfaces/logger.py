@@ -4,7 +4,7 @@ import numpy as np
 
 from dirigo import io
 from dirigo.sw_interfaces.worker import Worker
-from dirigo.sw_interfaces.acquisition import Acquisition, AcquisitionProduct 
+from dirigo.sw_interfaces.acquisition import Acquisition, AcquisitionProduct, Loader
 from dirigo.sw_interfaces.processor import Processor, ProcessorProduct
 from dirigo.sw_interfaces.display import Display
 
@@ -12,7 +12,7 @@ from dirigo.sw_interfaces.display import Display
 class Logger(Worker):
     """Dirigo interface for data logging."""
     def __init__(self, 
-                 upstream: Acquisition | Processor,
+                 upstream: Acquisition | Loader | Processor,
                  basename: str = "experiment",
                  ) -> None:
         """Instantiate with either an upstream Acquisition or Processor"""
@@ -21,7 +21,7 @@ class Logger(Worker):
         if isinstance(upstream, (Processor, Display)): 
             self._processor = upstream
             self._acquisition = upstream._acquisition
-        elif isinstance(upstream, Acquisition):
+        elif isinstance(upstream, (Acquisition, Loader)):
             self._processor = None
             self._acquisition = upstream
         else:

@@ -10,8 +10,7 @@ from dirigo.sw_interfaces.processor import Processor, ProcessorProduct
 from dirigo.sw_interfaces import Logger
 from dirigo.sw_interfaces.acquisition import Acquisition, AcquisitionProduct
 from dirigo.hw_interfaces import Digitizer
-from dirigo.plugins.acquisitions import FrameAcquisition, FrameAcquisitionSpec
-
+from dirigo.plugins.acquisitions import SampleAcquisitionSpec, FrameAcquisition, FrameAcquisitionSpec
 
 
 def serialize_float64_list(arrays: Sequence[np.ndarray]) -> bytes:
@@ -124,8 +123,8 @@ class TiffLogger(Logger):
         else:
             options['contiguous'] = True 
 
-        if isinstance(self._acquisition.data_acquisition_device, Digitizer):
-            if len(self._acquisition.data_acquisition_device.channels) > 1:
+        if isinstance(self._acquisition.spec, SampleAcquisitionSpec):
+            if sum(c.enabled for c in self._acquisition.digitizer_profile.channels) > 1:
                 options['planarconfig'] = 'contig'
 
         self._writer.write(frame.data, **options)
@@ -202,14 +201,12 @@ class TiffLogger(Logger):
     
     @cached_property
     def _x_dpi(self) -> float:
-        acq = self._acquisition 
-        fast_axis = acq.hw.fast_raster_scanner.axis
+        fast_axis = self._acquisition.system_config.fast_raster_scanner['axis']
         return self._fast_axis_dpi if fast_axis == 'x' else self._slow_axis_dpi
     
     @cached_property
     def _y_dpi(self) -> float:
-        acq = self._acquisition
-        slow_axis =  acq.hw.slow_raster_scanner.axis
+        slow_axis = self._acquisition.system_config.slow_raster_scanner['axis']
         return self._slow_axis_dpi if slow_axis == 'y' else self._fast_axis_dpi
 
     @cached_property
@@ -219,9 +216,9 @@ class TiffLogger(Logger):
         system_json = json.dumps(self._acquisition.system_config.to_dict())
         runtime_json = json.dumps(self._acquisition.runtime_info.to_dict())
         spec_json = json.dumps(self._acquisition.spec.to_dict())      
-        temp_entry = b' \x00' # temp will be patched (overwrite) later
+        temp_entry = b' \x00' # temp will be patched (overwritten) later
 
-        if isinstance(self._acquisition.data_acquisition_device, Digitizer):
+        if isinstance(self._acquisition.spec, SampleAcquisitionSpec):
             digi_json = json.dumps(self._acquisition.digitizer_profile.to_dict())
             return [
                 (self.SYSTEM_CONFIG_TAG,     's',  0,  system_json,   True),

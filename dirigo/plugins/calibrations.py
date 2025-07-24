@@ -235,7 +235,7 @@ class LineDistortionCalibrationLogger(Logger):
 
     def __init__(self, upstream: Processor):
         super().__init__(upstream)
-        self._acq: StageTranslationCalibration
+        self._acquisition: StageTranslationCalibration
         self._processor: RasterFrameProcessor
 
         self.basename = "line_distortion_calibration"
@@ -256,7 +256,7 @@ class LineDistortionCalibrationLogger(Logger):
 
     def save_data(self):
         """Process distortion field and save fit results"""
-        spec = self._acq.spec
+        spec = self._acquisition.spec
 
         n_f = len(self._frames)
         n_comparisons = n_f - 1
@@ -315,7 +315,7 @@ class LineDistortionCalibrationLogger(Logger):
         # If not calibrated (would have trivial Polynomial(1)), save distortion polynomial
         if self._processor._distortion_polynomial == Polynomial([1]):
             fn = self.filepath
-            calib_data = np.array([[self._acq.runtime_info.scanner_amplitude, c0, c1, c2]])
+            calib_data = np.array([[self._acquisition.runtime_info.scanner_amplitude, c0, c1, c2]])
             if fn.exists(): # add to existing calibration
                 data = np.loadtxt(fn, delimiter=',', dtype=np.float64, skiprows=1, ndmin=2)
                 data = np.concatenate((data, calib_data), axis=0)

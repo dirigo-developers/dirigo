@@ -224,6 +224,7 @@ class RasterFrameProcessor(Processor[Acquisition]):
         except:
             self._gradient = np.ones((self._spec.pixels_per_line,), np.float32)
 
+        self._phases = np.full(shape=(10,), fill_value=np.nan, dtype=np.float32)
         self._frames_processed = 0
 
     def _receive_product(self, block: bool = True, timeout: float | None = None) -> AcquisitionProduct:
@@ -243,18 +244,15 @@ class RasterFrameProcessor(Processor[Acquisition]):
                         # Estimate scanner frequency from timestamps
                         avg_trig_period = np.mean(np.diff(acq_prod.timestamps))
                         self._fast_scanner_frequency = 1 / avg_trig_period
-                        print("FAST SCANNER FREQ", self._fast_scanner_frequency)
+                        #print("FAST SCANNER FREQ", self._fast_scanner_frequency)
 
                     # Measure phase from bidi data (in uni-directional, phase is not critical)
                     if self._spec.bidirectional_scanning:
-                        trigger_phase = self.measure_phase(acq_prod.data)
-                        #print("TRIGGER SAMP", trigger_phase)
+                        p = self._frames_processed % len(self._phases)
+                        self._phases[p] = self.measure_phase(acq_prod.data)
+                        self._trigger_error = np.median(self._phases[~np.isnan(self._phases)])
+                        #print("TRIGGER ERROR", self._trigger_error)
 
-                        # quality check
-                        if (self._initial_trigger_error is None 
-                            or abs(trigger_phase - self._initial_trigger_error) < 10): 
-                            self._trigger_error = trigger_phase
-                            
                     # Update resampling start indices--these can change a bit if the scanner frequency drifts
                     start_indices = self.calculate_start_indices(self._trigger_error) - self._fixed_trigger_delay
                     nsamples_to_sum = np.abs(np.diff(start_indices, axis=1))
@@ -333,6 +331,7 @@ class RasterFrameProcessor(Processor[Acquisition]):
         (for bidirectional scanning).
         """
         UPSAMPLE = 2 # TODO move this somewhere else
+        PHASE_MAX = 80
         
         data_window = crop_bidi_data(
             data=data, 
@@ -350,6 +349,10 @@ class RasterFrameProcessor(Processor[Acquisition]):
         shift = float(np.argmax(corr))
         if shift > (n//2):  # Handle wrap-around for negative shifts
             shift -= n
+
+        # if phase is outside the pre-determined range, then return NaN (indeterminate)
+        if abs(shift) > PHASE_MAX * UPSAMPLE * 2:
+            return np.nan
 
         return shift / UPSAMPLE / 2 - 1
     
@@ -387,7 +390,7 @@ class RasterFrameProcessor(Processor[Acquisition]):
 
 
 
-
+# ---------- Line Camera Processor ----------
 class LineCameraLineProcessor(Processor[LineCameraLineAcquisition]):
     def __init__(self, 
                  upstream):
