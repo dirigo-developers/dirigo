@@ -1,4 +1,6 @@
 from abc import abstractmethod
+from typing import Optional
+import re
 
 import numpy as np
 
@@ -30,6 +32,7 @@ class Logger(Worker):
         self.basename = basename
         self.save_path = io.data_path()
         self.save_path.mkdir(parents=True, exist_ok=True)
+        self.file_ext: Optional[str] = None # must be set by concrete class
         self.last_saved_file_path = None
         
         self.frames_per_file: int = 1
@@ -42,3 +45,34 @@ class Logger(Worker):
     # def _receive_product(self, block = True, timeout = None) -> AcquisitionProduct | ProcessorProduct:
     #     return super()._receive_product(block, timeout)
 
+    def _file_path(self, image_index: Optional[int] = None):
+        """
+        Build an output path that never overwrites an existing file.
+
+        If ``image_index`` is None, scan ``self.save_path`` for files that already
+        match ``f"{self.basename}_<n>.{self.file_ext}"`` and return the next free index.
+        
+        If ``image_index`` is given, raise ``FileExistsError`` if that specific
+        file already exists.
+        """
+        # Regex that captures the numeric suffix of files like "<basename>_123.<file_ext>"
+        pattern = re.compile(rf"{re.escape(self.basename)}_(\d+)\.{self.file_ext}$")
+
+        if image_index is None:
+            # Collect any numeric suffixes on existing files
+            existing = [
+                int(m.group(1))
+                for p in self.save_path.glob(f"{self.basename}_*.{self.file_ext}")
+                if (m := pattern.match(p.name))
+            ]
+
+            next_index = (max(existing) + 1) if existing else 0
+            proposed_file_path = self.save_path / f"{self.basename}_{next_index}.{self.file_ext}"
+
+        else:
+            # check that we won't overwrite something
+            proposed_file_path = self.save_path / f"{self.basename}_{image_index}.{self.file_ext}"
+            if proposed_file_path.exists():
+                raise FileExistsError(f"File already exists: {proposed_file_path}")
+
+        return proposed_file_path

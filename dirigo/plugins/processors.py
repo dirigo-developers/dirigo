@@ -321,7 +321,7 @@ class RasterFrameProcessor(Processor[Acquisition]):
         return temporal_edges
 
     def calculate_start_indices(self, trigger_phase: int = 0):
-        """Calculate the start position in digitizer recrods for each pixel."""
+        """Calculate the start position in digitizer records for each pixel."""
         starts_exact = self._temporal_edges * self.samples_per_period + trigger_phase
         return np.ceil(starts_exact - 1e-6).astype(np.int32) 
     
