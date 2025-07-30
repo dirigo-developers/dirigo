@@ -60,15 +60,15 @@ class LinearEncoderViaNI(LinearEncoder):
         """Sets up the counter input task and starts it."""
         self._logging_task = nidaqmx.Task() # TODO give it a name
 
-        self._logging_task.ci_channels.add_ci_lin_encoder_chan(
+        chan = self._logging_task.ci_channels.add_ci_lin_encoder_chan(
             decoding_type=EncoderType.X_2,
             counter=CounterRegistry.allocate_counter(),
             dist_per_pulse=self._distance_per_pulse,
             initial_pos=initial_position
         )
 
-        self._logging_task.ci_channels[0].ci_encoder_a_input_term = self._signal_a_channel # type: ignore
-        self._logging_task.ci_channels[0].ci_encoder_b_input_term = self._signal_b_channel # type: ignore
+        chan.ci_encoder_a_input_term = self._signal_a_channel # type: ignore
+        chan.ci_encoder_b_input_term = self._signal_b_channel # type: ignore
 
         self._logging_task.timing.cfg_samp_clk_timing(
             rate=expected_sample_rate * 1.1, # this is the max expected rate, provide 10% higher rate
@@ -76,9 +76,11 @@ class LinearEncoderViaNI(LinearEncoder):
             sample_mode=AcquisitionType.CONTINUOUS,
             samps_per_chan=self._samples_per_channel
         )
-        # self._logging_task.timing.samp_clk_dig_fltr_enable          = True
-        # self._logging_task.timing.samp_clk_dig_fltr_min_pulse_width = 2e-6
-
+        chan.ci_encoder_a_input_dig_fltr_enable = True
+        chan.ci_encoder_a_input_dig_fltr_min_pulse_width = 500e-9
+        chan.ci_encoder_b_input_dig_fltr_enable = True
+        chan.ci_encoder_b_input_dig_fltr_min_pulse_width = 500e-9
+        
         self._reader = CounterReader(self._logging_task.in_stream)
 
         self._logging_task.start()
