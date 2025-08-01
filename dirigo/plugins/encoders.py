@@ -23,6 +23,7 @@ class LinearEncoderViaNI(LinearEncoder):
                  trigger_channel: Optional[str] = None,
                  timestamp_trigger_events: bool = False,
                  samples_per_channel: int = 4096, # Size of the buffer--set to 2X the expected number of samples to read at once
+                 min_pulse_width: units.Time = units.Time('90 ns'),
                  **kwargs):
         super().__init__(**kwargs) # sets axis
 
@@ -54,6 +55,8 @@ class LinearEncoderViaNI(LinearEncoder):
         self._samples_per_channel = samples_per_channel
         self._timestamp_trigger_events = timestamp_trigger_events
 
+        self._min_pulse_width = float(min_pulse_width)
+
     def start_logging(self, 
                       initial_position: units.Position, 
                       expected_sample_rate: units.SampleRate | units.Frequency):
@@ -77,9 +80,9 @@ class LinearEncoderViaNI(LinearEncoder):
             samps_per_chan=self._samples_per_channel
         )
         chan.ci_encoder_a_input_dig_fltr_enable = True
-        chan.ci_encoder_a_input_dig_fltr_min_pulse_width = 500e-9
+        chan.ci_encoder_a_input_dig_fltr_min_pulse_width = self._min_pulse_width
         chan.ci_encoder_b_input_dig_fltr_enable = True
-        chan.ci_encoder_b_input_dig_fltr_min_pulse_width = 500e-9
+        chan.ci_encoder_b_input_dig_fltr_min_pulse_width = self._min_pulse_width
         
         self._reader = CounterReader(self._logging_task.in_stream)
 
@@ -140,7 +143,7 @@ class LinearEncoderViaNI(LinearEncoder):
 
         # use angular encoder to trig out on every N pulses
         a = -pulses_per_trigger-1 if direction == "forward" else pulses_per_trigger
-        self._trigger_task.ci_channels.add_ci_ang_encoder_chan(
+        chan = self._trigger_task.ci_channels.add_ci_ang_encoder_chan(
             counter         = CounterRegistry.allocate_counter(),
             decoding_type   = EncoderType.X_1,      # TODO make this adjustable
             zidx_enable     = True,
@@ -155,13 +158,16 @@ class LinearEncoderViaNI(LinearEncoder):
         
         self._trigger_task.export_signals.ctr_out_event_output_term = self._trigger_channel
         
-        self._trigger_task.ci_channels[0].ci_encoder_a_input_term = self._signal_a_channel # type: ignore
-        self._trigger_task.ci_channels[0].ci_encoder_b_input_term = self._signal_b_channel # type: ignore
+        chan.ci_encoder_a_input_term = self._signal_a_channel # type: ignore
+        chan.ci_encoder_b_input_term = self._signal_b_channel # type: ignore
+        chan.ci_encoder_a_input_dig_fltr_enable = True
+        chan.ci_encoder_a_input_dig_fltr_min_pulse_width = self._min_pulse_width
+        chan.ci_encoder_b_input_dig_fltr_enable = True
+        chan.ci_encoder_b_input_dig_fltr_min_pulse_width = self._min_pulse_width
 
         parts = self._trigger_task.channel_names[0].split('/')
         cizterm = f"/{parts[0]}/Ctr{parts[1][-1]}InternalOutput" # e.g. /Dev1/Ctr1InternalOutput
-        # validate_ni_channel(cizterm)
-        self._trigger_task.ci_channels[0].ci_encoder_z_input_term = cizterm # type: ignore
+        chan.ci_encoder_z_input_term = cizterm # type: ignore
 
         # Creates a separate task that measures the time between edges of
         # the signal coming from 'DevX/CtrYInternalOutput'.
