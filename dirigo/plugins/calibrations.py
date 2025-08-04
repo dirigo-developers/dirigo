@@ -13,6 +13,7 @@ from dirigo.plugins.acquisitions import FrameAcquisition, SampleAcquisition
 from dirigo.plugins.processors import RasterFrameProcessor
 
 from dirigo.hw_interfaces import Digitizer, FastRasterScanner
+from dirigo.hw_interfaces.digitizer import AuxiliaryIOEnums
 
 """
 Calibrations are special instances of Acquisition designed to produce data for
@@ -488,13 +489,30 @@ class LineGradientCalibrationLogger(Logger):
 
 
 class LaserPulseFrequencyCalibration(SampleAcquisition):
-
+    """Measures the laser pulse rate by dividing down the sample clock and 
+    reading with counter input task """
+    DIVIDER = 1000
     def __init__(self, 
                  hw, 
                  system_config, 
                  spec, 
                  thread_name = "Laser Pulse Frequency Calibration"):
         super().__init__(hw, system_config, spec, thread_name)
+        self.configure_digitizer()
+        
+        # Setup pulse frequency divider
+        self.hw.digitizer.aux_io.configure_mode(
+            mode    = AuxiliaryIOEnums.OutPacer,
+            divider = self.DIVIDER
+        )
 
-        self.hw.digitizer.aux_io.configure_mode()
+    def run(self):
+
+        self.hw.digitizer.acquire.start()
+        time.sleep(1)
+        # Set up counter input task
+        f = self.hw.encoders.x.measure_pulse_frequency()
+        print(f"Laser pulse rate: {f*self.DIVIDER/1e6:.03f} MHz")
+
+        self.hw.digitizer.acquire.stop()
 

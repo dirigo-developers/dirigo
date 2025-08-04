@@ -26,6 +26,7 @@ raster_stack = "dirigo.plugins.acquisitions:StackAcquisition"
 # calibrations (create data for calibrations)
 trigger_delay_calibration = "dirigo.plugins.calibrations:TriggerDelayCalibration"
 stage_translation_calibration = "dirigo.plugins.calibrations:StageTranslationCalibration"
+laser_frequency_calibration = "dirigo.plugins.calibrations:LaserPulseFrequencyCalibration"
 
 [project.entry-points."dirigo_loaders"]
 raw_raster_frame = "dirigo.plugins.loaders:RawRasterFrameLoader"

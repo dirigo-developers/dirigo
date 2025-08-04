@@ -143,18 +143,18 @@ if __name__ == "__main__":
 
     diri = Dirigo()
 
+    acquisition = diri.make_acquisition("laser_frequency_calibration")
 
-    acquisition = diri.make_acquisition("raster_frame")
-    processor   = diri.make_processor("raster_frame", upstream=acquisition)
-    averager    = diri.make_processor("rolling_average", upstream=processor)
-    display     = diri.make_display_processor(
-        name                    = "frame", 
-        upstream                = averager,
-        color_vector_names      = ["green", "magenta"],
-        transfer_function_name  = "gamma"
-    )
-    logger      = diri.make_logger("tiff", upstream=processor)
-
+    # acquisition = diri.make_acquisition("raster_frame")
+    # processor   = diri.make_processor("raster_frame", upstream=acquisition)
+    # averager    = diri.make_processor("rolling_average", upstream=processor)
+    # display     = diri.make_display_processor(
+    #     name                    = "frame", 
+    #     upstream                = averager,
+    #     color_vector_names      = ["green", "magenta"],
+    #     transfer_function_name  = "gamma"
+    # )
+    # logger      = diri.make_logger("tiff", upstream=processor)
 
     acquisition.start()
     acquisition.join(timeout=100.0)

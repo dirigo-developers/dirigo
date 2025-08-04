@@ -145,7 +145,7 @@ class SampleAcquisition(Acquisition):
     samples at some rate. Should be independent of any spatial semantics.
     """
     required_resources = [Digitizer,]
-    spec_location = Path() # TODO
+    spec_location = io.config_path() / "acquisition/sample"
     Spec: Type[SampleAcquisitionSpec] = SampleAcquisitionSpec
 
     def __init__(self, hw, system_config, spec, 
@@ -177,6 +177,7 @@ class SampleAcquisition(Acquisition):
 
     def run(self):
         # TODO, should start and stop digitizer, set `active` event
+        # 1) configure digitizer
         raise NotImplementedError 
 
     @property
@@ -247,7 +248,7 @@ class LineCameraAcquisition(Acquisition):
     Use subclasses to provide spatial/spectral semantics.
     """
     required_resources = [LineCamera,]
-    spec_location = io.config_path() / "acquisitions/line_camera"
+    spec_location = io.config_path() / "acquisition/line_camera"
     Spec = LineCameraAcquisitionSpec
 
     def __init__(self, hw, system_config, spec,

@@ -716,7 +716,7 @@ class NIAcquire(digitizer.Acquire):
             return "edge counting"
 
 
-class NIAuxillaryIO(digitizer.AuxillaryIO):
+class NIAuxiliaryIO(digitizer.AuxiliaryIO):
     def __init__(self, device: nidaqmx.system.Device):
         self._device = device
 
@@ -734,7 +734,7 @@ class NIAuxillaryIO(digitizer.AuxillaryIO):
 class NIDigitizer(digitizer.Digitizer):
     """
     High-level aggregator for NI-based digitizer integration. 
-    Wires together the Channel, SampleClock, Trigger, Acquire, and AuxillaryIO.
+    Wires together the Channel, SampleClock, Trigger, Acquire, and AuxiliaryIO.
     """
     def __init__(self, 
                  device_name: str = "Dev1", 
@@ -776,7 +776,7 @@ class NIDigitizer(digitizer.Digitizer):
         )
 
         # Create auxiliary IO
-        self.aux_io = NIAuxillaryIO(device=self._device)
+        self.aux_io = NIAuxiliaryIO(device=self._device)
 
     @cached_property
     def data_range(self) -> units.IntRange:

@@ -5,6 +5,7 @@ from pathlib import Path
 import math
 from typing import Literal, List, Optional, TYPE_CHECKING
 import tomllib
+from enum import Enum
 
 from platformdirs import user_config_dir
 
@@ -604,16 +605,25 @@ class Acquire(ABC):
     def _inverted_channels(self) -> list[bool]:
         return [chan.inverted for chan in self._channels if chan.enabled]
 
+
+class AuxiliaryIOEnums(Enum):
+    # Mostly based on Alazar AuxIO enums, for now
+    OutTrigger      = 0
+    OutPacer        = 1
+    OutDigital      = 2
+    InTriggerEnable = 3
+    InDigital       = 4
+
     
-class AuxillaryIO(ABC):
+class AuxiliaryIO(ABC):
     """Abstract base class for auxiliary input/output functionality."""
 
     @abstractmethod
-    def configure_mode(self, mode, **kwargs):
+    def configure_mode(self, mode: AuxiliaryIOEnums, **kwargs):
         """Configure the auxiliary I/O mode.
 
         Args:
-            mode: The I/O mode to configure.
+            mode (AuxiliaryIOEnums): The I/O mode to configure.
             **kwargs: Additional parameters for configuration.
         """
         pass
@@ -650,7 +660,7 @@ class Digitizer(HardwareInterface):
         self.channels: tuple[Channel]
         self.trigger: Trigger
         self.acquire: Acquire
-        self.aux_io: AuxillaryIO
+        self.aux_io: AuxiliaryIO
 
     def load_profile(self, profile_name: str):
         """Load and apply a settings profile from a TOML file.

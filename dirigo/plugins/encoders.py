@@ -1,10 +1,11 @@
 from typing import Optional, Literal
+import time
 
 import numpy as np
 import nidaqmx
 from nidaqmx.constants import (
     AcquisitionType, EncoderType, EncoderZIndexPhase, AngleUnits, ExportAction,
-    TimeUnits
+    TimeUnits, CounterFrequencyMethod
 )
 from nidaqmx.stream_readers import CounterReader
 
@@ -185,7 +186,6 @@ class LinearEncoderViaNI(LinearEncoder):
             # Set to the internal signal exported by ctr0/1.
             parts = self._trigger_task.channel_names[0].split('/')
             cpt = f"/{parts[0]}/Ctr{parts[1][-1]}InternalOutput" # e.g. /Dev1/Ctr1InternalOutput
-            #cpt = "/Dev1/PFI11"
             self._timestamp_task.ci_channels[0].ci_period_term = cpt # type: ignore
                 
             self._timestamp_task.timing.cfg_implicit_timing(
@@ -220,6 +220,23 @@ class LinearEncoderViaNI(LinearEncoder):
             self._timestamp_task.close()
             del self._timestamp_task
 
+    def measure_pulse_frequency(self, measurement_time = units.Time('1 s')):
+        with nidaqmx.Task() as task:
+            chan = task.ci_channels.add_ci_freq_chan(
+                counter=CounterRegistry.allocate_counter(),           
+                min_val=40e3,
+                max_val=400e3,
+                meas_method=CounterFrequencyMethod.HIGH_FREQUENCY_2_COUNTERS,
+                meas_time=float(measurement_time)
+            )
+            chan.ci_freq_term = self._sample_clock_channel
+
+            # Start & read 1 sample
+            task.start()
+            f = task.read()
+            
+            task.stop()
+        return units.Frequency(f)
 
 
 class MultiAxisLinearEncodersViaNI(MultiAxisLinearEncoder):
