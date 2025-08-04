@@ -9,7 +9,7 @@ from dirigo import units
 from dirigo import io
 from dirigo.sw_interfaces import Acquisition, Processor, Logger
 from dirigo.sw_interfaces.worker import EndOfStream
-from dirigo.plugins.acquisitions import FrameAcquisition
+from dirigo.plugins.acquisitions import FrameAcquisition, SampleAcquisition
 from dirigo.plugins.processors import RasterFrameProcessor
 
 from dirigo.hw_interfaces import Digitizer, FastRasterScanner
@@ -485,4 +485,16 @@ class LineGradientCalibrationLogger(Logger):
                 deg=2
             )
             c0, c1, c2 = pfit.convert().coef
+
+
+class LaserPulseFrequencyCalibration(SampleAcquisition):
+
+    def __init__(self, 
+                 hw, 
+                 system_config, 
+                 spec, 
+                 thread_name = "Laser Pulse Frequency Calibration"):
+        super().__init__(hw, system_config, spec, thread_name)
+
+        self.hw.digitizer.aux_io.configure_mode()
 
