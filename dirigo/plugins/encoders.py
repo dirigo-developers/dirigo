@@ -222,8 +222,9 @@ class LinearEncoderViaNI(LinearEncoder):
 
     def measure_pulse_frequency(self, measurement_time = units.Time('1 s')):
         with nidaqmx.Task() as task:
+            ctr = CounterRegistry.allocate_counter()
             chan = task.ci_channels.add_ci_freq_chan(
-                counter=CounterRegistry.allocate_counter(),           
+                counter=ctr,           
                 min_val=40e3,
                 max_val=400e3,
                 meas_method=CounterFrequencyMethod.HIGH_FREQUENCY_2_COUNTERS,
@@ -236,6 +237,8 @@ class LinearEncoderViaNI(LinearEncoder):
             f = task.read()
             
             task.stop()
+            CounterRegistry.free_counter(ctr)
+
         return units.Frequency(f)
 
 
