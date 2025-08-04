@@ -14,7 +14,7 @@ from dirigo.sw_interfaces.worker import EndOfStream, Product
 from dirigo.hw_interfaces.hw_interface import NoBuffers
 from dirigo.sw_interfaces.acquisition import Acquisition, AcquisitionSpec, AcquisitionProduct
 from dirigo.hw_interfaces.detector import DetectorSet, Detector
-from dirigo.hw_interfaces.digitizer import Digitizer, DigitizerProfile
+from dirigo.hw_interfaces.digitizer import Digitizer, DigitizerProfile, AuxiliaryIOEnums
 from dirigo.hw_interfaces.scanner import (
     FastRasterScanner, SlowRasterScanner, GalvoScanner, ResonantScanner,
     ObjectiveZScanner
@@ -457,6 +457,7 @@ class LineAcquisition(SampleAcquisition):
             scanner.amplitude = optics.object_position_to_scan_angle(
                 self.spec.extended_scan_width,
             )
+            digi.aux_io.configure_mode(AuxiliaryIOEnums.OutTrigger)
             
         # Scanner settings implemented, configure digitizer acquisition params
         self.configure_digitizer()
