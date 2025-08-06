@@ -429,7 +429,6 @@ class SignalOffsetCalibrationLogger(Logger):
         )
 
 
-
 class LineGradientCalibrationLogger(Logger):
     
     def __init__(self, upstream: Processor):
@@ -476,14 +475,14 @@ class LineGradientCalibrationLogger(Logger):
             header=hdr[:-1]
         )
 
-        # Fit to polynomials
+        # Fit to 2nd deg polynomial
         w = self._acquisition.spec.line_width
         x = np.linspace(-w/2, w/2, n_x)
         for c in range(n_channels):
             pfit: Polynomial = Polynomial.fit(
-                x=x,
-                y=line_averages[:,c],
-                deg=2
+                x   = x,
+                y   = line_averages[:,c],
+                deg = 2
             )
             c0, c1, c2 = pfit.convert().coef
 
