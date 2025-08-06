@@ -4,7 +4,6 @@ from typing import Optional, Any
 from functools import cached_property
 
 import numpy as np
-import tifffile
 from numpy.polynomial.polynomial import Polynomial
 import platformdirs as pd
 
@@ -85,10 +84,18 @@ def load_signal_offset(
 
 
 def load_line_gradient_calibration(
-        path: Path = config_path() / "optics/line_gradient_calibration.tif"
+        line_width: units.Position,
+        pixel_size: units.Position,
+        path: Path = config_path() / "optics/line_gradient.csv"
     ):
-    return tifffile.imread(path)
-
+    """Returns a correction function to correct intensity vignetting."""
+    n_x = round(line_width / pixel_size)
+    x = np.linspace(-line_width/2, line_width/2, n_x)
+    entries = np.loadtxt(path, delimiter=',', dtype=np.float64, skiprows=1, ndmin=2)
+    for entry in entries:
+        if abs(entry[0] - line_width)/line_width < 0.01:
+            pfit = Polynomial(entry[1:])
+            return (1/pfit(x)).astype(np.float32)
 
 
 class SystemConfig: 

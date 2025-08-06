@@ -480,16 +480,27 @@ class LineGradientCalibrationLogger(Logger):
             header=hdr[:-1]
         )
 
-        # Fit to 2nd deg polynomial
+        # Fit to 4th order polynomial
         w = self._acquisition.spec.line_width
         x = np.linspace(-w/2, w/2, n_x)
-        for c in range(n_channels):
-            pfit: Polynomial = Polynomial.fit(
-                x   = x,
-                y   = line_averages[:,c],
-                deg = 2
-            )
-            c0, c1, c2 = pfit.convert().coef
+        pfit: Polynomial = Polynomial.fit(
+            x   = x,
+            y   = np.sum(line_averages, axis=1),
+            deg = 4
+        )
+
+        x_dense = np.linspace(-w/2, w/2, n_x*10)
+        peak_val = pfit(x_dense).max()                 # scalar peak value
+        pfit_norm = pfit / peak_val                    # scale so max == 1
+
+        coeffs = pfit_norm.convert().coef              # power-basis coefficients
+        data = np.array([[float(w), *coeffs]])
+
+        np.savetxt(
+            self.filepath, data,
+            delimiter   = ',',
+            header      = "line width (m), coefficients"
+        )
 
 
 class LaserPulseFrequencyCalibration(SampleAcquisition):

@@ -220,7 +220,10 @@ class RasterFrameProcessor(Processor[Acquisition]):
             if hasattr(self._spec, "frame_height"):
                 raise Exception
             else: # line acquisition
-                self._gradient = io.load_line_gradient_calibration()
+                self._gradient = io.load_line_gradient_calibration(
+                    line_width = self._spec.line_width,
+                    pixel_size = self._spec.pixel_size
+                )
         except:
             self._gradient = np.ones((self._spec.pixels_per_line,), np.float32)
 
