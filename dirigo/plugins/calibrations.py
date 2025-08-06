@@ -52,7 +52,7 @@ class TriggerDelayCalibration(Acquisition):
             stop=self.spec.ampl_range.max * ampl,
             num=self.spec.n_amplitudes
         )
-        self.spec.buffers_per_acquisition = self.spec.measurement_frames_per_ampl
+        self.spec.buffers_per_acquisition = self.spec.measurement_frames_per_ampl + 10
         
         # Frame acquisition needs to exist by the end of __init__ for other 
         # Workers (e.g. FrameProcessor) to instantiate correctly
@@ -79,6 +79,11 @@ class TriggerDelayCalibration(Acquisition):
 
                     # Over-ride amplitude
                     self.hw.fast_raster_scanner.amplitude = units.Angle(ampl)
+
+                    # Get discarded frames
+                    for f in range(10):
+                        with self._receive_product() as product:
+                            pass
 
                     # Get measurement frames
                     while True:
@@ -121,19 +126,19 @@ class TriggerDelayCalibrationLogger(Logger):
             self.save_data()
 
     def save_data(self):
-        amplitudes = np.unique(self._amplitudes)
+        amplitudes = self._acquisition._amplitudes
         frequencies = []
         phases = []
         for ampl in amplitudes:
             matching_f = []
             matching_p = []
             for a, f, p in zip(self._amplitudes, self._frequencies, self._phases):
-                if a == ampl:
+                if abs(a - ampl)/ampl < 0.01:
                     matching_f.append(f)
                     matching_p.append(p)
 
-            frequencies.append(np.median(matching_f))
-            phases.append(np.median(matching_p))
+            frequencies.append(matching_f[-1])
+            phases.append(matching_p[-1])
 
         # stack into a 2-column array
         data = np.column_stack([amplitudes, frequencies, phases])

@@ -244,14 +244,14 @@ class RasterFrameProcessor(Processor[Acquisition]):
                         # Estimate scanner frequency from timestamps
                         avg_trig_period = np.mean(np.diff(acq_prod.timestamps))
                         self._fast_scanner_frequency = 1 / avg_trig_period
-                        #print("FAST SCANNER FREQ", self._fast_scanner_frequency)
+                        # print("FAST SCANNER FREQ", self._fast_scanner_frequency)
 
                     # Measure phase from bidi data (in uni-directional, phase is not critical)
                     if self._spec.bidirectional_scanning:
                         p = self._frames_processed % len(self._phases)
                         self._phases[p] = self.measure_phase(acq_prod.data)
                         self._trigger_error = np.median(self._phases[~np.isnan(self._phases)])
-                        #print("TRIGGER ERROR", self._trigger_error)
+                        # print("BIDI PHASE", self._trigger_error)
 
                     # Update resampling start indices--these can change a bit if the scanner frequency drifts
                     start_indices = self.calculate_start_indices(self._trigger_error) - self._fixed_trigger_delay
@@ -330,8 +330,8 @@ class RasterFrameProcessor(Processor[Acquisition]):
         Measure the apparent fast raster scanner trigger phase, in samples
         (for bidirectional scanning).
         """
-        UPSAMPLE = 2 # TODO move this somewhere else
-        PHASE_MAX = 80
+        UPSAMPLE = 2        # TODO move this somewhere else
+        PHASE_MAX = 320
         
         data_window = crop_bidi_data(
             data=data, 
