@@ -88,16 +88,32 @@ def load_line_gradient_calibration(
         pixel_size: units.Position,
         path: Path = config_path() / "optics/line_gradient.csv"
     ):
-    """Returns a correction function to correct intensity vignetting."""
-    n_x = round(line_width / pixel_size)
-    x = np.linspace(-line_width/2, line_width/2, n_x)
-    entries = np.loadtxt(path, delimiter=',', dtype=np.float64, skiprows=1, ndmin=2)
-    for entry in entries:
-        if abs(entry[0] - line_width)/line_width < 0.01:
-            pfit = Polynomial(entry[1:])
-            return (1/pfit(x)).astype(np.float32)
+    """Returns a function to correct intensity vignetting."""
 
+    entries = np.loadtxt(
+        fname       = path, 
+        delimiter   = ',',
+        dtype       = np.float64, 
+        skiprows    = 1, 
+    )
 
+    x = entries[:,0]
+    if abs(line_width - (x[-1] - x[0])) / line_width > 0.001:
+        raise RuntimeError("Line gradient calibrated on different line size.")
+    if abs(pixel_size - (x[1] - x[0])) / pixel_size > 0.001:
+        raise RuntimeError("Line gradient calibrated on different pixel size.")
+        # one could interpolate here probably TODO
+    
+    n_x, n_c = entries.shape
+    n_c -= 1 # -1 to account for x axis label
+    correction = np.zeros((n_x,n_c), dtype=np.float32)
+    for c in range(n_c):
+        y = entries[:,c+1]
+        correction[:,c] = 1 / y
+
+    return np.average(correction,axis=1)
+
+        
 class SystemConfig: 
     def __init__(self, data: dict[str, dict]):
         self._data = data
@@ -158,3 +174,9 @@ class SystemConfig:
     def to_dict(self) -> dict[str, dict[str, Any]]:
         return self._data # should this be a (deep) copy?
     
+
+if __name__ == "__main__":
+    load_line_gradient_calibration(
+        line_width=units.Position('1.5 mm'),
+        pixel_size=units.Position('1 um')
+    )

@@ -32,7 +32,7 @@ def resample_kernel(raw_data: np.ndarray,
                     invert_mask: np.ndarray,
                     offset: np.ndarray,
                     bit_shift: int,
-                    gradient: np.ndarray, # should this have seperate rows for fwd and rvs?
+                    gradient: np.ndarray, 
                     resampled: np.ndarray, 
                     start_indices: np.ndarray, 
                     nsamples_to_sum: np.ndarray):
@@ -48,7 +48,6 @@ def resample_kernel(raw_data: np.ndarray,
     Ns, Nf, Nc_out = resampled.shape # Acquisition must be in channel-minor order (interleaved)
     # Nc_in may not be the same as Nc_out if there's a empty byte (e.g. BGRX format)
     Ndirections = start_indices.shape[0]
-    
 
     # Clamp start_indices to [0, Nsamples); calculate final scaling factor
     scaling_factor = np.zeros_like(start_indices, np.float32)
