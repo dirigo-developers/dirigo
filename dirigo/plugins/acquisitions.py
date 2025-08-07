@@ -19,12 +19,10 @@ from dirigo.hw_interfaces.scanner import (
     FastRasterScanner, SlowRasterScanner, GalvoScanner, ResonantScanner,
     ObjectiveZScanner
 )
-from dirigo.hw_interfaces.camera import LineCamera
+from dirigo.hw_interfaces.camera import LineCamera, TriggerModes
 from dirigo.hw_interfaces.illuminator import Illuminator
 from dirigo.hw_interfaces.encoder import MultiAxisLinearEncoder
 from dirigo.hw_interfaces.stage import MultiAxisStage
-
-from dirigo_e2v_line_camera.dirigo_e2v_line_camera import TriggerModes # TODO write Dirigo-specific enum for trigger modes
 
 
 TWO_PI = 2 * math.pi 

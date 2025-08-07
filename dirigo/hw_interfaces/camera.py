@@ -108,6 +108,11 @@ class FrameGrabber(HardwareInterface):
         pass
 
 
+class TriggerModes(Enum):
+    FREE_RUN            = 0
+    EXTERNAL_TRIGGER    = 1
+
+
 class Camera(HardwareInterface):
     attr_name = "camera"
     def __init__(self, frame_grabber: Optional[FrameGrabber], 
