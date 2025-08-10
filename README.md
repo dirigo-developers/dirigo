@@ -1,36 +1,18 @@
 # Dirigo
-Dirigo ('I direct') is a collection of [interfaces](https://en.wikipedia.org/wiki/Interface_(computing)#Software_interfaces) for customizable image data acquisition in Python.
+**Dirigo** is an extensible, high-performance backend for scientific image acquisition, designed with high-speed laser scanning microscopy in mind but adaptable to a wide range of medium- to high-complexity imaging systems.
 
-Virtually all components are plugins which implement interfaces. Acquisition workers execute data collection logic by coordinating Resources (hardware devices, data loggers, image processing workflows, etc.).
+Dirigo separates hardware control, acquisition logic, and user interface, making it easy to:
 
-By design, Dirigo is a [backend](https://en.wikipedia.org/wiki/Frontend_and_backend) layer only, however it provides an API for frontend applications.
+- Add new hardware via plugin drivers that implement generic device interfaces (digitizers, scanners, stages, cameras, etc.)
 
-## Acquisition
-Built-in plugins:
+- Reconfigure data acquisition and processing pipelines using a Worker/publisher–subscriber model
 
-- **LineAcquisition** \
-Continuous or finite 1D (e.g. line scan) acquisition.
+- Integrate adaptive acquisition strategies through feedback loops between processing and control
 
-- **FrameAcquisition** \
-A subclass of LineAcquisition. Continuous or finite 2D (e.g. frame) acquisition
+- Build custom GUIs or integrate with existing tools via a clean API (a reference GUI is available as a [separate package](https://github.com/dirigo-developers/dirigo-gui))
 
+Performance-critical operations are accelerated with [Numba](https://numba.pydata.org/) JIT compilation, releasing the GIL during execution and enabling parallel/vectorized processing.
 
-## Hardware
-Defined interfaces:
+Dirigo follows a modular, package-oriented architecture: almost all components—hardware drivers, processing modules, GUIs—are separate Python packages that can be developed, installed, and updated independently.
 
-- **Digitizer** \
-Sequential analog to digital device, typically dedicated (high-speed) hardware
-
-- **Stage** \
-Sample translation device
-
-- **Multi-function input/output (MFIO)** \
-Device with multiple digitial and analog input and output capabilities. Well-known example: NIDAQ card
-
-- **Raster beam scanning** \
-Seperate interfaces for fast and slow axes
-
-
-## Conventions
-- In user-facing locations (GUIs, configuration files, etc), variables should explicitly include units when applicable. Use a string with a space between the value and unit. Examples: `rate = "100 MS/s`, `objective_focal_length = "12.5 mm"`
-- In non-user-facing locations (internally within objects), variables should be stored in  SI base units (`float` or `int`). This simplifies internal calculations assuming there are no dimension errors in the calculations. Examples: 100 MS/s should be stored internally as `100e6`, 12.5 mm should be stored as `12.5e-3`
+Dirigo is in *very* early development. While the API and architecture are functional, documentation and ready-to-use releases are in progress.
