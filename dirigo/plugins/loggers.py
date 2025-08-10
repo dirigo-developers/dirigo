@@ -67,6 +67,7 @@ class TiffLogger(Logger):
                  max_frames_per_file: int = 1,
                  **kwargs):
         super().__init__(upstream, **kwargs)
+        self.file_ext = "tif"
 
         self.frames_per_file = int(max_frames_per_file) 
         

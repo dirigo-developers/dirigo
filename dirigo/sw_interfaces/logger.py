@@ -30,6 +30,7 @@ class Logger(Worker):
             raise ValueError("Upstream Worker must be either an Acquisition or a Processor")
 
         self.basename = basename
+        self.number_files = True    # False: disable automatic number postpending
         self.save_path = io.data_path()
         self.save_path.mkdir(parents=True, exist_ok=True)
         self.file_ext: Optional[str] = None # must be set by concrete class
@@ -55,24 +56,29 @@ class Logger(Worker):
         If ``image_index`` is given, raise ``FileExistsError`` if that specific
         file already exists.
         """
-        # Regex that captures the numeric suffix of files like "<basename>_123.<file_ext>"
-        pattern = re.compile(rf"{re.escape(self.basename)}_(\d+)\.{self.file_ext}$")
+        if self.number_files:
+            # Regex that captures the numeric suffix of files like "<basename>_123.<file_ext>"
+            pattern = re.compile(rf"{re.escape(self.basename)}_(\d+)\.{self.file_ext}$")
 
-        if image_index is None:
-            # Collect any numeric suffixes on existing files
-            existing = [
-                int(m.group(1))
-                for p in self.save_path.glob(f"{self.basename}_*.{self.file_ext}")
-                if (m := pattern.match(p.name))
-            ]
+            if image_index is None:
+                # Collect any numeric suffixes on existing files
+                existing = [
+                    int(m.group(1))
+                    for p in self.save_path.glob(f"{self.basename}_*.{self.file_ext}")
+                    if (m := pattern.match(p.name))
+                ]
 
-            next_index = (max(existing) + 1) if existing else 0
-            proposed_file_path = self.save_path / f"{self.basename}_{next_index}.{self.file_ext}"
+                next_index = (max(existing) + 1) if existing else 0
+                proposed_file_path = self.save_path / f"{self.basename}_{next_index}.{self.file_ext}"
 
+            else:
+                # check that we won't overwrite something
+                proposed_file_path = self.save_path / f"{self.basename}_{image_index}.{self.file_ext}"
+                if proposed_file_path.exists():
+                    raise FileExistsError(f"File already exists: {proposed_file_path}")
         else:
-            # check that we won't overwrite something
-            proposed_file_path = self.save_path / f"{self.basename}_{image_index}.{self.file_ext}"
+            proposed_file_path = self.save_path / f"{self.basename}.{self.file_ext}"
             if proposed_file_path.exists():
-                raise FileExistsError(f"File already exists: {proposed_file_path}")
+                    raise FileExistsError(f"File already exists: {proposed_file_path}")
 
         return proposed_file_path
