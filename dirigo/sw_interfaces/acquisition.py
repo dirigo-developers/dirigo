@@ -61,15 +61,9 @@ class AcquisitionProduct(Product):
 
 class AcquisitionWorker(Worker):
     Product = AcquisitionProduct
-    # def _init_product_pool(self, n, shape, dtype):
-    #     for _ in range(n):
-    #         acquisition_product = AcquisitionProduct(
-    #             pool=self._product_pool,
-    #             data=np.empty(shape, dtype) # pre-allocates for large buffers
-    #         )
-    #         self._product_pool.put(acquisition_product)
 
     def _get_free_product(self) -> AcquisitionProduct:
+        # print("QSIZE", self._product_pool.qsize())
         return self._product_pool.get()
 
 

@@ -59,6 +59,8 @@ class Processor(Generic[U_co], Worker):
 
     def _get_free_product(self) -> ProcessorProduct:
         """Gets an available ProcessorProduct from the product pool."""
+        if self.__class__.__name__ == "RasterFrameProcessor":
+            print(self.__class__.__name__, "QSIZE:", self._product_pool.qsize())
         return super()._get_free_product() # type: ignore
     
     # def _receive_product(self, block = True, timeout = None) -> AcquisitionProduct | ProcessorProduct:
