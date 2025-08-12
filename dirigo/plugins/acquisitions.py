@@ -10,6 +10,7 @@ from platformdirs import user_config_dir
 import numpy as np
 
 from dirigo.components import units, io
+from dirigo.components.profiling import timer
 from dirigo.sw_interfaces.worker import EndOfStream, Product
 from dirigo.hw_interfaces.hw_interface import NoBuffers
 from dirigo.sw_interfaces.acquisition import Acquisition, AcquisitionSpec, AcquisitionProduct
@@ -514,20 +515,20 @@ class LineAcquisition(SampleAcquisition):
             while not self._stop_event.is_set():
                 if bpa != -1 and digi.acquire.buffers_acquired >= bpa: # bpa=-1 codes for infinite
                     break
-                #t0 = time.perf_counter()
-                acq_product = self._get_free_product()
-                #t1 = time.perf_counter()
-                digi.acquire.get_next_completed_buffer(acq_product)
+
+                with timer("get_free_product"):
+                    acq_product = self._get_free_product()
+
+                with timer("get_next_completed_buffer"):
+                    digi.acquire.get_next_completed_buffer(acq_product)
 
                 if self.hw.stages or self.hw.objective_z_scanner:
-                    #t0 = time.perf_counter()
-                    acq_product.positions = self.read_positions()
-                    #t1 = time.perf_counter()
+                    with timer("read_positions"):
+                        acq_product.positions = self.read_positions()
 
                 self._publish(acq_product)
 
                 print(f"Acquired {digi.acquire.buffers_acquired} {"" if bpa==-1 else f"of {bpa}"} "
-                      #f"GET ACQ PRODUCT took: {1000*(float(t1)-t0):.3f} ms"
                       )
         finally:
             self.cleanup()
