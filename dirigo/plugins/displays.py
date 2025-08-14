@@ -364,7 +364,7 @@ class FrameDisplay(Display):
         )
         self._update_tf_lut()
 
-    def run(self):
+    def _work(self):
         try:
             while True:
                 with self._receive_product() as product:

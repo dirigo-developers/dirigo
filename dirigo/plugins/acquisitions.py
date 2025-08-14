@@ -174,7 +174,7 @@ class SampleAcquisition(Acquisition):
         acq.buffers_per_acquisition = self.spec.buffers_per_acquisition
         acq.buffers_allocated = self.spec.buffers_allocated
 
-    def run(self):
+    def _work(self):
         # TODO, should start and stop digitizer, set `active` event
         # 1) configure digitizer
         raise NotImplementedError 
@@ -297,7 +297,7 @@ class LineCameraAcquisition(Acquisition):
     def _get_free_product(self) -> AcquisitionProduct:
         return super()._get_free_product() # type: ignore
 
-    def run(self):
+    def _work(self):
         # Set up acquisition buffer pool
         shape = self.hw.frame_grabber._buffers[0].buffer.shape # TODO add some sort of shape/dtype to API for framegrabber
         dtype = self.hw.frame_grabber._buffers[0].buffer.dtype
@@ -464,7 +464,7 @@ class LineAcquisition(SampleAcquisition):
         # Capture runtime info
         self.runtime_info = LineAcquisitionRuntimeInfo.from_acquisition(self)
 
-    def run(self):
+    def _work(self):
         digi = self.hw.digitizer # for brevity
 
         # Enable detectors
@@ -781,7 +781,7 @@ class FrameAcquisition(LineAcquisition):
             1 - spec.flyback_periods / spec.records_per_buffer
         )
 
-    def run(self):
+    def _work(self):
         self.hw.slow_raster_scanner.start(
             periods_per_frame=self.spec.records_per_buffer
         )
@@ -878,7 +878,7 @@ class StackAcquisition(Acquisition):
                          timeout: float | None = None) -> AcquisitionProduct:
         return super()._receive_product(block, timeout) # type: ignore
 
-    def run(self):
+    def _work(self):
         """
         For video-rate frame scanning (resonant or polygon scanners), there are
         3 ways to manage axial movement during a Z stack:
@@ -887,7 +887,7 @@ class StackAcquisition(Acquisition):
             2) Very fast step (likely w/ piezo) during frame slow axis flyback 
             3) Step during a sacrificial frame period
 
-        For galvo-galvo scanning, 
+        For galvo-galvo scanning, ... TODO
         """
         # Move to lower limit
         z_scanner = self.hw.objective_z_scanner

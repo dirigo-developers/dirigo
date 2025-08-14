@@ -82,12 +82,21 @@ class Worker(threading.Thread, ABC):
         self._dirigo_plugin: Optional[str] = None   # entry point name, e.g. "raster_line"
         self._dirigo_run_id: Optional[str] = None   # set by acquisitions; others inherit
 
-    @abstractmethod
-    def run(self):      # all subclasses should call super().run() in their implementations
+    def run(self):
+        # Final: subclasses should NOT shadow this method
         run_id_var.set(self._dirigo_run_id) # type: ignore
         group_var.set(self._dirigo_group) # type: ignore 
         plugin_var.set(self._dirigo_plugin) # type: ignore
         worker_var.set(self.name)  # type: ignore
+        try:
+            self._work()  # subclasses implement this
+        finally:
+            # optional: flush metrics/logs
+            pass
+
+    @abstractmethod
+    def _work(self):
+        ...
     
     def _init_product_pool(self, 
                            n: int, 

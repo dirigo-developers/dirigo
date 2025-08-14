@@ -232,7 +232,7 @@ class RasterFrameProcessor(Processor[Acquisition]):
     def _receive_product(self, block: bool = True, timeout: float | None = None) -> AcquisitionProduct:
         return super()._receive_product(block, timeout) # type: ignore
 
-    def run(self):
+    def _work(self):
         try:
             while True: 
 
@@ -450,7 +450,7 @@ class LineCameraLineProcessor(Processor[LineCameraLineAcquisition]):
             except EndOfStream:
                 break
     
-    def run(self):
+    def _work(self):
         try:
             for acq_prod in self._product_stream():
                 proc_product = self._get_free_product()
@@ -580,7 +580,7 @@ class RollingAverageProcessor(Processor[RasterFrameProcessor]):
                          ) -> AcquisitionProduct | ProcessorProduct:
         return super()._receive_product(block, timeout) # type: ignore
     
-    def run(self):
+    def _work(self):
         try:
             while True:
                 with self._receive_product() as in_product:

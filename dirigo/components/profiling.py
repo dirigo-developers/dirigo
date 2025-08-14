@@ -66,7 +66,7 @@ def incr(stage: str, n: int = 1):
     )
 
 
-class MetricsAggregator(Thread):
+class MetricsAggregator(Thread): # Should this be a dirigo.Worker?
     def __init__(self, interval_s: float = 2.0):
         super().__init__(daemon=True)
         self.stop_ev = Event()
