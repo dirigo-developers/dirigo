@@ -1,18 +1,17 @@
-from typing import Optional, Literal, Any, overload
+from typing import TYPE_CHECKING, Optional, Literal, Any, overload
 from functools import lru_cache
 import importlib.metadata as im
 from pathlib import Path
 
 from dirigo import io
 from dirigo.components.hardware import Hardware
-from dirigo.sw_interfaces import Acquisition, Processor, Display, Logger
-from dirigo.sw_interfaces.acquisition import AcquisitionSpec, Loader
 from dirigo.sw_interfaces.display import DisplayPixelFormat
-from dirigo.plugins.processors import RollingAverageProcessor
-from dirigo.plugins.displays import FrameDisplay
 
-
-_Worker = Acquisition | Loader | Processor | Display | Logger
+if TYPE_CHECKING:
+    from dirigo.sw_interfaces import Acquisition, Processor, Display, Logger
+    from dirigo.sw_interfaces.acquisition import AcquisitionSpec, Loader
+    from dirigo.plugins.processors import RollingAverageProcessor
+    from dirigo.plugins.displays import FrameDisplay
 
 
 class PluginError(RuntimeError):
@@ -50,28 +49,29 @@ class Dirigo:
 
     @overload
     def make(self, group: Literal["acquisition"], name: str, *,
-             spec: AcquisitionSpec | str | None = ...,
-             **kw: Any) -> Acquisition: ...
+             spec: "AcquisitionSpec | str | None" = ...,
+             **kw: Any) -> "Acquisition": ...
     
     @overload
     def make(self, group: Literal["loader"], name: str, *,
-             file_path: Path) -> Loader: ...
+             file_path: Path) -> "Loader": ...
 
     @overload
     def make(self, group: Literal["processor"],  name: str, *,
-             upstream: Acquisition | Processor, **kw: Any) -> Processor: ...
+             upstream: "Acquisition | Processor", **kw: Any) -> "Processor": ...
     
     @overload
     def make(self, group: Literal["display"], name: str, *,
-             upstream: Acquisition | Processor,
+             upstream: "Acquisition | Processor",
              pixel_format: DisplayPixelFormat = DisplayPixelFormat.RGB24,
-             **kw: Any) -> Display: ...
+             **kw: Any) -> "Display": ...
     
     @overload
     def make(self, group: Literal["logger"], name: str, *,
-             upstream: Acquisition | Processor, **kw: Any) -> Logger: ...
+             upstream: "Acquisition | Processor", **kw: Any) -> "Logger": ...
 
-    def make(self, group: str, name: str, **kw: Any) -> _Worker:
+    def make(self, group: str, name: str, **kw: Any
+             ) -> "Acquisition | Loader | Processor | Display | Logger":
         """
         Make pluggable pipeline elements (acquisitions, processors, loggers,
         displays)
@@ -110,53 +110,29 @@ class Dirigo:
 
         raise PluginError(f"Unsupported plugin group '{group}'.")
     
-    def make_acquisition(self, name: str, **kw: Any) -> Acquisition:
+    def make_acquisition(self, name: str, **kw: Any) -> "Acquisition":
         return self.make("acquisition", name, **kw)
     
-    def make_loader(self, name: str, file_path: Path, **kw: Any) -> Loader:
+    def make_loader(self, name: str, file_path: Path, **kw: Any) -> "Loader":
         return self.make("loader", name, file_path=file_path)
     
     @overload
     def make_processor(self, name: Literal["rolling_average"], *,               # type: ignore
-                       upstream: Acquisition | Processor) -> RollingAverageProcessor: ...
+                       upstream: "Acquisition | Processor") -> "RollingAverageProcessor": ...
     
-    def make_processor(self, name: str, *, upstream, **kw: Any) -> Processor:
+    def make_processor(self, name: str, *, upstream, **kw: Any) -> "Processor":
         return self.make("processor", name, upstream=upstream, **kw)
     
     @overload
     def make_display_processor(self, name: Literal["frame"], *,                 # type: ignore
-                               upstream: Acquisition | Processor,
+                               upstream: "Acquisition | Processor",
                                pixel_format: DisplayPixelFormat = DisplayPixelFormat.RGB24,
                                color_vector_names: Optional[list[str]] = None,
                                transfer_function_name: Optional[str] = None
-                               ) -> FrameDisplay: ...
+                               ) -> "FrameDisplay": ...
         
-    def make_display_processor(self, name: str, *, upstream, **kw: Any) -> Display:
+    def make_display_processor(self, name: str, *, upstream, **kw: Any) -> "Display":
         return self.make("display", name, upstream=upstream, **kw)
     
-    def make_logger(self, name: str, *, upstream, **kw: Any) -> Logger:
+    def make_logger(self, name: str, *, upstream, **kw: Any) -> "Logger":
         return self.make("logger", name, upstream=upstream, **kw)
-
-    
-
-if __name__ == "__main__":
-
-    diri = Dirigo()
-
-    acquisition = diri.make_acquisition("laser_frequency_calibration")
-
-    # acquisition = diri.make_acquisition("raster_frame")
-    # processor   = diri.make_processor("raster_frame", upstream=acquisition)
-    # averager    = diri.make_processor("rolling_average", upstream=processor)
-    # display     = diri.make_display_processor(
-    #     name                    = "frame", 
-    #     upstream                = averager,
-    #     color_vector_names      = ["green", "magenta"],
-    #     transfer_function_name  = "gamma"
-    # )
-    # logger      = diri.make_logger("tiff", upstream=processor)
-
-    acquisition.start()
-    acquisition.join(timeout=100.0)
-
-    print("Acquisition complete")

@@ -10,8 +10,8 @@ from dirigo.components.io import load_toml, SystemConfig
 from dirigo.components.units import RangeWithUnits
 
 if TYPE_CHECKING:
-    from dirigo.components.hardware import Hardware 
-
+    from dirigo.components.hardware import Hardware#, NotConfiguredError, HardwareError
+from dirigo.components.hardware import NotConfiguredError, HardwareError
 
 
 class AcquisitionSpec:
@@ -63,7 +63,6 @@ class AcquisitionWorker(Worker):
     Product = AcquisitionProduct
 
     def _get_free_product(self) -> AcquisitionProduct:
-        # print("QSIZE", self._product_pool.qsize())
         return self._product_pool.get()
 
 
@@ -84,39 +83,41 @@ class Acquisition(AcquisitionWorker):
         super().__init__(thread_name)
         self.hw = hw
         self.system_config = system_config
-        self.check_resources()
+        self._check_resources()
         self.spec = spec
 
-    def check_resources(self) -> None:
-        """
-        Check whether required_resources are all present and instantiated. Also
-        attempts to instantiate optional_resources 
-        """
+    def _check_resources(self) -> None:
+        # Required: fail if not configured or if instantiation fails
         for iface in self.required_resources:
-            attr = iface.attr()                     # ask the interface itself
             try:
-                dev = getattr(self.hw, attr)        # instantiate lazily
-            except Exception as exc:
+                _ = self._instantiate(iface)
+            except NotConfiguredError as exc:
                 raise RuntimeError(
-                    f"Failed to initialize required {iface.__name__}: {exc}"
+                    f"Required {iface.__name__} not configured: {exc}"
                 ) from exc
-            if dev is None:
+            except HardwareError as exc:
                 raise RuntimeError(
-                    f"{iface.__name__} is not configured (missing [{attr}] "
-                    "section in system_config.toml)."
-                )
-            
+                    f"Required {iface.__name__} failed to initialize: {exc}"
+                ) from exc
+        
+        # Optional: ignore “not configured”, surface real failures
         for iface in self.optional_resources:
-            attr = iface.attr()
             try:
-                dev = getattr(self.hw, attr)             # instantiate if configured
-                # if the device is not in system_config.toml, then dev will be None (will not raise error)
-            except Exception as exc:
+                _ = self._instantiate(iface)
+            except NotConfiguredError:
+                continue
+            except HardwareError as exc:
                 raise RuntimeError(
-                    f"{self.__class__.__name__}: failed to initialize optional "
-                    f"{iface.__name__}: {exc}"
+                    f"Optional {iface.__name__} failed to initialize: {exc}"
                 ) from exc
-
+            
+    def _instantiate(self, iface: Type[HardwareInterface]):
+        attr = iface.attr()
+        try:
+            return getattr(self.hw, attr) # triggers lazy instantiation
+        except AttributeError:
+            # typo in iface.attr(), or Hardware missing the property
+            raise RuntimeError(f"Hardware has no attribute '{attr}' for {iface.__name__}")
             
     @classmethod
     def get_specification(cls, spec_name: str = "default") -> AcquisitionSpec:
@@ -125,8 +126,6 @@ class Acquisition(AcquisitionWorker):
         spec = load_toml(cls.spec_location / spec_fn)
         return cls.Spec(**spec)
     
-    # ! Acquisition subclasses must implement a run() method.
-
     @property
     def data_acquisition_device(self):
         """
