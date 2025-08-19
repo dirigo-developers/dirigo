@@ -786,7 +786,7 @@ class FrameAcquisition(LineAcquisition):
             periods_per_frame=self.spec.records_per_buffer
         )
 
-        super().run() # The hard work is done by super's run method
+        super()._work() # The hard work is done by super's run method
 
     def cleanup(self):
         """Extends LineAcquisition's cleanup method to stop both slow axis and fast"""
