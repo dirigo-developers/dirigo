@@ -62,7 +62,7 @@ class TriggerDelayCalibration(Acquisition):
         self.digitizer_profile = self._frame_acquisition.digitizer_profile
         self.runtime_info = self._frame_acquisition.runtime_info
 
-    def run(self):
+    def _work(self):
         try:
             for i, ampl in enumerate(self._amplitudes):
                 try:
@@ -110,7 +110,7 @@ class TriggerDelayCalibrationLogger(Logger):
     def _receive_product(self) -> Processor.Product:
         return super()._receive_product(self) # type: ignore
         
-    def run(self):
+    def _work(self):
         try:
             while True:
                 with self._receive_product() as product:
@@ -194,7 +194,7 @@ class StageTranslationCalibration(Acquisition):
             self._fast_stage = self.hw.stages.y
         self._original_position = self._fast_stage.position
 
-    def run(self):
+    def _work(self):
         try:
             self._frame_acquisition.start()
 
@@ -248,7 +248,7 @@ class LineDistortionCalibrationLogger(Logger):
         self.filepath = io.config_path() / "optics" / (self.basename + ".csv")
         self.data_filepath = io.data_path() / (self.basename + "_data.csv")
 
-    def run(self):
+    def _work(self):
         self._frames, self._positions = [], [] # collect measurement frames/pos
         try:
             while True:
@@ -397,7 +397,7 @@ class SignalOffsetCalibrationLogger(Logger):
         self.basename = "signal_offset"
         self.filepath = io.config_path() / "digitizer" / (self.basename + ".csv")
 
-    def run(self):
+    def _work(self):
         self._buffers = [] # collect measurement frames/pos
         try:
             while True:
@@ -444,7 +444,7 @@ class LineGradientCalibrationLogger(Logger):
 
         self._acq: FrameAcquisition
 
-    def run(self):
+    def _work(self):
         self._frames = [] # collect measurement frames/pos
         try:
             while True:
@@ -521,7 +521,7 @@ class LaserPulseFrequencyCalibration(SampleAcquisition):
             divider = self.DIVIDER
         )
 
-    def run(self):
+    def _work(self):
 
         self.hw.digitizer.acquire.start()
         time.sleep(1)

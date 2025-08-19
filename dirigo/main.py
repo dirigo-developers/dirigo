@@ -14,8 +14,7 @@ if TYPE_CHECKING:
     from dirigo.plugins.displays import FrameDisplay
 
 
-class PluginError(RuntimeError):
-    """Raised when a Dirigo plugin cannot be located or instantiated."""
+class PluginError(RuntimeError): ...
 
 
 @lru_cache
@@ -28,20 +27,39 @@ def _load_entry_points(group: str) -> dict[str, type]:
 
 class Dirigo:
     """High-level facade for building Dirigo acquisition pipelines."""
+    _instance: Optional["Dirigo"] = None
+    _init_args: Optional[dict] = None
+
+    def __new__(cls, *a, **k):
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+        return cls._instance
 
     def __init__(self, 
-                 system_config_path: Optional[Path] = None) -> None:
+                 system_config_path: Optional[Path | str] = None,
+                 *,
+                 start_services: bool = False):
         
-        if system_config_path is None:
-            system_config_path = io.config_path() / "system_config.toml"
+        cfg = Path(system_config_path or (io.config_path() / "system_config.toml"))
+        args = {"system_config_path": cfg, "start_services": bool(start_services)}
+        if getattr(self, "_initialized", False):
+            if self._init_args and self._init_args != args:
+                raise RuntimeError(
+                    "Dirigo is a singleton and was already created with "
+                    f"{self._init_args}. New args {args} are not allowed."
+                )
+            return
         
-        if not system_config_path.exists():
+        if not cfg.exists():
             raise FileNotFoundError(
-                f"Could not find system configuration file at {system_config_path}."
+                f"Could not find system configuration file at {cfg}."
             )
         
-        self.system_config = io.SystemConfig.from_toml(system_config_path)
+        self.system_config = io.SystemConfig.from_toml(cfg)
         self.hw = Hardware(self.system_config) 
+
+        self._init_args = args
+        self._initialized = True
 
     def available(self, group: str) -> set[str]:
         """Return available plugin names for a given group."""
@@ -81,34 +99,42 @@ class Dirigo:
         try:
             cls = plugins[name]
         except KeyError:
-            raise PluginError(f"No {group} plugin named '{name}'. "
-                              f"Available: {set(plugins)}")
+            raise PluginError(
+                f"No {group} plugin named '{name}'. Available: {set(plugins)}"
+            )
+        
+        if group not in ("acquisition", "loader", "display", "processor", "logger"):
+            raise PluginError(f"Unsupported plugin group '{group}'.")
 
         # special handling per group
         if group == "acquisition":
             spec = kw.pop("spec", None)
             if isinstance(spec, str) or spec is None:
                 spec = cls.get_specification(spec_name=spec or "default")
-            return cls(self.hw, self.system_config, spec, **kw)              # type: ignore[arg-type]
+            obj = cls(self.hw, self.system_config, spec, **kw)              # type: ignore[arg-type]
         
-        if group == "loader":
+        elif group == "loader":
             # For loaders, spec information should be availabe in saved file
             file_path = kw.pop("file_path")
-            return cls(file_path, **kw)
-        
-        upstream = kw.pop("upstream")
-        autostart = kw.pop("autostart", True)
-        autoconnect = kw.pop("autoconnect", True)
+            obj = cls(file_path, **kw)
 
-        if group in ("display", "processor", "logger"):
+        else:
+            upstream = kw.pop("upstream")
+            autostart = kw.pop("autostart", True)
+            autoconnect = kw.pop("autoconnect", True)
+
             obj = cls(upstream, **kw)
             if autoconnect:
                 upstream.add_subscriber(obj)
             if autostart:
                 obj.start()
-            return obj
+        
+        obj._dirigo_group = group
+        obj._dirigo_plugin = name
+        if hasattr(obj, "thread_name"):
+            setattr(obj, "_dirigo_worker", obj.thread_name)
 
-        raise PluginError(f"Unsupported plugin group '{group}'.")
+        return obj 
     
     def make_acquisition(self, name: str, **kw: Any) -> "Acquisition":
         return self.make("acquisition", name, **kw)

@@ -6,8 +6,8 @@ from numpy.polynomial.polynomial import Polynomial
 from numba import njit, prange, uint8, int16, uint16, int32, int64, float32, complex64
 from scipy import fft
 
-from dirigo.components import units
-from dirigo.components import io
+from dirigo.components import units, io
+from dirigo.components.profiling import timer
 from dirigo.sw_interfaces.worker import EndOfStream
 from dirigo.sw_interfaces.processor import Processor, ProcessorProduct
 from dirigo.sw_interfaces.acquisition import Acquisition, AcquisitionProduct
@@ -232,58 +232,54 @@ class RasterFrameProcessor(Processor[Acquisition]):
     def _receive_product(self, block: bool = True, timeout: float | None = None) -> AcquisitionProduct:
         return super()._receive_product(block, timeout) # type: ignore
 
-    def run(self):
+    def _work(self):
         try:
             while True: 
-
-                with self._receive_product() as acq_prod:
-                    proc_product = self._get_free_product() # Check out a product from the pool
-                    # TODO, following could be factored out into a private method to improve clarity
-                    t0 = time.perf_counter()
-
-                    # If array of timestamps are assigned (default is None)
-                    if isinstance(acq_prod.timestamps, np.ndarray):
-                        # Estimate scanner frequency from timestamps
-                        avg_trig_period = np.mean(np.diff(acq_prod.timestamps))
-                        self._fast_scanner_frequency = 1 / avg_trig_period
-                        # print("FAST SCANNER FREQ", self._fast_scanner_frequency)
-
-                    # Measure phase from bidi data (in uni-directional, phase is not critical)
-                    if self._spec.bidirectional_scanning:
-                        p = self._frames_processed % len(self._phases)
-                        self._phases[p] = self.measure_phase(acq_prod.data)
-                        self._trigger_error = np.median(self._phases[~np.isnan(self._phases)])
-                        # print("BIDI PHASE", self._trigger_error)
-
-                    # Update resampling start indices--these can change a bit if the scanner frequency drifts
-                    start_indices = self.calculate_start_indices(self._trigger_error) - self._fixed_trigger_delay
-                    nsamples_to_sum = np.abs(np.diff(start_indices, axis=1))
-                    t1 = time.perf_counter()
-
-                    resample_kernel(
-                        raw_data=acq_prod.data, 
-                        invert_mask=self._invert_mask,
-                        offset=self.signal_offset,
-                        bit_shift=self._scaling_factor,
-                        gradient=self._gradient,
-                        resampled=proc_product.data,
-                        start_indices=start_indices, 
-                        nsamples_to_sum=nsamples_to_sum
-                    )
-                    proc_product.timestamps = acq_prod.timestamps
-                    proc_product.positions = acq_prod.positions
-                    proc_product.phase = TWO_PI * self._trigger_error \
-                        / (self._acquisition.digitizer_profile.sample_clock.rate * avg_trig_period)
-                    proc_product.frequency = float(self._fast_scanner_frequency)
-
-                    self._publish(proc_product) # sends off to Logger and/or Display workers
+                with self._receive_product() as acquisition_product:
+                    processed = self._process_frame(acquisition_product)
+                    self._publish(processed) # sends off to Logger and/or Display workers
                     self._frames_processed += 1
-                    t2 = time.perf_counter()
-
-                    #print(f"RECALC: {1000*(t1-t0):.03f} | FRAME {1000*(t2-t1):.03f} ")
 
         except EndOfStream:
             self._publish(None) # forward sentinel
+
+    def _process_frame(self, acq_product: AcquisitionProduct) -> ProcessorProduct:
+        processed = self._get_free_product() # Check out a product from the pool
+
+        # If array of timestamps are assigned (default is None)
+        if isinstance(acq_product.timestamps, np.ndarray):
+            # Estimate scanner frequency from timestamps
+            avg_trig_period = np.mean(np.diff(acq_product.timestamps))
+            self._fast_scanner_frequency = 1 / avg_trig_period
+
+        # Measure phase from bidi data (in uni-directional, phase is not critical)
+        if self._spec.bidirectional_scanning:
+            p = self._frames_processed % len(self._phases)
+            self._phases[p] = self.measure_phase(acq_product.data)
+            self._trigger_error = np.median(self._phases[~np.isnan(self._phases)])
+
+        # Update resampling start indices--these can change a bit if the scanner frequency drifts
+        start_indices = self.calculate_start_indices(self._trigger_error) - self._fixed_trigger_delay
+        nsamples_to_sum = np.abs(np.diff(start_indices, axis=1))
+
+        with timer("resample_kernel"):
+            resample_kernel(
+                raw_data=acq_product.data, 
+                invert_mask=self._invert_mask,
+                offset=self.signal_offset,
+                bit_shift=self._scaling_factor,
+                gradient=self._gradient,
+                resampled=processed.data,
+                start_indices=start_indices, 
+                nsamples_to_sum=nsamples_to_sum
+            )
+        processed.timestamps = acq_product.timestamps
+        processed.positions = acq_product.positions
+        processed.phase = TWO_PI * self._trigger_error \
+            / (self._acquisition.digitizer_profile.sample_clock.rate * avg_trig_period)
+        processed.frequency = float(self._fast_scanner_frequency)
+        
+        return processed
 
     @cached_property
     def _temporal_edges(self):
@@ -450,7 +446,7 @@ class LineCameraLineProcessor(Processor[LineCameraLineAcquisition]):
             except EndOfStream:
                 break
     
-    def run(self):
+    def _work(self):
         try:
             for acq_prod in self._product_stream():
                 proc_product = self._get_free_product()
@@ -580,7 +576,7 @@ class RollingAverageProcessor(Processor[RasterFrameProcessor]):
                          ) -> AcquisitionProduct | ProcessorProduct:
         return super()._receive_product(block, timeout) # type: ignore
     
-    def run(self):
+    def _work(self):
         try:
             while True:
                 with self._receive_product() as in_product:

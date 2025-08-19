@@ -1,6 +1,7 @@
 from typing import TYPE_CHECKING, Type, List, Optional
 from collections.abc import Mapping, Sequence
 from pathlib import Path
+import uuid
 
 import numpy as np
 
@@ -62,6 +63,13 @@ class AcquisitionProduct(Product):
 class AcquisitionWorker(Worker):
     Product = AcquisitionProduct
 
+    def __init__(self, thread_name: str):
+        super().__init__(thread_name)
+        
+        # Set the run ID -- note that there could be a collision of 2 or more
+        # AcquisitionWorkers streams converge at a downstream Worker.
+        self._dirigo_run_id = str(uuid.uuid4())
+
     def _get_free_product(self) -> AcquisitionProduct:
         return self._product_pool.get()
 
@@ -79,7 +87,7 @@ class Acquisition(AcquisitionWorker):
                  hw: "Hardware", 
                  system_config: SystemConfig, 
                  spec: AcquisitionSpec, 
-                 thread_name: str = "Acquisition"):
+                 thread_name: str = "acquisition"):
         super().__init__(thread_name)
         self.hw = hw
         self.system_config = system_config
@@ -149,10 +157,12 @@ class Loader(AcquisitionWorker):
     Loads and makes available saved data for post-hoc analyses. Mimics the 
     publishing behavior of Acquisition.
     """
-    def __init__(self, file_path: str | Path, thread_name: str = "Loader"):
+    def __init__(self, 
+                 file_path: str | Path, 
+                 thread_name: str = "loader"):
         super().__init__(thread_name)
 
         file_path = Path(file_path)
         if not file_path.exists():
-            raise FileExistsError(f"Could not find file: {file_path}")
+            raise FileNotFoundError(f"Could not find file: {file_path}")
         self._file_path = file_path
