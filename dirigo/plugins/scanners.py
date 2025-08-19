@@ -386,7 +386,7 @@ class GalvoWaveformWriter(threading.Thread):
         waveforms = self.generate_waveforms()
         self._ao_writer.write_many_sample(waveforms)
 
-    def run(self):
+    def _work(self):
         while not self._stop_event.is_set():
             try:
                 waveforms = self.generate_waveforms()

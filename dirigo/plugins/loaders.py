@@ -63,7 +63,7 @@ class RawRasterFrameLoader(Loader):
 
             self.frames_read = 0
 
-    def run(self):
+    def _work(self):
         try:
             with tifffile.TiffFile(self._file_path) as tif:   
                 

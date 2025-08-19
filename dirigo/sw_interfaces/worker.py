@@ -1,9 +1,11 @@
 from abc import ABC, abstractmethod
-import threading
-import queue
+import threading, queue
 from typing import Optional
 
 import numpy as np
+
+from dirigo.components.profiling import run_id_var, group_var, plugin_var, worker_var
+
 
 
 class EndOfStream(Exception):
@@ -55,7 +57,7 @@ class Product:
 class Worker(threading.Thread, ABC):
     Product = Product
 
-    def __init__(self, name: str = "Worker"):
+    def __init__(self, name: str = "worker"):
         """
         Sets up a worker Thread object with internal publisher-subscriber model.
 
@@ -73,10 +75,28 @@ class Worker(threading.Thread, ABC):
         # Pool for re-usable product objects
         self._product_pool = queue.Queue()
         self._product_shape: Optional[tuple[int, ...]] = None
+        self._product_dtype = None
+        
+        # Set context
+        self._dirigo_group: Optional[str] = None    # "acquisition"/"processor"/"logger"/"display"/"loader"
+        self._dirigo_plugin: Optional[str] = None   # entry point name, e.g. "raster_line"
+        self._dirigo_run_id: Optional[str] = None   # set by acquisitions; others inherit
+
+    def run(self):
+        # Final: subclasses should NOT shadow this method
+        run_id_var.set(self._dirigo_run_id) # type: ignore
+        group_var.set(self._dirigo_group) # type: ignore 
+        plugin_var.set(self._dirigo_plugin) # type: ignore
+        worker_var.set(self.name)  # type: ignore
+        try:
+            self._work()  # subclasses implement this
+        finally:
+            # optional: flush metrics/logs
+            pass
 
     @abstractmethod
-    def run(self):
-        pass
+    def _work(self):
+        ...
     
     def _init_product_pool(self, 
                            n: int, 
@@ -114,8 +134,11 @@ class Worker(threading.Thread, ABC):
 
     # Publisher-Subscriber model
     def add_subscriber(self, subscriber: 'Worker'):
-        """Add a reference to a new subscriber."""
+        """Add a reference to a new subscriber and inherit run ID if applicable."""
         self._subscribers.append(subscriber)
+
+        if getattr(self, "_dirigo_run_id", None):
+            subscriber._dirigo_run_id = self._dirigo_run_id
 
     def remove_subscriber(self, subscriber: 'Worker'):
         """Remove reference to a subscriber."""

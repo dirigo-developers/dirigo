@@ -90,7 +90,7 @@ class TiffLogger(Logger):
     def _receive_product(self) ->  AcquisitionProduct | ProcessorProduct:
         return super()._receive_product(self) # type: ignore
          
-    def run(self):
+    def _work(self):
         try:
             while True:
                 with self._receive_product() as product:
