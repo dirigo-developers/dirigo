@@ -82,7 +82,7 @@ def load_signal_offset(
     try:
         return np.loadtxt(path, delimiter=',', dtype=np.float64, skiprows=1)
     except FileNotFoundError:
-        return np.array(0)
+        return np.array([0])
 
 
 def load_line_gradient_calibration(

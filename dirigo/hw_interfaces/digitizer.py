@@ -3,9 +3,9 @@ from functools import cached_property
 from dataclasses import dataclass, asdict
 from pathlib import Path
 import math
-from typing import Literal, List, Optional, TYPE_CHECKING
+from typing import Literal, List, TYPE_CHECKING
 import tomllib
-from enum import Enum
+from enum import StrEnum, Enum
 
 from platformdirs import user_config_dir
 
@@ -35,25 +35,47 @@ Example configuration:
 [project.entry-points."dirigo_digitizers"]
 alazar = "dirigo_alazar:AlazarDigitizer"
 """
-# Questions: 
-# should we define a whole set of enumerations to be used with Dirigo?
-# Currently uses strings (and sets of strings)
-# Argument against: too many possibilities if we consider multiple vendors but 
-# certain concepts like AC/DC, external/internal may be OK
+
+
+# ---------- Digitizer enumerations ----------
+class SampleClockSource(StrEnum):
+    INTERNAL = "internal"
+    EXTERNAL = "external"
+
+class SampleClockEdge(StrEnum):
+    RISING  = "rising"
+    FALLING = "falling"
+
+class ChannelCoupling(StrEnum):
+    AC      = "ac"
+    DC      = "dc"
+    GROUND  = "ground"
+
+class TriggerSource(StrEnum):
+    INTERNAL = "internal"
+    EXTERNAL = "external"
+
+class TriggerSlope(StrEnum):
+    RISING  = "rising"
+    FALLING = "fall"
+
+class ExternalTriggerCoupling(StrEnum):
+    AC = "ac"
+    DC = "dc"
 
 
 @dataclass(frozen=True, slots=True)
 class SampleClockProfile:
-    source: str
+    source: SampleClockSource
     rate: units.SampleRate
-    edge: Literal["Rising", "Falling"] = "Rising"
+    edge: SampleClockEdge = SampleClockEdge.RISING
 
     @classmethod
     def from_dict(cls, d: dict) -> "SampleClockProfile":
         return cls(
-            source = d["source"],
+            source = SampleClockSource(d["source"]),
             rate = units.SampleRate(d["rate"]),
-            edge = d["edge"]
+            edge = SampleClockEdge(d["edge"])
         )
 
 
@@ -61,7 +83,7 @@ class SampleClockProfile:
 class ChannelProfile:
     enabled: bool
     inverted: bool
-    coupling: Literal["AC", "DC"]
+    coupling: ChannelCoupling
     impedance: units.Resistance
     range: units.VoltageRange
 
@@ -79,7 +101,7 @@ class ChannelProfile:
             channel = cls(
                 enabled=channel_profile["enabled"], 
                 inverted=channel_profile["inverted"],
-                coupling=channel_profile["coupling"], 
+                coupling=ChannelCoupling(channel_profile["coupling"]), 
                 impedance=units.Resistance(channel_profile["impedance"]), 
                 range=input_range
             )
@@ -89,20 +111,35 @@ class ChannelProfile:
 
 @dataclass(frozen=True, slots=True)
 class TriggerProfile:
-    source: str
-    slope: str
-    level: units.Voltage
-    external_range: str
-    external_coupling: Literal["AC", "DC"]
+    source: TriggerSource
+    slope: TriggerSlope
+    level: units.Voltage | None
+    external_range: units.VoltageRange | None
+    external_coupling: ExternalTriggerCoupling | None
 
     @classmethod
     def from_dict(cls, d: dict) -> "TriggerProfile":
+        if "level" in d.keys():
+            level = ExternalTriggerCoupling(d["level"])
+        else:
+            level = None
+
+        if "external_range" in d.keys():
+            external_range = units.VoltageRange(d["external_range"])
+        else:
+            external_range = None
+
+        if "external_coupling" in d.keys():
+            external_coupling = ExternalTriggerCoupling(d["external_coupling"])
+        else:
+            external_coupling = None
+
         return cls(
-            source = d["source"],
-            slope = d["slope"],
-            level = units.Voltage(d["level"]),
-            external_range = d["external_range"],
-            external_coupling = d["external_coupling"]
+            source = TriggerSource(d["source"]),
+            slope = TriggerSlope(d["slope"]),
+            level = level,
+            external_range = external_range,
+            external_coupling = external_coupling
         )
 
 
@@ -145,8 +182,6 @@ class Channel(ABC):
     def __init__(self, 
                  enabled: bool = False, 
                  inverted: bool = False):
-        super().__init__() # Is this needed?
-
         self.enabled = enabled
         self.inverted = inverted
 
@@ -187,13 +222,13 @@ class Channel(ABC):
 
     @property
     @abstractmethod
-    def coupling(self) -> str:
+    def coupling(self) -> ChannelCoupling:
         """Signal coupling mode (e.g., "AC", "DC")."""
         pass
 
     @coupling.setter
     @abstractmethod
-    def coupling(self, coupling: str):
+    def coupling(self, coupling: ChannelCoupling):
         """Set the signal coupling mode.
         
         Must match one of the options provided by `coupling_options`.
@@ -202,7 +237,7 @@ class Channel(ABC):
 
     @property
     @abstractmethod
-    def coupling_options(self) -> set[str]:
+    def coupling_options(self) -> set[ChannelCoupling]:
         """Set of available coupling modes."""
         pass
 
@@ -254,13 +289,13 @@ class SampleClock(ABC):
 
     @property
     @abstractmethod
-    def source(self) -> str:
+    def source(self) -> SampleClockSource:
         """Source of the sample clock (e.g., internal, external)."""
         pass
 
     @source.setter
     @abstractmethod
-    def source(self, source: str):
+    def source(self, source: SampleClockSource):
         """Set the source of the sample clock.
         
         Must match one of the options provided by `source_options`.
@@ -269,7 +304,7 @@ class SampleClock(ABC):
 
     @property
     @abstractmethod
-    def source_options(self) -> set[str]:
+    def source_options(self) -> set[SampleClockSource]:
         """Set of supported clock sources."""
         pass
 
@@ -290,13 +325,13 @@ class SampleClock(ABC):
 
     @property
     @abstractmethod
-    def edge(self) -> str:
+    def edge(self) -> SampleClockEdge:
         """Clock edge to use for sampling (e.g., rising, falling)."""
         pass
 
     @edge.setter
     @abstractmethod
-    def edge(self, edge: str):
+    def edge(self, edge: SampleClockEdge):
         """Set the clock edge for sampling.
         
         Must match one of the options provided by `edge_options`.
@@ -305,7 +340,7 @@ class SampleClock(ABC):
 
     @property
     @abstractmethod
-    def edge_options(self) -> set[str]:
+    def edge_options(self) -> set[SampleClockEdge]:
         """Set of supported clock edge options."""
         pass
     
@@ -645,7 +680,6 @@ class AuxiliaryIO(ABC):
             state (bool): The desired output state (True for high, False for low).
         """
         pass
-
 
 
 class Digitizer(HardwareInterface):

@@ -72,24 +72,21 @@ class Hardware:
         cfg = self._cfg.digitizer
         if cfg is None:
             raise NotConfiguredError("digitizer")
-        type_name = cfg.pop("type")
-        return self._load("dirigo_digitizers", type_name, **cfg)
+        return self._load("dirigo_digitizers", cfg["type"], **cfg)
     
     @cached_property
     def fast_raster_scanner(self) -> "FastRasterScanner":
         cfg = self._cfg.fast_raster_scanner
         if cfg is None:
             raise NotConfiguredError("fast raster scanner")
-        type_name = cfg.pop("type")
-        return self._load("dirigo_scanners", type_name, **cfg)
+        return self._load("dirigo_scanners", cfg["type"], **cfg)
 
     @cached_property
     def slow_raster_scanner(self) -> "SlowRasterScanner":
         cfg = self._cfg.slow_raster_scanner
         if cfg is None:
             raise NotConfiguredError("slow raster scanner")
-        type_name = cfg.pop("type")
-        return self._load("dirigo_scanners", type_name,
+        return self._load("dirigo_scanners", cfg["type"],
             fast_scanner=self.fast_raster_scanner, **cfg)
     
     @cached_property
@@ -97,24 +94,21 @@ class Hardware:
         cfg = self._cfg.objective_z_scanner
         if cfg is None:
             raise NotConfiguredError("objective z scanner")
-        type_name = cfg.pop("type")
-        return self._load("dirigo_scanners", type_name, **cfg)
+        return self._load("dirigo_scanners", cfg["type"], **cfg)
 
     @cached_property
     def stages(self) -> "MultiAxisStage":
         cfg = self._cfg.stages
         if cfg is None:
             raise NotConfiguredError("stages")
-        type_name = cfg.pop("type")
-        return self._load("dirigo_stages", type_name, **cfg)
+        return self._load("dirigo_stages", cfg["type"], **cfg)
     
     @cached_property
     def encoders(self) -> "MultiAxisLinearEncoder":
         cfg = self._cfg.encoders
         if cfg is None:
             raise NotConfiguredError("encoders")
-        type_name = cfg.pop("type")
-        return self._load("dirigo_encoders", type_name, **cfg)
+        return self._load("dirigo_encoders", cfg["type"], **cfg)
 
     @cached_property
     def detectors(self) -> DetectorSet[Detector]:
@@ -123,9 +117,8 @@ class Hardware:
             raise NotConfiguredError("detectors")
         dset = DetectorSet()
         for key, det_cfg in cfg.items():
-            type_name = det_cfg.pop("type")
             det = self._load("dirigo_detectors",
-                             type_name,
+                             det_cfg.pop("type"),
                              **det_cfg,
                              fast_scanner=self.fast_raster_scanner)
             dset.append(det)
@@ -136,16 +129,14 @@ class Hardware:
         cfg = self._cfg.frame_grabber
         if cfg is None:
             raise NotConfiguredError("frame grabber")
-        type_name = cfg.pop("type")
-        return self._load("dirigo_frame_grabbers", type_name, **cfg)
+        return self._load("dirigo_frame_grabbers", cfg["type"], **cfg)
     
     @cached_property
     def line_camera(self) -> "LineCamera": # this could just be camera
         cfg = self._cfg.line_camera
         if cfg is None:
             raise NotConfiguredError("line camera")
-        type_name = cfg.pop("type")
-        return self._load("dirigo_line_cameras", type_name, 
+        return self._load("dirigo_line_cameras", cfg["type"], 
             frame_grabber=self.frame_grabber, **cfg)
     
     @cached_property
@@ -153,15 +144,13 @@ class Hardware:
         cfg = self._cfg.illuminator
         if cfg is None:
             raise NotConfiguredError("illuminator")
-        type_name = cfg.pop("type")
-        return self._load("dirigo_illuminators", type_name, **cfg)
+        return self._load("dirigo_illuminators", cfg["type"], **cfg)
 
     @cached_property
     def laser_scanning_optics(self) -> LaserScanningOptics:
         cfg = self._cfg.laser_scanning_optics
         if cfg is None:
             raise NotConfiguredError("laser scanning optics")
-        #type_name = cfg.pop("type") TODO
         return LaserScanningOptics(**cfg)
 
     @cached_property
@@ -169,7 +158,6 @@ class Hardware:
         cfg = self._cfg.camera_optics
         if cfg is None:
             raise NotConfiguredError("camera optics")
-        # type_name = cfg.pop("type") TODO
         return CameraOptics(**cfg)
         
     # --- conveniences ---

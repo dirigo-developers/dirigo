@@ -1,8 +1,6 @@
 from pathlib import Path
-import threading
-import math
-import time
-from typing import Optional, Type
+import threading, math, time
+from typing import Type
 from functools import cached_property
 from dataclasses import dataclass, asdict
 
@@ -11,11 +9,13 @@ import numpy as np
 
 from dirigo.components import units, io
 from dirigo.components.profiling import timer
-from dirigo.sw_interfaces.worker import EndOfStream, Product
+from dirigo.components.hardware import NotConfiguredError
 from dirigo.hw_interfaces.hw_interface import NoBuffers
 from dirigo.sw_interfaces.acquisition import Acquisition, AcquisitionSpec, AcquisitionProduct
 from dirigo.hw_interfaces.detector import DetectorSet, Detector
-from dirigo.hw_interfaces.digitizer import Digitizer, DigitizerProfile, AuxiliaryIOEnums
+from dirigo.hw_interfaces.digitizer import (
+    Digitizer, DigitizerProfile, AuxiliaryIOEnums, SampleClockSource
+)
 from dirigo.hw_interfaces.scanner import (
     FastRasterScanner, SlowRasterScanner, GalvoScanner, ResonantScanner,
     ObjectiveZScanner
@@ -39,7 +39,7 @@ class LineAcquisitionRuntimeInfo:
     scanner_amplitude: units.Angle
     digitizer_bit_depth: int
     digitizer_trigger_delay: int
-    stage_scanner_angle: Optional[units.Angle] = None
+    stage_scanner_angle: units.Angle | None = None
 
     @classmethod
     def from_acquisition(cls, acquisition: "LineAcquisition"):
@@ -67,7 +67,7 @@ class LineAcquisitionRuntimeInfo:
 @dataclass
 class CameraAcquisitionRuntimeInfo:
     camera_bit_depth: int
-    frame_grabber_bytes_per_pixel: Optional[int] = None
+    frame_grabber_bytes_per_pixel: int | None = None
 
     @classmethod
     def from_acquisition(cls, acq: "LineCameraAcquisition"):
@@ -348,7 +348,7 @@ class LineAcquisitionSpec(SampleAcquisitionSpec):
         pixel_size: units.Position | str,
         lines_per_buffer: int,
         bidirectional_scanning: bool = False,
-        pixel_time: Optional[str] = None, # e.g. "1 μs"
+        pixel_time: str | None = None, # e.g. "1 μs"
         fill_fraction: float = 1.0,
         **kwargs
     ):
@@ -424,36 +424,36 @@ class LineAcquisition(SampleAcquisition):
         self.spec: LineAcquisitionSpec # to refine type hints  
 
         # for brevity
-        scanner = self.hw.fast_raster_scanner
+        fast_scanner = self.hw.fast_raster_scanner
         optics = self.hw.laser_scanning_optics
         digi = self.hw.digitizer
        
-        if digi.sample_clock.rate is None:
-            # if sample rate is not set, set it based on pixel dwell time
+        if digi.sample_clock.rate is None:          # TODO, is this still used?
+            # if sample rate not set, set it based on pixel dwell time
             digi.sample_clock.rate = units.SampleRate(1 / spec.pixel_time)
 
         # If using galvo scanner, then set it up based on acquisition spec parameters
-        if isinstance(scanner, GalvoScanner):
-            scanner.amplitude = optics.object_position_to_scan_angle(
+        if isinstance(fast_scanner, GalvoScanner):
+            if self.spec.pixel_time is None:
+                raise ValueError("Specification must define a pixel (dwell) time.")
+            
+            fast_scanner.amplitude = optics.object_position_to_scan_angle(
                 self.spec.line_width,
-                axis="fast"
             )
 
             # Fast axis period should be multiple of digitizer sample resolution
-            assert self.spec.pixel_time is not None
             T_exact = self.spec.pixel_time * self.spec.pixels_per_line / self.spec.fill_fraction
-            dt = units.Time(
-                digi.acquire.record_length_resolution / digi.sample_clock.rate
-            )
+            dt = units.Time(digi.acquire.record_length_resolution 
+                            / digi.sample_clock.rate)
             T_rounded = round(T_exact / dt) * dt
-            scanner.frequency = 1 / T_rounded 
-            scanner.waveform = "asymmetric triangle"
-            scanner.duty_cycle = self.spec.fill_fraction # TODO set duty cycle to 50% if doing bidi
+            fast_scanner.frequency = 1 / T_rounded 
+            fast_scanner.waveform = "asymmetric triangle"
+            fast_scanner.duty_cycle = self.spec.fill_fraction # TODO set duty cycle to 50% if doing bidi
         
-        elif isinstance(scanner, ResonantScanner):
+        elif isinstance(fast_scanner, ResonantScanner):
             # for res scanner: fixed: frequency, waveform, duty cycle; 
             # adjustable: amplitude
-            scanner.amplitude = optics.object_position_to_scan_angle(
+            fast_scanner.amplitude = optics.object_position_to_scan_angle(
                 self.spec.extended_scan_width,
             )
             digi.aux_io.configure_mode(AuxiliaryIOEnums.OutTrigger)
@@ -493,9 +493,11 @@ class LineAcquisition(SampleAcquisition):
 
         elif isinstance(self.hw.fast_raster_scanner, GalvoScanner):
             if digi._mode == "analog": # type: ignore #TODO fix this
+                if digi.sample_clock.source == SampleClockSource.INTERNAL:
+                    clock_channel = None # configures digitizer to use internal clock
                 self.hw.fast_raster_scanner.start(
                     input_sample_rate=digi.sample_clock.rate,
-                    input_sample_clock_channel=digi.sample_clock.source,
+                    input_sample_clock_channel=clock_channel,
                     pixels_per_period=self.spec.pixels_per_line,
                     periods_per_write=self.spec.records_per_buffer
                 )
@@ -522,9 +524,12 @@ class LineAcquisition(SampleAcquisition):
                 with timer("get_next_completed_buffer"):
                     digi.acquire.get_next_completed_buffer(acq_product)
 
-                if self.hw.stages or self.hw.objective_z_scanner:
-                    with timer("read_positions"):
-                        acq_product.positions = self.read_positions()
+                try:
+                    if self.hw.stages or self.hw.objective_z_scanner:
+                        with timer("read_positions"):
+                            acq_product.positions = self.read_positions()
+                except NotConfiguredError:
+                    pass
 
                 self._publish(acq_product)
 
@@ -597,8 +602,8 @@ class LineAcquisition(SampleAcquisition):
         scanner_info = self.system_config.fast_raster_scanner
         digitizer_rate = self.digitizer_profile.sample_clock.rate
 
-        nominal_period = units.Time(1 / units.Frequency(scanner_info['frequency']))
         if 'resonant' in scanner_info['type']:
+            nominal_period = units.Time(1 / units.Frequency(scanner_info['frequency']))
             shortest_period = nominal_period / 1.005 # TODO set max frequency error
 
             if self.spec.bidirectional_scanning:
@@ -608,9 +613,13 @@ class LineAcquisition(SampleAcquisition):
                 record_duration = shortest_period / 2
                 record_length = record_duration * digitizer_rate
 
-        elif isinstance(self.hw.fast_raster_scanner, GalvoScanner):
+        elif 'galvo' in scanner_info['type']:
+            nominal_period = units.Time(1 / self.hw.fast_raster_scanner.frequency)
             # For galvo-galvo scanning, we record 100% of time including flyback
             record_length = nominal_period * digitizer_rate
+
+        else:
+            raise RuntimeError("Unsupported fast axis scanner.")
         
         # Round record length up to the nearest allowable size (or the min)
         rlr = self.hw.digitizer.acquire.record_length_resolution
@@ -786,7 +795,7 @@ class FrameAcquisition(LineAcquisition):
             periods_per_frame=self.spec.records_per_buffer
         )
 
-        super()._work() # The hard work is done by super's run method
+        super()._work() # The hard work is done by super's _work() method
 
     def cleanup(self):
         """Extends LineAcquisition's cleanup method to stop both slow axis and fast"""

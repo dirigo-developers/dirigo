@@ -3,7 +3,7 @@ from functools import cached_property
 
 import numpy as np
 from numpy.polynomial.polynomial import Polynomial
-from numba import njit, prange, uint8, int16, uint16, int32, int64, float32, complex64
+from numba import njit, prange, types, uint8, int16, uint16, int32, int64, float32, complex64
 from scipy import fft
 
 from dirigo.components import units, io
@@ -19,13 +19,16 @@ from dirigo.plugins.acquisitions import (
 
 
 TWO_PI = 2 * np.pi
+uint8_3d_readonly = types.Array(types.uint8, 3, 'C', readonly=True)
+int16_3d_readonly = types.Array(types.int16, 3, 'C', readonly=True)
+uint16_3d_readonly = types.Array(types.uint16, 3, 'C', readonly=True)
 
 # ---------- Raster Frame Processor ----------
 sigs = [
     #buffer_data    invert_mask  offset    bit_shift  gradient     resampled (out)  start_indices  nsamples_to_sum
-    (uint8[:,:,:],  int16[:],    int16[:], int32,     float32[:],  int16[:,:,:],   int32[:,:],    int32[:,:]),
-    (int16[:,:,:],  int16[:],    int16[:], int32,     float32[:],  int16[:,:,:],   int32[:,:],    int32[:,:]),
-    (uint16[:,:,:], int16[:],    int16[:], int32,     float32[:],  int16[:,:,:],   int32[:,:],    int32[:,:])
+    (uint8_3d_readonly,  int16[:],    int16[:], int32,     float32[:],  int16[:,:,:],   int32[:,:],    int32[:,:]),
+    (int16_3d_readonly,  int16[:],    int16[:], int32,     float32[:],  int16[:,:,:],   int32[:,:],    int32[:,:]),
+    (uint16_3d_readonly, int16[:],    int16[:], int32,     float32[:],  int16[:,:,:],   int32[:,:],    int32[:,:])
 ]
 @njit(sigs, parallel=True, fastmath=True, nogil=True, cache=True)
 def resample_kernel(raw_data: np.ndarray, 
@@ -275,9 +278,11 @@ class RasterFrameProcessor(Processor[Acquisition]):
             )
         processed.timestamps = acq_product.timestamps
         processed.positions = acq_product.positions
-        processed.phase = TWO_PI * self._trigger_error \
+        
+        if hasattr(self, "_fast_scanner_frequency"):
+            processed.phase = TWO_PI * self._trigger_error \
             / (self._acquisition.digitizer_profile.sample_clock.rate * avg_trig_period)
-        processed.frequency = float(self._fast_scanner_frequency)
+            processed.frequency = float(self._fast_scanner_frequency)
         
         return processed
 
@@ -372,7 +377,10 @@ class RasterFrameProcessor(Processor[Acquisition]):
         """
         The exact number of digitizer samples per fast raster scanner period.
         """
-        return float(self._sample_clock_rate / self._fast_scanner_frequency)
+        if hasattr(self, "_fast_scanner_frequency"):
+            return float(self._sample_clock_rate / self._fast_scanner_frequency)
+        else:
+            return self._acquisition.product_shape[1]
     
     @property
     def data_range(self):
