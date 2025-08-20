@@ -71,7 +71,7 @@ class AcquisitionWorker(Worker):
         self._dirigo_run_id = str(uuid.uuid4())
 
     def _get_free_product(self) -> AcquisitionProduct:
-        return self._product_pool.get()
+        return super()._get_free_product()
 
 
 class Acquisition(AcquisitionWorker):

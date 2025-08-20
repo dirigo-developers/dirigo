@@ -558,7 +558,8 @@ class NIAcquire(digitizer.Acquire):
                     physical_channel=channel.channel_name,
                     min_val=channel.range.min,
                     max_val=channel.range.max,
-                ) 
+                )
+                ai_channel.ai_coupling = channel._coupling # _coupling has the NI enumeration; coupling has Dirigo enumeration
                 if self._device.product_category == ProductCategory.X_SERIES_DAQ:
                     ai_channel.ai_term_cfg = TerminalConfiguration.RSE
                 elif self._device.product_category == ProductCategory.S_SERIES_DAQ:
@@ -658,15 +659,6 @@ class NIAcquire(digitizer.Acquire):
                 data=self._prealloc,
                 number_of_samples_per_channel=Ny*Ns
             )
-
-            # # Invert channels if necessary (TODO, may be slightly faster to broadcast multiply a +/-1 vector)
-            # for i, invert in enumerate(self._inverted_channels):
-            #     if invert:
-            #         data[i,:] = -data[i,:] 
-
-            # The buffer dimensions need to be reordered for further processing
-            # data.shape = (self.n_channels_enabled, self.records_per_buffer, self.record_length)
-            # data = np.transpose(data, axes=(1,2,0)) # Move channels dimension from major to minor (ie interleaved)
             acq_product.data[...] = np.moveaxis(self._prealloc.reshape(Nc, Ny, Ns), 0, -1)
 
         else: # Edge counting mode
