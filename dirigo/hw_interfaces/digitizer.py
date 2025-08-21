@@ -52,8 +52,13 @@ class ChannelCoupling(StrEnum):
     GROUND  = "ground"
 
 class TriggerSource(StrEnum):
-    INTERNAL = "internal"
-    EXTERNAL = "external"
+    INTERNAL  = "internal"
+    EXTERNAL  = "external"
+    CHANNEL_A = "channel_a"
+    CHANNEL_B = "channel_b"
+    CHANNEL_C = "channel_c"
+    CHANNEL_D = "channel_d"
+    # could do more ...
 
 class TriggerSlope(StrEnum):
     RISING  = "rising"
@@ -62,6 +67,10 @@ class TriggerSlope(StrEnum):
 class ExternalTriggerCoupling(StrEnum):
     AC = "ac"
     DC = "dc"
+
+class ExternalTriggerRange(StrEnum):
+    TTL = "ttl"
+    # True voltage ranges should use the units.VoltageRange class
 
 
 @dataclass(frozen=True, slots=True)
@@ -73,9 +82,9 @@ class SampleClockProfile:
     @classmethod
     def from_dict(cls, d: dict) -> "SampleClockProfile":
         return cls(
-            source = SampleClockSource(d["source"]),
+            source = SampleClockSource(d["source"].lower()),
             rate = units.SampleRate(d["rate"]),
-            edge = SampleClockEdge(d["edge"])
+            edge = SampleClockEdge(d["edge"].lower())
         )
 
 
@@ -101,7 +110,7 @@ class ChannelProfile:
             channel = cls(
                 enabled=channel_profile["enabled"], 
                 inverted=channel_profile["inverted"],
-                coupling=ChannelCoupling(channel_profile["coupling"]), 
+                coupling=ChannelCoupling(channel_profile["coupling"].lower()), 
                 impedance=units.Resistance(channel_profile["impedance"]), 
                 range=input_range
             )
@@ -114,29 +123,32 @@ class TriggerProfile:
     source: TriggerSource
     slope: TriggerSlope
     level: units.Voltage | None
-    external_range: units.VoltageRange | None
+    external_range: units.VoltageRange | ExternalTriggerRange | None
     external_coupling: ExternalTriggerCoupling | None
 
     @classmethod
     def from_dict(cls, d: dict) -> "TriggerProfile":
         if "level" in d.keys():
-            level = ExternalTriggerCoupling(d["level"])
+            level = units.Voltage(d["level"])
         else:
             level = None
 
         if "external_range" in d.keys():
-            external_range = units.VoltageRange(d["external_range"])
+            try:
+                external_range = ExternalTriggerRange(d["external_range"].lower())
+            except: 
+                external_range = units.VoltageRange(d["external_range"])
         else:
             external_range = None
 
         if "external_coupling" in d.keys():
-            external_coupling = ExternalTriggerCoupling(d["external_coupling"])
+            external_coupling = ExternalTriggerCoupling(d["external_coupling"].lower())
         else:
             external_coupling = None
 
         return cls(
-            source = TriggerSource(d["source"]),
-            slope = TriggerSlope(d["slope"]),
+            source = TriggerSource(d["source"].lower()),
+            slope = TriggerSlope(d["slope"].lower()),
             level = level,
             external_range = external_range,
             external_coupling = external_coupling
@@ -194,7 +206,7 @@ class Channel(ABC):
     def enabled(self, enable: bool):
         """Enable or disable the channel."""
         if not isinstance(enable, bool):
-            raise ValueError("`inverted` must be set with a boolean")
+            raise ValueError("`enabled` must be set with a boolean")
         self._enabled = enable
 
     @property
@@ -410,13 +422,13 @@ class Trigger(ABC):
 
     @property
     @abstractmethod
-    def external_coupling(self) -> str:
+    def external_coupling(self) -> ExternalTriggerCoupling:
         """Coupling mode for external trigger sources."""
         pass
     
     @external_coupling.setter
     @abstractmethod
-    def external_coupling(self, coupling: str):
+    def external_coupling(self, coupling: ExternalTriggerCoupling):
         """Set the coupling mode for external triggers.
         
         Must match one of the options provided by `external_coupling_options`.
@@ -425,19 +437,19 @@ class Trigger(ABC):
 
     @property
     @abstractmethod
-    def external_coupling_options(self) -> set[str]:
+    def external_coupling_options(self) -> set[ExternalTriggerCoupling]:
         """Set of available external coupling modes."""
         pass
 
     @property
     @abstractmethod
-    def external_range(self) -> str: # return dirigo.VoltageRange?
+    def external_range(self) -> units.VoltageRange | ExternalTriggerRange: # return dirigo.VoltageRange?
         """Voltage range for external triggers."""
         pass
     
     @external_range.setter
     @abstractmethod
-    def external_range(self, range: str):
+    def external_range(self, range: units.VoltageRange | ExternalTriggerRange):
         """Set the voltage range for external triggers.
         
         Must match one of the options provided by `external_range_options`.
@@ -446,7 +458,7 @@ class Trigger(ABC):
 
     @property
     @abstractmethod
-    def external_range_options(self) -> set[str]:
+    def external_range_options(self) -> set[units.VoltageRange | ExternalTriggerRange]:
         """Set of available external trigger voltage ranges."""
         pass
 
@@ -715,11 +727,13 @@ class Digitizer(HardwareInterface):
             channel.impedance = channel_profile.impedance
             channel.range = channel_profile.range
 
-        self.trigger.external_range = self.profile.trigger.external_range
-        self.trigger.external_coupling = self.profile.trigger.external_coupling
+        if self.profile.trigger.external_range and self.profile.trigger.external_coupling:
+            self.trigger.external_range = self.profile.trigger.external_range
+            self.trigger.external_coupling = self.profile.trigger.external_coupling
         self.trigger.source = self.profile.trigger.source
         self.trigger.slope = self.profile.trigger.slope
-        self.trigger.level = self.profile.trigger.level
+        if self.profile.trigger.level:
+            self.trigger.level = self.profile.trigger.level
 
     @property
     @abstractmethod
