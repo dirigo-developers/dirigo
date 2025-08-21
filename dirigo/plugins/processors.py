@@ -3,7 +3,7 @@ from functools import cached_property
 
 import numpy as np
 from numpy.polynomial.polynomial import Polynomial
-from numba import njit, prange, types, uint8, int16, uint16, int32, int64, float32, complex64
+from numba import njit, prange, types, int16, uint16, int32, int64, float32, complex64
 from scipy import fft
 
 from dirigo.components import units, io
@@ -19,6 +19,7 @@ from dirigo.plugins.acquisitions import (
 
 
 TWO_PI = 2 * np.pi
+
 uint8_3d_readonly = types.Array(types.uint8, 3, 'C', readonly=True)
 int16_3d_readonly = types.Array(types.int16, 3, 'C', readonly=True)
 uint16_3d_readonly = types.Array(types.uint16, 3, 'C', readonly=True)
@@ -85,20 +86,22 @@ def resample_kernel(raw_data: np.ndarray,
 
 
 sigs = [
-    float32[:,:](uint16[:,:,:], int64, int64, float32),
-    float32[:,:](int16[:,:,:],  int64, int64, float32)
+#    data                trigger delay  samples_per_period  cropped
+    (uint16_3d_readonly, int64,         float32,            float32[:,:]),
+    (int16_3d_readonly,  int64,         float32,            float32[:,:])
 ]
 @njit(sigs, nogil=True, parallel=True, fastmath=True, cache=True)
-def crop_bidi_data(data: np.ndarray, lines_per_frame: int, trigger_delay: int, samples_per_period: float):
+def crop_bidi_data(data: np.ndarray,
+                   trigger_delay: int,
+                   samples_per_period: float, # exact number of samples per fast axis period (can be noninteger)
+                   cropped: np.ndarray):
     """
-    Select ranages, flips the reverse scan, and converts to float32 for phase
+    Select ranges, flips the reverse scan, and converts to float32 for phase
     correlation.
 
     Note: operates on channel 0 only.
     """
-
-    # Largest power of two window
-    n = 2**int(np.log2(samples_per_period/2 - 2*trigger_delay))
+    lines_per_frame, n = cropped.shape
 
     # Find the nominal midpoints and endpoints of fwd and rvs scans
     mid_fwd = samples_per_period/4
@@ -109,14 +112,9 @@ def crop_bidi_data(data: np.ndarray, lines_per_frame: int, trigger_delay: int, s
     rvs0 = int(mid_rvs) - n//2 - trigger_delay
     rvs1 = int(mid_rvs) + n//2 - trigger_delay
 
-    # Make fp32 output array
-    out_array = np.zeros((lines_per_frame, n), dtype=np.float32)
-
     for rec in prange(lines_per_frame//2):
-        out_array[2*rec, :] = data[rec, fwd0:fwd1, 0].astype(np.float32)
-        out_array[2*rec+1, :] = data[rec, rvs1:rvs0:-1, 0].astype(np.float32) # flipped with the slicing
-
-    return out_array
+        cropped[2*rec, :] = data[rec, fwd0:fwd1, 0].astype(np.float32)
+        cropped[2*rec+1, :] = data[rec, rvs1:rvs0:-1, 0].astype(np.float32) # flipped with the slicing
         
 
 @njit(
@@ -195,6 +193,8 @@ class RasterFrameProcessor(Processor[Acquisition]):
             self._trigger_error = delay * self._sample_clock_rate
             
         elif "resonant" in system_config.fast_raster_scanner['type'].lower():
+            # Set a preliminary fast axis frequency
+            self._fast_scanner_frequency = units.Frequency(system_config.fast_raster_scanner['frequency'])
             try:
                 # anticipate correct phase delay from calibration table
                 self._initial_trigger_error = self.calibrated_trigger_delay(
@@ -206,6 +206,11 @@ class RasterFrameProcessor(Processor[Acquisition]):
                 # Calibration could not be loaded, don't use
                 self._initial_trigger_error = None
                 self._trigger_error = 0
+
+            # Preallocate a cropping buffer for bidi acquisitions
+            lines_per_frame = self.processed_shape[0]
+            n = 2**int(np.log2(self.samples_per_period/2 - 2*self._fixed_trigger_delay))
+            self._cropped = np.zeros((lines_per_frame, n), dtype=np.float32) # preallocate
         
         try:
             ampl = runtime_info.scanner_amplitude
@@ -335,18 +340,18 @@ class RasterFrameProcessor(Processor[Acquisition]):
         """
         UPSAMPLE = 2        # TODO move this somewhere else
         PHASE_MAX = 320
-        
-        data_window = crop_bidi_data(
-            data=data, 
-            lines_per_frame=self.processed_shape[0], 
-            trigger_delay=self._fixed_trigger_delay, 
-            samples_per_period=self.samples_per_period
-        )                                         # TODO preallocate data_window
 
-        F = fft.rfft(data_window, axis=1, workers=4)
+        crop_bidi_data(
+            data =                  data, 
+            trigger_delay =         self._fixed_trigger_delay, 
+            samples_per_period =    self.samples_per_period,
+            cropped =               self._cropped
+        )
+
+        F = fft.rfft(self._cropped, axis=1, workers=4)
         xps = compute_cross_power_spectrum(F)
 
-        n = data_window.shape[1] * UPSAMPLE
+        n = self._cropped.shape[1] * UPSAMPLE
         corr = np.abs(fft.irfft(xps, n))
 
         shift = float(np.argmax(corr))
