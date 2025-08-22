@@ -480,7 +480,8 @@ class LineAcquisition(SampleAcquisition):
             digi.acquire.record_length,
             digi.acquire.n_channels_enabled
         )
-        self._init_product_pool(n=4, shape=shape, dtype=np.int16)
+        dtype = np.int8 if self.hw.digitizer.bit_depth <= 8 else np.int16
+        self._init_product_pool(n=4, shape=shape, dtype=dtype)
 
         # Start scanner & digitizer
         if isinstance(self.hw.fast_raster_scanner, ResonantScanner):
@@ -583,7 +584,7 @@ class LineAcquisition(SampleAcquisition):
         """
 
         if self.spec.bidirectional_scanning:
-            start_index = 128 # should be half the trigger re-arm time TODO, get actual rearm time
+            start_index = 256 # should be half the trigger re-arm time TODO, get actual rearm time
         else:
             start_index = 0  
 
@@ -608,7 +609,7 @@ class LineAcquisition(SampleAcquisition):
 
             if self.spec.bidirectional_scanning:
                 record_duration = shortest_period
-                record_length = record_duration * digitizer_rate - 256 # TODO, get actual rearm time
+                record_length = record_duration * digitizer_rate - 512 # TODO, get actual rearm time
             else:
                 record_duration = shortest_period / 2
                 record_length = record_duration * digitizer_rate

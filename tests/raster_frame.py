@@ -1,7 +1,7 @@
 from dirigo.main import Dirigo
 
 
-save_raw = False
+save_raw = True
 
 
 diri = Dirigo()
@@ -17,7 +17,8 @@ display = diri.make_display_processor(
     color_vector_names      = ["green", "magenta"],
     transfer_function_name  = "gamma"
 )
-logger = diri.make_logger("tiff", upstream=processor)
+if not save_raw:
+    logger = diri.make_logger("tiff", upstream=processor)
 
 acquisition.start()
 acquisition.join(timeout=100.0)

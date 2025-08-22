@@ -164,9 +164,13 @@ class DigitizerProfile:
     
     def to_dict(self):
         d = asdict(self)
+        
         # replace VoltageRange objects with simple dictionary for serialization
         for channel in d["channels"]:
             channel["range"] = channel["range"].to_dict()
+        if isinstance(d["trigger"]["external_range"], units.VoltageRange):
+            d["trigger"]["external_range"] = d["trigger"]["external_range"].to_dict()
+
         return d
      
     @classmethod
