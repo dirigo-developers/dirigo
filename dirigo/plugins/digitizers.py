@@ -286,12 +286,10 @@ class NISampleClock(digitizer.SampleClock):
         """
         NI boards generally support a continuous range up to some max.
         If you want to provide a discrete set, adapt. 
-        For demonstration, we show 'continuous range' by returning None 
-        or a wide range object.
         """
         if self._mode == "analog":
             if self._device.product_category == ProductCategory.X_SERIES_DAQ:
-                # For X-series analog sampling, sample rate needs to be within the aggregrate sample rate
+                # For X-series analog sampling, sample rate is dependent on number of channels enabled
                 nchannels_enabled = sum([channel.enabled for channel in self._channels])
                 return units.SampleRateRange(
                     min=get_min_ai_rate(self._device), 

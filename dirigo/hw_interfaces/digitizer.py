@@ -720,13 +720,17 @@ class Digitizer(HardwareInterface):
         """
         profile_path = self.PROFILE_LOCATION / (profile_name + ".toml")
         self.profile = DigitizerProfile.from_toml(profile_path)
+
+        for channel, channel_profile in zip(self.channels, self.profile.channels):
+            channel.enabled = channel_profile.enabled
+            # NI X-series requires # channels enabled to check max (aggregate) sample rate
         
         self.sample_clock.source = self.profile.sample_clock.source
         self.sample_clock.rate = self.profile.sample_clock.rate
         self.sample_clock.edge = self.profile.sample_clock.edge
 
         for channel, channel_profile in zip(self.channels, self.profile.channels):
-            channel.enabled = channel_profile.enabled
+            #channel.enabled = channel_profile.enabled
             channel.coupling = channel_profile.coupling
             channel.impedance = channel_profile.impedance
             channel.range = channel_profile.range
