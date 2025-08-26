@@ -228,9 +228,9 @@ class NISampleClock(digitizer.SampleClock):
 
         # Check the type of Channels to infer mode
         if isinstance(self._channels[0], NIAnalogChannel):
-            self._mode = "analog"
+            self._mode = digitizer.InputMode.ANALOG
         else:
-            self._mode = "edge counting"
+            self._mode = digitizer.InputMode.EDGE_COUNTING
 
         self._source = None
         self._rate = None 
@@ -302,7 +302,7 @@ class NISampleClock(digitizer.SampleClock):
                     max=get_max_ai_rate(self._device)
                 )
         else:
-            # For edge counting, sample rate needs to just be within valid AO range
+            # For edge counting, rate must be in AO rate range (which will be sample/pixel clock)
             return units.SampleRateRange(
                 min=get_min_ao_rate(self._device), 
                 max=get_max_ao_rate(self._device)
@@ -532,7 +532,7 @@ class NIAcquire(digitizer.Acquire):
         if self._started:
             return  # Already started
         
-        if self._sample_clock.edge == "rising":
+        if self._sample_clock.edge == digitizer.SampleClockEdge.RISING:
             edge = Edge.RISING 
         else:
             edge = Edge.FALLING
@@ -544,7 +544,7 @@ class NIAcquire(digitizer.Acquire):
             sample_mode = AcquisitionType.CONTINUOUS
             samples_per_chan = 2 * self.records_per_buffer * self.record_length 
 
-        if self._mode == "analog":
+        if self._mode == digitizer.InputMode.ANALOG:
 
             self._task = nidaqmx.Task("Analog input")
 
@@ -601,7 +601,7 @@ class NIAcquire(digitizer.Acquire):
                 ci_chan.ci_count_edges_term = channel.channel_name
 
                 # Configure the sample clock
-                if self._sample_clock.source is None:
+                if self._sample_clock.source is digitizer.SampleClockSource.INTERNAL:
                     source = "/" + self._device.name + "/ao/SampleClock"
                 else:
                     source = self._sample_clock.source
@@ -611,7 +611,7 @@ class NIAcquire(digitizer.Acquire):
                     source=source,
                     active_edge=edge,
                     sample_mode=sample_mode,
-                    samps_per_chan=samples_per_chan*4 # TODO not sure about 2x?
+                    samps_per_chan=samples_per_chan*4 # TODO not sure about 4x?
                 )
 
                 reader = CounterReader(task.in_stream)
@@ -620,8 +620,8 @@ class NIAcquire(digitizer.Acquire):
                 self._readers.append(reader)
 
             self._last_samples = np.zeros(
-                shape=(1, self.n_channels_enabled),
-                dtype=np.uint32
+                shape = (1, self.n_channels_enabled),
+                dtype = np.uint32
             )
 
         self._inverted_vector = np.array(
@@ -630,7 +630,7 @@ class NIAcquire(digitizer.Acquire):
         )
 
         # Start the task(s)
-        if self._mode == "analog":
+        if self._mode == digitizer.InputMode.ANALOG:
             self._task.start()
         else:
             for task in self._tasks:
@@ -670,20 +670,18 @@ class NIAcquire(digitizer.Acquire):
             )
             
             for i, reader in enumerate(self._readers):
-                t0 = time.perf_counter()
                 reader.read_many_sample_uint32(
                     data=data_single_channel,
                     number_of_samples_per_channel=nsamples
                 )
-                t1 = time.perf_counter()
                 data_multiple_channels[1:,i] = data_single_channel
-                print(f'Read {nsamples} samples. Waited {t1-t0}')
 
             # Difference along the samples dim and reorder dims for further processing
-            data_multiple_channels[0,:] = self._last_samples
+            data_multiple_channels[0,:] = self._last_samples # place the last frame's final count
             data = np.diff(data_multiple_channels, axis=0).astype(np.uint16)
             self._last_samples = data_multiple_channels[-1,:]
             data.shape = (self.records_per_buffer, self.record_length, self.n_channels_enabled)
+            acq_product.data[...] = data
 
         self._buffers_acquired += 1
 
@@ -738,24 +736,17 @@ class NIDigitizer(digitizer.Digitizer):
         self._device = get_device(device_name)
 
         # Get channel names from default profile 
-        # (NI cards have lots of AI channels, so avoid instantiating all of them)
         profile = load_toml(self.PROFILE_LOCATION / "default.toml")
         channel_names: list[str] = [c["channel"] for c in profile["channels"]]
 
-        # Infer mode from profile->channels->channels
+        # Infer channel input mode from profile->channels->channels
         if channel_names[0].split('/')[-1][:2] == "ai":
-            # if the last two characters of channel names = "ai" then we are using analog mode
-            self._mode = "analog"
+            # if characters of channel names = "ai" then we are using analog mode
+            self._mode = digitizer.InputMode.ANALOG
+            self.channels = [NIAnalogChannel(self._device, chan) for chan in channel_names]
         else:
-            self._mode = "edge counting"
-
-        # Create channel objects
-        if self._mode == "analog":
-            self.channels = \
-                [NIAnalogChannel(self._device, chan) for chan in channel_names]
-        else:
-            self.channels = \
-                [NICounterChannel(self._device, chan) for chan in channel_names]
+            self._mode = digitizer.InputMode.EDGE_COUNTING
+            self.channels = [NICounterChannel(self._device, chan) for chan in channel_names]
 
         # Create sample clock
         self.sample_clock = NISampleClock(self._device, self.channels)

@@ -81,9 +81,10 @@ class SampleClockProfile:
 
     @classmethod
     def from_dict(cls, d: dict) -> "SampleClockProfile":
+        rate = units.SampleRate(d["rate"]) if d.get("rate") is not None else None
         return cls(
             source = SampleClockSource(d["source"].lower()),
-            rate = units.SampleRate(d["rate"]),
+            rate = rate,
             edge = SampleClockEdge(d["edge"].lower())
         )
 
@@ -100,18 +101,27 @@ class ChannelProfile:
     def from_dict(cls, channel_profile_list: List[dict]) -> List["ChannelProfile"]:
         channel_list = []
         for channel_profile in channel_profile_list:
-            input_range = channel_profile["range"]
+            coupling = channel_profile.get("coupling")
+            if coupling is not None: 
+                coupling = ChannelCoupling(channel_profile["coupling"].lower()) 
+
+            impedance = channel_profile.get("impedance")
+            if impedance is not None: 
+                impedance = units.Resistance(channel_profile["impedance"]) 
+
+            input_range = channel_profile.get("range")
             if isinstance(input_range, dict):
                 # if dictionary with min, max keys
                 input_range = units.VoltageRange(**input_range)
-            else:
+            elif isinstance(input_range, str):
                 # if coming from toml file and using plus/minus, eg "±2 V"
                 input_range = units.VoltageRange(input_range)
+
             channel = cls(
                 enabled=channel_profile["enabled"], 
-                inverted=channel_profile["inverted"],
-                coupling=ChannelCoupling(channel_profile["coupling"].lower()), 
-                impedance=units.Resistance(channel_profile["impedance"]), 
+                inverted=channel_profile.get("inverted", False),
+                coupling=coupling, 
+                impedance=impedance, 
                 range=input_range
             )
             channel_list.append(channel)
@@ -167,7 +177,10 @@ class DigitizerProfile:
         
         # replace VoltageRange objects with simple dictionary for serialization
         for channel in d["channels"]:
-            channel["range"] = channel["range"].to_dict()
+            try:
+                channel["range"] = channel["range"].to_dict()
+            except AttributeError: # None type
+                pass
         if isinstance(d["trigger"]["external_range"], units.VoltageRange):
             d["trigger"]["external_range"] = d["trigger"]["external_range"].to_dict()
 
@@ -191,6 +204,11 @@ class DigitizerProfile:
             data = tomllib.load(fh)
 
         return cls.from_dict(data)
+
+
+class InputMode(StrEnum):
+    ANALOG =        "analog"
+    EDGE_COUNTING = "edge counting"
 
 
 class Channel(ABC):

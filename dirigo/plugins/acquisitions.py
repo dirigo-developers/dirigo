@@ -14,7 +14,8 @@ from dirigo.hw_interfaces.hw_interface import NoBuffers
 from dirigo.sw_interfaces.acquisition import Acquisition, AcquisitionSpec, AcquisitionProduct
 from dirigo.hw_interfaces.detector import DetectorSet, Detector
 from dirigo.hw_interfaces.digitizer import (
-    Digitizer, DigitizerProfile, AuxiliaryIOEnums, SampleClockSource
+    Digitizer, DigitizerProfile, AuxiliaryIOEnums, SampleClockSource,
+    InputMode
 )
 from dirigo.hw_interfaces.scanner import (
     FastRasterScanner, SlowRasterScanner, GalvoScanner, ResonantScanner,
@@ -493,24 +494,28 @@ class LineAcquisition(SampleAcquisition):
             self.active.set()
 
         elif isinstance(self.hw.fast_raster_scanner, GalvoScanner):
-            if digi._mode == "analog": # type: ignore #TODO fix this
-                if digi.sample_clock.source == SampleClockSource.INTERNAL:
-                    clock_channel = None # configures digitizer to use internal clock
+            # The start order of Digitizer and Galvo are dependent on input mode:
+
+            if digi._mode == InputMode.ANALOG:
+                # Analog: AI clock is main clock, start AO task first
                 self.hw.fast_raster_scanner.start(
-                    input_sample_rate=digi.sample_clock.rate,
-                    input_sample_clock_channel=clock_channel,
-                    pixels_per_period=self.spec.pixels_per_line,
-                    periods_per_write=self.spec.records_per_buffer
+                    input_mode          = InputMode.ANALOG,
+                    input_sample_rate   = digi.sample_clock.rate,
+                    sample_clock_source = digi.sample_clock.source,
+                    pixels_per_period   = self.spec.pixels_per_line,
+                    periods_per_write   = self.spec.records_per_buffer
                 )
                 digi.acquire.start()
 
-            elif digi._mode == "edge counting": # type: ignore #TODO fix this
+            elif digi._mode == InputMode.EDGE_COUNTING:
+                # Edge-counting: AO clock is main clock, start counting task first
                 digi.acquire.start()
                 self.hw.fast_raster_scanner.start(
-                    input_sample_rate=digi.sample_clock.rate,
-                    input_sample_clock_channel=digi.sample_clock.source,
-                    pixels_per_period=self.spec.pixels_per_line,
-                    periods_per_write=self.spec.records_per_buffer
+                    input_mode          = InputMode.EDGE_COUNTING,
+                    input_sample_rate   = digi.sample_clock.rate,
+                    sample_clock_source = digi.sample_clock.source,
+                    pixels_per_period   = self.spec.pixels_per_line,
+                    periods_per_write   = self.spec.records_per_buffer
                 )
 
         try:
