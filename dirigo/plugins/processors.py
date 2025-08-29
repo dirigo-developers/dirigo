@@ -20,6 +20,7 @@ from dirigo.plugins.acquisitions import (
 
 TWO_PI = 2 * np.pi
 
+uint8_3d_readonly   = types.Array(types.uint8, 3, 'C', readonly=True)
 int8_3d_readonly   = types.Array(types.int8, 3, 'C', readonly=True)
 int16_3d_readonly  = types.Array(types.int16, 3, 'C', readonly=True)
 uint16_3d_readonly = types.Array(types.uint16, 3, 'C', readonly=True)
@@ -28,6 +29,7 @@ uint16_3d_readonly = types.Array(types.uint16, 3, 'C', readonly=True)
 sigs = [
     #buffer_data         invert_mask  offset    bit_shift  gradient     resampled (out)  start_indices  nsamples_to_sum
     (int8_3d_readonly,   int16[:],    int16[:], int32,     float32[:],  int16[:,:,:],   int32[:,:],    int32[:,:]),
+    (uint8_3d_readonly,  int16[:],    int16[:], int32,     float32[:],  int16[:,:,:],   int32[:,:],    int32[:,:]),
     (int16_3d_readonly,  int16[:],    int16[:], int32,     float32[:],  int16[:,:,:],   int32[:,:],    int32[:,:]),
     (uint16_3d_readonly, int16[:],    int16[:], int32,     float32[:],  int16[:,:,:],   int32[:,:],    int32[:,:])
 ]
