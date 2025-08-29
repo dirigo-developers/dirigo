@@ -439,7 +439,7 @@ class LineAcquisition(SampleAcquisition):
                 raise ValueError("Specification must define a pixel (dwell) time.")
             
             fast_scanner.amplitude = optics.object_position_to_scan_angle(
-                self.spec.extended_scan_width,
+                self.spec.line_width
             )
 
             # Fast axis period should be multiple of digitizer sample resolution
