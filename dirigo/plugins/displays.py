@@ -249,10 +249,12 @@ class DisplayChannel():
 
 
 # ---------- Standard Multichannel Frame Display ----------
+int16_3d_readonly = types.Array(types.int16, 3, 'C', readonly=True)
+uint16_3d_readonly = types.Array(types.uint16, 3, 'C', readonly=True)
 sigs = [
 #    data           luts           tf_lut    image
-    (int16[:,:,:],  uint16[:,:,:], uint8[:], uint8[:,:,:]),
-    (uint16[:,:,:], uint16[:,:,:], uint8[:], uint8[:,:,:]),
+    (int16_3d_readonly,  uint16[:,:,:], uint8[:], uint8[:,:,:]),
+    (uint16_3d_readonly, uint16[:,:,:], uint8[:], uint8[:,:,:]),
 ]
 @njit(sigs, nogil=True, parallel=True, fastmath=True, cache=True)
 def _additive_blend_channels_kernel(data: np.ndarray, 

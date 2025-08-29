@@ -549,13 +549,13 @@ class AngleRange(RangeWithUnits[Angle]):
 
     @property 
     def min_degrees(self) -> float:
-        """Returns min in degrees optical."""
-        return self.min * 180 / math.pi
+        """Returns min in degrees optical, float type."""
+        return float(self.min) * 180 / math.pi
     
     @property 
     def max_degrees(self) -> float:
-        """Returns max in degrees optical."""
-        return self.max * 180 / math.pi
+        """Returns max in degrees optical, float type."""
+        return float(self.max) * 180 / math.pi
     
 
 class VoltageRange(RangeWithUnits[Voltage]):

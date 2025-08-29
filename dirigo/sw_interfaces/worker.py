@@ -1,6 +1,5 @@
 from abc import ABC, abstractmethod
 import threading, queue
-from typing import Optional
 
 import numpy as np
 
@@ -28,15 +27,23 @@ class Product:
     def _add_consumers(self, n: int):
         """Add n consumer references. Called once by Worker.publish just before 
         the publish (fan-out)."""
+        if n < 0 or not isinstance(n, int):
+            raise ValueError("n must be integer >= 0")
         with self._lock:
             self._remaining += n
+            if self._remaining < 0:
+                raise RuntimeError("Product refcount went negative in _add_consumers")
             if self._remaining < 1:
+                # No consumers → immediately return to pool
                 self._pool.put(self)
                 self._remaining = 0
 
     def _release(self):
         with self._lock:
             self._remaining -= 1
+            if self._remaining < 0:
+                self._remaining = 0
+                raise RuntimeError("Product refcount went negative in _release()")
             if self._remaining < 1:
                 self._pool.put(self)
                 self._remaining = 0
@@ -48,8 +55,7 @@ class Product:
         self._release()
 
     def hold_once(self):
-        """Adds 1 to reference count, so the product will need to be context 
-        manager-entered again to release."""
+        """Increments the reference count by 1 (manual retain)."""
         with self._lock:
             self._remaining += 1
 
@@ -60,27 +66,24 @@ class Worker(threading.Thread, ABC):
     def __init__(self, name: str = "worker"):
         """
         Sets up a worker Thread object with internal publisher-subscriber model.
-
-        Each Worker has a queue.Queue `inbox` which it can call `get()` on to
-        obtain incoming data. Each worker can send out data using the `publish`
-        method to any subscribers 
         """
         super().__init__(name=name) # Sets up Thread
         self._stop_event = threading.Event()  # Event to signal thread termination
 
         # Publisher-subscriber objects
-        self._inbox = queue.Queue()
+        self._inbox: "queue.Queue[Product | None]" = queue.Queue()
         self._subscribers: list['Worker'] = []
+        self._subs_lock = threading.RLock()  # protect subscriber list & publishing snapshot
 
         # Pool for re-usable product objects
-        self._product_pool = queue.Queue()
-        self._product_shape: Optional[tuple[int, ...]] = None
-        self._product_dtype = None
+        self._product_pool: "queue.Queue[Product]" = queue.Queue()
+        self._product_shape: tuple[int, ...] | None = None
+        self._product_dtype = None # numpy dtype
         
         # Set context
-        self._dirigo_group: Optional[str] = None    # "acquisition"/"processor"/"logger"/"display"/"loader"
-        self._dirigo_plugin: Optional[str] = None   # entry point name, e.g. "raster_line"
-        self._dirigo_run_id: Optional[str] = None   # set by acquisitions; others inherit
+        self._dirigo_group: str | None = None    # "acquisition"/"processor"/"logger"/"display"/"loader"
+        self._dirigo_plugin: str | None = None   # entry point name, e.g. "raster_line"
+        self._dirigo_run_id: str | None = None   # set by acquisitions; others inherit
 
     def run(self):
         # Final: subclasses should NOT shadow this method
@@ -91,7 +94,6 @@ class Worker(threading.Thread, ABC):
         try:
             self._work()  # subclasses implement this
         finally:
-            # optional: flush metrics/logs
             pass
 
     @abstractmethod
@@ -107,11 +109,11 @@ class Worker(threading.Thread, ABC):
         self._product_shape = shape
         self._product_dtype = dtype
         for _ in range(n):
-            aq_buf = self.Product(
+            product = self.Product(
                 pool=self._product_pool,
                 data=np.full(shape, fill_value, dtype) # pre-allocates for large buffers
             )
-            self._product_pool.put(aq_buf)
+            self._product_pool.put(product)
 
     @property
     def product_shape(self) -> tuple[int, ...]:
@@ -125,9 +127,22 @@ class Worker(threading.Thread, ABC):
             raise RuntimeError("Product pool is not initialized")
         return self._product_dtype
 
-    def stop(self, blocking: bool = False):
-        """Sets a flag to stop thread."""
+    def stop(self, blocking: bool = False, propagate: bool = True):
+        """
+        Signal the thread to stop. Wakes the inbox and (optionally) fans out 
+        sentinel None to subscribers.
+        """
         self._stop_event.set()
+
+        # Wake ourselves if blocked in _inbox.get()
+        try:
+            self._inbox.put_nowait(None)
+        except queue.Full:
+            pass
+
+        # Optionally propagate sentinel None to downstream
+        if propagate:
+            self._publish(None)
 
         if blocking:
             self.join() # does not return until thread completes
@@ -135,32 +150,50 @@ class Worker(threading.Thread, ABC):
     # Publisher-Subscriber model
     def add_subscriber(self, subscriber: 'Worker'):
         """Add a reference to a new subscriber and inherit run ID if applicable."""
-        self._subscribers.append(subscriber)
-
-        if getattr(self, "_dirigo_run_id", None):
-            subscriber._dirigo_run_id = self._dirigo_run_id
+        with self._subs_lock:
+            self._subscribers.append(subscriber)
+            if getattr(self, "_dirigo_run_id", None):
+                subscriber._dirigo_run_id = self._dirigo_run_id
 
     def remove_subscriber(self, subscriber: 'Worker'):
         """Remove reference to a subscriber."""
-        self._subscribers.remove(subscriber)
+        with self._subs_lock:
+            try:
+                self._subscribers.remove(subscriber)
+            except ValueError:
+                pass  # already removed
 
     def _publish(self, obj: Product | None):
         """Fan out obj to all subscribers. """
+        with self._subs_lock:
+            subs_snapshot = tuple(self._subscribers)
+
         if obj is None: # sentinel for work finished
-            for s in self._subscribers:
+            for s in subs_snapshot:
                 s._inbox.put(None)
             return
-        else:
-            if not isinstance(obj, Product):
-                raise ValueError("Can only publish subclasses of Product.")
+        
+        if not isinstance(obj, Product):
+            raise ValueError("Can only publish subclasses of Product.")
+        
+        # Freeze while product is out (read-only to consumers)
+        try:
+            obj.data.flags.writeable = False
+        except Exception:
+            pass  # non-ndarray payloads could be supported later
             
-        obj._add_consumers(len(self._subscribers))
-
-        for subscriber in self._subscribers:
+        obj._add_consumers(len(subs_snapshot))
+        for subscriber in subs_snapshot:
             subscriber._inbox.put(obj) # "Thrilled to share ..."
 
     def _get_free_product(self) -> Product:
-        return self._product_pool.get()
+        p = self._product_pool.get()
+        # Unfreeze for producer write
+        try:
+            p.data.flags.writeable = True
+        except Exception:
+            pass
+        return p
 
     def _receive_product(self,
               block: bool = True,
@@ -168,22 +201,22 @@ class Worker(threading.Thread, ABC):
               ) -> Product:
         """
         Wrapper around inbox.get().
-        
         Raises EndOfStream error if sentinel None is received.
         """
-
         if self._stop_event.is_set():
             raise EndOfStream
 
-        product = self._inbox.get(block=block, timeout=timeout)
+        try:
+            product = self._inbox.get(block=block, timeout=timeout)
+        except queue.Empty:
+            raise EndOfStream
         
         if product is None:
-            print(f"Shutting down thread: {self.__class__.__name__}")
+            # TODO add logging e.g. f"Shutting down thread: {self.__class__.__name__}"
             raise EndOfStream
 
         if not isinstance(product, Product):
             raise TypeError(f"{self.name}: expected Product, got {type(product)!r}")
 
         return product
-
 

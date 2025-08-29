@@ -52,8 +52,7 @@ class LaserScanningOptics:
         return units.Position(position)
 
     def object_position_to_scan_angle(self, 
-                                      position: units.Position,
-                                      axis: Optional[str] = None) -> units.Angle:
+                                      position: units.Position) -> units.Angle:
         """
         Return the scanner angle (optical) required for a certain focus position.
 

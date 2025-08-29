@@ -3,9 +3,9 @@ from functools import cached_property
 from dataclasses import dataclass, asdict
 from pathlib import Path
 import math
-from typing import Literal, List, Optional, TYPE_CHECKING
+from typing import Literal, List, TYPE_CHECKING
 import tomllib
-from enum import Enum
+from enum import StrEnum, Enum
 
 from platformdirs import user_config_dir
 
@@ -35,25 +35,57 @@ Example configuration:
 [project.entry-points."dirigo_digitizers"]
 alazar = "dirigo_alazar:AlazarDigitizer"
 """
-# Questions: 
-# should we define a whole set of enumerations to be used with Dirigo?
-# Currently uses strings (and sets of strings)
-# Argument against: too many possibilities if we consider multiple vendors but 
-# certain concepts like AC/DC, external/internal may be OK
+
+
+# ---------- Digitizer enumerations ----------
+class SampleClockSource(StrEnum):
+    INTERNAL = "internal"
+    EXTERNAL = "external"
+
+class SampleClockEdge(StrEnum):
+    RISING  = "rising"
+    FALLING = "falling"
+
+class ChannelCoupling(StrEnum):
+    AC      = "ac"
+    DC      = "dc"
+    GROUND  = "ground"
+
+class TriggerSource(StrEnum):
+    INTERNAL  = "internal"
+    EXTERNAL  = "external"
+    CHANNEL_A = "channel_a"
+    CHANNEL_B = "channel_b"
+    CHANNEL_C = "channel_c"
+    CHANNEL_D = "channel_d"
+    # could do more ...
+
+class TriggerSlope(StrEnum):
+    RISING  = "rising"
+    FALLING = "fall"
+
+class ExternalTriggerCoupling(StrEnum):
+    AC = "ac"
+    DC = "dc"
+
+class ExternalTriggerRange(StrEnum):
+    TTL = "ttl"
+    # True voltage ranges should use the units.VoltageRange class
 
 
 @dataclass(frozen=True, slots=True)
 class SampleClockProfile:
-    source: str
+    source: SampleClockSource
     rate: units.SampleRate
-    edge: Literal["Rising", "Falling"] = "Rising"
+    edge: SampleClockEdge = SampleClockEdge.RISING
 
     @classmethod
     def from_dict(cls, d: dict) -> "SampleClockProfile":
+        rate = units.SampleRate(d["rate"]) if d.get("rate") is not None else None
         return cls(
-            source = d["source"],
-            rate = units.SampleRate(d["rate"]),
-            edge = d["edge"]
+            source = SampleClockSource(d["source"].lower()),
+            rate = rate,
+            edge = SampleClockEdge(d["edge"].lower())
         )
 
 
@@ -61,7 +93,7 @@ class SampleClockProfile:
 class ChannelProfile:
     enabled: bool
     inverted: bool
-    coupling: Literal["AC", "DC"]
+    coupling: ChannelCoupling
     impedance: units.Resistance
     range: units.VoltageRange
 
@@ -69,18 +101,27 @@ class ChannelProfile:
     def from_dict(cls, channel_profile_list: List[dict]) -> List["ChannelProfile"]:
         channel_list = []
         for channel_profile in channel_profile_list:
-            input_range = channel_profile["range"]
+            coupling = channel_profile.get("coupling")
+            if coupling is not None: 
+                coupling = ChannelCoupling(channel_profile["coupling"].lower()) 
+
+            impedance = channel_profile.get("impedance")
+            if impedance is not None: 
+                impedance = units.Resistance(channel_profile["impedance"]) 
+
+            input_range = channel_profile.get("range")
             if isinstance(input_range, dict):
                 # if dictionary with min, max keys
                 input_range = units.VoltageRange(**input_range)
-            else:
+            elif isinstance(input_range, str):
                 # if coming from toml file and using plus/minus, eg "±2 V"
                 input_range = units.VoltageRange(input_range)
+
             channel = cls(
                 enabled=channel_profile["enabled"], 
-                inverted=channel_profile["inverted"],
-                coupling=channel_profile["coupling"], 
-                impedance=units.Resistance(channel_profile["impedance"]), 
+                inverted=channel_profile.get("inverted", False),
+                coupling=coupling, 
+                impedance=impedance, 
                 range=input_range
             )
             channel_list.append(channel)
@@ -89,20 +130,38 @@ class ChannelProfile:
 
 @dataclass(frozen=True, slots=True)
 class TriggerProfile:
-    source: str
-    slope: str
-    level: units.Voltage
-    external_range: str
-    external_coupling: Literal["AC", "DC"]
+    source: TriggerSource
+    slope: TriggerSlope
+    level: units.Voltage | None
+    external_range: units.VoltageRange | ExternalTriggerRange | None
+    external_coupling: ExternalTriggerCoupling | None
 
     @classmethod
     def from_dict(cls, d: dict) -> "TriggerProfile":
+        if "level" in d.keys():
+            level = units.Voltage(d["level"])
+        else:
+            level = None
+
+        if "external_range" in d.keys():
+            try:
+                external_range = ExternalTriggerRange(d["external_range"].lower())
+            except: 
+                external_range = units.VoltageRange(d["external_range"])
+        else:
+            external_range = None
+
+        if "external_coupling" in d.keys():
+            external_coupling = ExternalTriggerCoupling(d["external_coupling"].lower())
+        else:
+            external_coupling = None
+
         return cls(
-            source = d["source"],
-            slope = d["slope"],
-            level = units.Voltage(d["level"]),
-            external_range = d["external_range"],
-            external_coupling = d["external_coupling"]
+            source = TriggerSource(d["source"].lower()),
+            slope = TriggerSlope(d["slope"].lower()),
+            level = level,
+            external_range = external_range,
+            external_coupling = external_coupling
         )
 
 
@@ -115,9 +174,16 @@ class DigitizerProfile:
     
     def to_dict(self):
         d = asdict(self)
+        
         # replace VoltageRange objects with simple dictionary for serialization
         for channel in d["channels"]:
-            channel["range"] = channel["range"].to_dict()
+            try:
+                channel["range"] = channel["range"].to_dict()
+            except AttributeError: # None type
+                pass
+        if isinstance(d["trigger"]["external_range"], units.VoltageRange):
+            d["trigger"]["external_range"] = d["trigger"]["external_range"].to_dict()
+
         return d
      
     @classmethod
@@ -140,13 +206,16 @@ class DigitizerProfile:
         return cls.from_dict(data)
 
 
+class InputMode(StrEnum):
+    ANALOG =        "analog"
+    EDGE_COUNTING = "edge counting"
+
+
 class Channel(ABC):
     """Abstract base class for a digitizer's input channel configuration."""
     def __init__(self, 
                  enabled: bool = False, 
                  inverted: bool = False):
-        super().__init__() # Is this needed?
-
         self.enabled = enabled
         self.inverted = inverted
 
@@ -159,7 +228,7 @@ class Channel(ABC):
     def enabled(self, enable: bool):
         """Enable or disable the channel."""
         if not isinstance(enable, bool):
-            raise ValueError("`inverted` must be set with a boolean")
+            raise ValueError("`enabled` must be set with a boolean")
         self._enabled = enable
 
     @property
@@ -187,13 +256,13 @@ class Channel(ABC):
 
     @property
     @abstractmethod
-    def coupling(self) -> str:
+    def coupling(self) -> ChannelCoupling:
         """Signal coupling mode (e.g., "AC", "DC")."""
         pass
 
     @coupling.setter
     @abstractmethod
-    def coupling(self, coupling: str):
+    def coupling(self, coupling: ChannelCoupling):
         """Set the signal coupling mode.
         
         Must match one of the options provided by `coupling_options`.
@@ -202,7 +271,7 @@ class Channel(ABC):
 
     @property
     @abstractmethod
-    def coupling_options(self) -> set[str]:
+    def coupling_options(self) -> set[ChannelCoupling]:
         """Set of available coupling modes."""
         pass
 
@@ -254,13 +323,13 @@ class SampleClock(ABC):
 
     @property
     @abstractmethod
-    def source(self) -> str:
+    def source(self) -> SampleClockSource:
         """Source of the sample clock (e.g., internal, external)."""
         pass
 
     @source.setter
     @abstractmethod
-    def source(self, source: str):
+    def source(self, source: SampleClockSource):
         """Set the source of the sample clock.
         
         Must match one of the options provided by `source_options`.
@@ -269,7 +338,7 @@ class SampleClock(ABC):
 
     @property
     @abstractmethod
-    def source_options(self) -> set[str]:
+    def source_options(self) -> set[SampleClockSource]:
         """Set of supported clock sources."""
         pass
 
@@ -290,13 +359,13 @@ class SampleClock(ABC):
 
     @property
     @abstractmethod
-    def edge(self) -> str:
+    def edge(self) -> SampleClockEdge:
         """Clock edge to use for sampling (e.g., rising, falling)."""
         pass
 
     @edge.setter
     @abstractmethod
-    def edge(self, edge: str):
+    def edge(self, edge: SampleClockEdge):
         """Set the clock edge for sampling.
         
         Must match one of the options provided by `edge_options`.
@@ -305,7 +374,7 @@ class SampleClock(ABC):
 
     @property
     @abstractmethod
-    def edge_options(self) -> set[str]:
+    def edge_options(self) -> set[SampleClockEdge]:
         """Set of supported clock edge options."""
         pass
     
@@ -375,13 +444,13 @@ class Trigger(ABC):
 
     @property
     @abstractmethod
-    def external_coupling(self) -> str:
+    def external_coupling(self) -> ExternalTriggerCoupling:
         """Coupling mode for external trigger sources."""
         pass
     
     @external_coupling.setter
     @abstractmethod
-    def external_coupling(self, coupling: str):
+    def external_coupling(self, coupling: ExternalTriggerCoupling):
         """Set the coupling mode for external triggers.
         
         Must match one of the options provided by `external_coupling_options`.
@@ -390,19 +459,19 @@ class Trigger(ABC):
 
     @property
     @abstractmethod
-    def external_coupling_options(self) -> set[str]:
+    def external_coupling_options(self) -> set[ExternalTriggerCoupling]:
         """Set of available external coupling modes."""
         pass
 
     @property
     @abstractmethod
-    def external_range(self) -> str: # return dirigo.VoltageRange?
+    def external_range(self) -> units.VoltageRange | ExternalTriggerRange: # return dirigo.VoltageRange?
         """Voltage range for external triggers."""
         pass
     
     @external_range.setter
     @abstractmethod
-    def external_range(self, range: str):
+    def external_range(self, range: units.VoltageRange | ExternalTriggerRange):
         """Set the voltage range for external triggers.
         
         Must match one of the options provided by `external_range_options`.
@@ -411,7 +480,7 @@ class Trigger(ABC):
 
     @property
     @abstractmethod
-    def external_range_options(self) -> set[str]:
+    def external_range_options(self) -> set[units.VoltageRange | ExternalTriggerRange]:
         """Set of available external trigger voltage ranges."""
         pass
 
@@ -647,7 +716,6 @@ class AuxiliaryIO(ABC):
         pass
 
 
-
 class Digitizer(HardwareInterface):
     """Abstract base class for digitizer hardware interface."""
     attr_name = "digitizer"
@@ -670,22 +738,28 @@ class Digitizer(HardwareInterface):
         """
         profile_path = self.PROFILE_LOCATION / (profile_name + ".toml")
         self.profile = DigitizerProfile.from_toml(profile_path)
+
+        for channel, channel_profile in zip(self.channels, self.profile.channels):
+            channel.enabled = channel_profile.enabled
+            # NI X-series requires # channels enabled to check max (aggregate) sample rate
         
         self.sample_clock.source = self.profile.sample_clock.source
         self.sample_clock.rate = self.profile.sample_clock.rate
         self.sample_clock.edge = self.profile.sample_clock.edge
 
         for channel, channel_profile in zip(self.channels, self.profile.channels):
-            channel.enabled = channel_profile.enabled
+            #channel.enabled = channel_profile.enabled
             channel.coupling = channel_profile.coupling
             channel.impedance = channel_profile.impedance
             channel.range = channel_profile.range
 
-        self.trigger.external_range = self.profile.trigger.external_range
-        self.trigger.external_coupling = self.profile.trigger.external_coupling
+        if self.profile.trigger.external_range and self.profile.trigger.external_coupling:
+            self.trigger.external_range = self.profile.trigger.external_range
+            self.trigger.external_coupling = self.profile.trigger.external_coupling
         self.trigger.source = self.profile.trigger.source
         self.trigger.slope = self.profile.trigger.slope
-        self.trigger.level = self.profile.trigger.level
+        if self.profile.trigger.level:
+            self.trigger.level = self.profile.trigger.level
 
     @property
     @abstractmethod

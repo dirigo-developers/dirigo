@@ -75,3 +75,6 @@ led_via_ni = "dirigo.plugins.illuminators:LEDViaNI"
 
 [project.entry-points."dirigo_digitizers"]
 ni = "dirigo.plugins.digitizers:NIDigitizer"
+
+[project.entry-points."dirigo_detectors"]
+generic = "dirigo.plugins.detectors:GenericDetector"

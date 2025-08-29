@@ -1,7 +1,9 @@
 from pathlib import Path
 import tomllib
-from typing import Optional, Any
+from typing import Any
 from functools import cached_property
+from types import MappingProxyType
+from copy import deepcopy
 
 import numpy as np
 from numpy.polynomial.polynomial import Polynomial
@@ -80,7 +82,7 @@ def load_signal_offset(
     try:
         return np.loadtxt(path, delimiter=',', dtype=np.float64, skiprows=1)
     except FileNotFoundError:
-        return np.array(0)
+        return np.array([0])
 
 
 def load_line_gradient_calibration(
@@ -114,69 +116,56 @@ def load_line_gradient_calibration(
     return np.average(correction,axis=1)
 
         
-class SystemConfig: 
-    def __init__(self, data: dict[str, dict]):
-        self._data = data
-        
-    @cached_property
-    def laser_scanning_optics(self) -> dict[str, Any]:
-        return self._data["laser_scanning_optics"]
-    
-    @cached_property
-    def camera_optics(self) -> dict[str, Any]:
-        return self._data["camera_optics"]
-    
-    @cached_property
-    def digitizer(self) -> dict[str, Any]:
-        return self._data["digitizer"]
-    
-    @cached_property
-    def detectors(self) -> dict[str, Any]:
-        return self._data["detectors"]
-    
-    @cached_property
-    def objective_z_scanner(self) -> dict[str, Any]:
-        return self._data["objective_z_scanner"]
+_CONFIG_KEYS = (
+    "laser_scanning_optics", "camera_optics", "digitizer", "detectors",
+    "objective_z_scanner", "stages", "line_camera", "illuminator",
+    "frame_grabber", "encoders", "fast_raster_scanner", "slow_raster_scanner",
+)
 
-    @cached_property
-    def stages(self) -> dict[str, Any]:
-        return self._data["stages"]
-    
-    @cached_property
-    def line_camera(self) -> dict[str, Any]:
-        return self._data["line_camera"]
-    
-    @cached_property
-    def illuminator(self) -> dict[str, Any]:
-        return self._data["illuminator"]
-    
-    @cached_property
-    def frame_grabber(self) -> dict[str, Any]:
-        return self._data["frame_grabber"]
-    
-    @cached_property
-    def encoders(self) -> dict[str, Any]:
-        return self._data["encoders"]
+class SystemConfig:
+    """
+    Slotted, read-mostly config: each known section becomes an attribute whose
+    value is either a dict[...] or None if the section is absent in TOML.
+    No cached_property needed; lookups are direct attribute access.
+    """
+    __slots__ = (*_CONFIG_KEYS, "_raw")
 
-    @cached_property
-    def fast_raster_scanner(self) -> dict[str, Any]:
-        return self._data["fast_raster_scanner"]
-    
-    @cached_property
-    def slow_raster_scanner(self) -> dict[str, Any]:
-        return self._data["slow_raster_scanner"]
+    # explicit (optional) type hints for IDEs / type checkers
+    laser_scanning_optics:  dict[str, Any] | None
+    camera_optics:          dict[str, Any] | None
+    digitizer:              dict[str, Any] | None
+    detectors:              dict[str, Any] | None
+    objective_z_scanner:    dict[str, Any] | None
+    stages:                 dict[str, Any] | None
+    line_camera:            dict[str, Any] | None
+    illuminator:            dict[str, Any] | None
+    frame_grabber:          dict[str, Any] | None
+    encoders:               dict[str, Any] | None
+    fast_raster_scanner:    dict[str, Any] | None
+    slow_raster_scanner:    dict[str, Any] | None
+
+    def __init__(self, data: dict[str, dict[str, Any]]):
+        self._raw = data
+        for key in _CONFIG_KEYS:
+            setattr(self, key, data.get(key))  # missing -> None
 
     @classmethod
-    def from_toml(cls, toml_path: Path) -> 'SystemConfig':
-        toml_data = load_toml(toml_path)
-        return cls(toml_data)
+    def from_toml(cls, toml_path: "Path") -> "SystemConfig":
+        return cls(load_toml(toml_path))
 
-    def to_dict(self) -> dict[str, dict[str, Any]]:
-        return self._data # should this be a (deep) copy?
+    def has(self, key: str) -> bool:
+        return getattr(self, key) is not None
+
+    def to_dict(self, *, copy: bool = False, readonly: bool = False) -> dict[str, dict[str, Any] | None]:
+        # expose the normalized view (sections -> dict | None)
+        d = {k: getattr(self, k) for k in _CONFIG_KEYS}
+        if copy:
+            return deepcopy(d)
+        if readonly:
+            return MappingProxyType(d)
+        return d
+
+    def raw(self) -> dict[str, dict[str, Any]]:
+        # original TOML mapping (no None entries; missing keys absent)
+        return self._raw
     
-
-if __name__ == "__main__":
-    load_line_gradient_calibration(
-        line_width=units.Position('1.5 mm'),
-        pixel_size=units.Position('1 um')
-    )

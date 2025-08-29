@@ -6,6 +6,7 @@ from dirigo.components import units
 from dirigo.hw_interfaces.hw_interface import HardwareInterface
 
 
+
 class Detector(HardwareInterface):
     attr_name= "detector"
     """Abstract interface for a single detection channel."""
