@@ -86,7 +86,7 @@ class CounterRegistry:
     _available_counters: list[str] = []
     _in_use: set[str] = set()
     _initialized: bool = False
-    _device_name: str = None
+    _device_name: str | None = None
 
     @classmethod
     def initialize(cls, device_name="Dev1"):
@@ -240,7 +240,7 @@ class GalvoScannerViaNI(GalvoScanner):
             )
         self._analog_control_range = units.VoltageRange(**analog_control_range)
 
-        self._ao_task: nidaqmx.Task = None
+        self._ao_task: nidaqmx.Task | None = None
         self._active = False
 
     def park(self):
