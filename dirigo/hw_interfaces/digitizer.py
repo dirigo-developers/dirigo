@@ -62,7 +62,7 @@ class TriggerSource(StrEnum):
 
 class TriggerSlope(StrEnum):
     RISING  = "rising"
-    FALLING = "fall"
+    FALLING = "falling"
 
 class ExternalTriggerCoupling(StrEnum):
     AC = "ac"
