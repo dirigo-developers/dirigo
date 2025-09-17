@@ -299,8 +299,8 @@ class GalvoScanner(RasterScanner):
     INPUT_DELAY_RANGE = units.TimeRange(min=0, max=units.Time('0.5 ms'))
 
     def __init__(self, 
+                 ao_sample_rate: str | None = None, # This implies analog output (chance some users might want digital galvo control)
                  input_delay: str = "0 s",
-                 ao_sample_rate: units.SampleRate = units.SampleRate("200 kS/s"),
                  **kwargs):
         super().__init__(**kwargs)
 
@@ -316,10 +316,12 @@ class GalvoScanner(RasterScanner):
             raise ValueError(f"input_delay out of valid range ({self.INPUT_DELAY_RANGE})")
         self.input_delay = delay
 
-         # Validate sample rate
-        if not isinstance(ao_sample_rate, units.SampleRate):
-            raise ValueError("Input sample rate must be set with SampleRate object")
-        self._ao_sample_rate = ao_sample_rate
+        # Validate sample rate
+        if ao_sample_rate is not None:
+            rate = units.SampleRate(ao_sample_rate)
+        else:
+            rate = None
+        self._ao_sample_rate = rate
 
     @property
     def amplitude(self) -> units.Angle:

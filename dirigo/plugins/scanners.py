@@ -453,6 +453,7 @@ class GalvoWaveformWriter(threading.Thread):
 class FastGalvoScannerViaNI(GalvoScannerViaNI, FastRasterScanner):    
     def __init__(self, 
                  ao_clock_source: str | None = None,
+                 ao_start_trigger: str | None = None,
                  line_clock_channel: str | None = None, 
                  **kwargs):
         
@@ -462,6 +463,11 @@ class FastGalvoScannerViaNI(GalvoScannerViaNI, FastRasterScanner):
             self._ao_clock_source = None # codes for use internal clock
         else:
             self._ao_clock_source = validate_ni_channel(ao_clock_source)
+
+        if ao_start_trigger == "internal":
+            self._ao_start_trigger = None # codes for immediate start
+        else:
+            self._ao_start_trigger = validate_ni_channel(ao_start_trigger)
 
         self._line_clock_channel = validate_ni_channel(line_clock_channel)
 
@@ -559,18 +565,32 @@ class FastGalvoScannerViaNI(GalvoScannerViaNI, FastRasterScanner):
                 sample_mode     = AcquisitionType.CONTINUOUS,
                 samps_per_chan  = self._periods_per_write * self._pixels_per_period # TODO should be samples not pixels per period
             )
-            if adjustable:
-                # Requires constantly supplying new waveform data, no regeneration
-                self._ao_task.out_stream.regen_mode = \
-                    RegenerationMode.DONT_ALLOW_REGENERATION
-
             self._do_task.timing.cfg_samp_clk_timing(
                 rate            = self._ao_sample_rate,
                 source          = self._ao_clock_source, # see above about frequency divider counter
                 sample_mode     = AcquisitionType.CONTINUOUS,
                 samps_per_chan  = self._periods_per_write * self._pixels_per_period 
             )
-            
+
+            # Set start trigger
+            if self._ao_start_trigger is not None:
+                self._ao_task.triggers.start_trigger.cfg_dig_edge_start_trig(
+                    trigger_source=self._ao_start_trigger
+                )
+            # link DO/CO to AO start trigger
+            self._do_task.triggers.start_trigger.cfg_dig_edge_start_trig(
+                trigger_source=f"/{self._device.name}/ao/StartTrigger"
+            )
+            if self._co_task:
+                self._co_task.triggers.start_trigger.cfg_dig_edge_start_trig(
+                    trigger_source=f"/{self._device.name}/ao/StartTrigger"
+                )
+
+            if adjustable:
+                # Requires constantly supplying new waveform data, no regeneration
+                self._ao_task.out_stream.regen_mode = \
+                    RegenerationMode.DONT_ALLOW_REGENERATION
+
             # Set up the waveform writer worker
             self._writer = GalvoWaveformWriter(
                 fast_scanner = self, 
