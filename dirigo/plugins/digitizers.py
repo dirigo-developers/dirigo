@@ -222,8 +222,14 @@ class NISampleClock(digitizer.SampleClock):
        - edge = "rising" or "falling"
     """
 
-    def __init__(self, device: nidaqmx.system.Device, channels: list[NIAnalogChannel]):
+    def __init__(self, 
+                 device: nidaqmx.system.Device, 
+                 external_clock_channel: str | None,
+                 channels: list[NIAnalogChannel]):
         self._device = device
+        if external_clock_channel is not None:
+            validate_ni_channel(external_clock_channel) # Typically a PFI channel
+        self._external_clock_channel = external_clock_channel 
         self._channels = channels
 
         # Check the type of Channels to infer mode
@@ -415,8 +421,11 @@ class NIAcquire(digitizer.Acquire):
     or a user-specified “finite” acquisition.
     """
 
-    def __init__(self, device: nidaqmx.system.Device, sample_clock: NISampleClock, 
-                 channels: list[NIAnalogChannel | NICounterChannel], trigger: NITrigger):
+    def __init__(self, 
+                 device: nidaqmx.system.Device, 
+                 sample_clock: NISampleClock, 
+                 channels: list[NIAnalogChannel | NICounterChannel], 
+                 trigger: NITrigger):
         self._device = device
         self._channels: list[NIAnalogChannel | NICounterChannel] = channels
         self._sample_clock: NISampleClock = sample_clock
@@ -566,13 +575,16 @@ class NIAcquire(digitizer.Acquire):
 
             # Configure the sample clock
             if self._sample_clock.source == digitizer.SampleClockSource.INTERNAL:
-                source = None
+                source = None # This will enable use of the built-in analog input clock
+            elif self._sample_clock.source == digitizer.SampleClockSource.EXTERNAL:
+                source = self._sample_clock._external_clock_channel
+
             self._task.timing.cfg_samp_clk_timing(
-                rate=self._sample_clock.rate, 
-                source=source, 
-                active_edge=edge,
-                sample_mode=sample_mode,
-                samps_per_chan=samples_per_chan*2 #TODO, not sure about 2x
+                rate            = self._sample_clock.rate, 
+                source          = source, 
+                active_edge     = edge,
+                sample_mode     = sample_mode,
+                samps_per_chan  = samples_per_chan*2 #TODO, not sure about 2x
             )
 
             # Set up stream reader
@@ -731,9 +743,11 @@ class NIDigitizer(digitizer.Digitizer):
     Wires together the Channel, SampleClock, Trigger, Acquire, and AuxiliaryIO.
     """
     def __init__(self, 
-                 device_name: str = "Dev1", 
+                 device_name: str = "Dev1",
+                 external_clock_channel: str | None = None,
                  **kwargs): 
         self._device = get_device(device_name)
+        
 
         # Get channel names from default profile 
         profile = load_toml(self.PROFILE_LOCATION / "default.toml")
@@ -749,7 +763,11 @@ class NIDigitizer(digitizer.Digitizer):
             self.channels = [NICounterChannel(self._device, chan) for chan in channel_names]
 
         # Create sample clock
-        self.sample_clock = NISampleClock(self._device, self.channels)
+        self.sample_clock = NISampleClock(
+            device                  = self._device,
+            external_clock_channel  = external_clock_channel, 
+            channels                = self.channels
+        )
 
         # Create trigger
         self.trigger = NITrigger(self._device)

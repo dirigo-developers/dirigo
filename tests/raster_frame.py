@@ -14,7 +14,7 @@ averager = diri.make_processor("rolling_average", upstream=processor)
 display = diri.make_display_processor(
     name                    = "frame", 
     upstream                = averager,
-    color_vector_names      = ["green", "magenta"],
+    color_vector_names      = ["green"],# "magenta"],
     transfer_function_name  = "gamma"
 )
 if not save_raw:

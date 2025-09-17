@@ -299,7 +299,8 @@ class GalvoScanner(RasterScanner):
     INPUT_DELAY_RANGE = units.TimeRange(min=0, max=units.Time('0.5 ms'))
 
     def __init__(self, 
-                 input_delay: str = "0 s", 
+                 input_delay: str = "0 s",
+                 ao_sample_rate: units.SampleRate = units.SampleRate("200 kS/s"),
                  **kwargs):
         super().__init__(**kwargs)
 
@@ -314,6 +315,11 @@ class GalvoScanner(RasterScanner):
         if not self.INPUT_DELAY_RANGE.within_range(delay):
             raise ValueError(f"input_delay out of valid range ({self.INPUT_DELAY_RANGE})")
         self.input_delay = delay
+
+         # Validate sample rate
+        if not isinstance(ao_sample_rate, units.SampleRate):
+            raise ValueError("Input sample rate must be set with SampleRate object")
+        self._ao_sample_rate = ao_sample_rate
 
     @property
     def amplitude(self) -> units.Angle:
