@@ -632,7 +632,7 @@ class LineAcquisition(SampleAcquisition):
                 record_length = record_duration * digitizer_rate - rearm_samples
             else:
                 delay = fast_scanner.input_delay \
-                    if hasattr(fast_scanner, 'input_delay') else 0
+                    if hasattr(fast_scanner, 'input_delay') else units.Time(0)
                 record_duration = min(
                     nominal_period * fast_scanner.duty_cycle + delay, 
                     shortest_period

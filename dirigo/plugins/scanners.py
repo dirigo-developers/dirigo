@@ -220,7 +220,6 @@ class PolygonScannerViaNI(PolygonScanner, FastRasterScanner):
 
 
 class GalvoScannerViaNI(GalvoScanner):
-
     def __init__(self, 
                  analog_control_channel: str, # e.g. 'Dev1/ao1'
                  analog_control_range: dict, # e.g. {'min': '-10 V', 'max': '10 V'}
@@ -270,7 +269,7 @@ class GalvoScannerViaNI(GalvoScanner):
     
     def generate_waveform(self, 
                           sample_rate: units.SampleRate,
-                          rearm_time: units.Time = units.Time(0)):
+                          rearm_time: units.Time = units.Time(0)) -> np.ndarray:
         # TODO, njit? parameters: waveform, amplitude, duty_cycle, waveform_length, samples_per_period
         """Returns are waveform vector in units of radian."""
         offset = self.offset
@@ -629,9 +628,8 @@ class FastGalvoScannerViaNI(GalvoScannerViaNI, FastRasterScanner):
 class SlowGalvoScannerViaNI(GalvoScannerViaNI, SlowRasterScanner):
     def __init__(self,
                  fast_scanner: FastRasterScanner, 
-                 external_line_clock_channel: str = None, # to sync to external line clock (e.g. a resonant scanner)
-                 frame_clock_channel: str = None, 
-                 ao_sample_rate: str = "200 kS/s", # ignored if using galvo-galvo config
+                 external_line_clock_channel: str | None = None, # to sync to external line clock (e.g. a resonant scanner)
+                 frame_clock_channel: str | None = None, 
                  **kwargs):
         
         super().__init__(**kwargs) # analog control channel and voltage limits
@@ -644,26 +642,32 @@ class SlowGalvoScannerViaNI(GalvoScannerViaNI, SlowRasterScanner):
             self._fast_scanner.pair_slow_galvo(self)
         
         elif isinstance(fast_scanner, (ResonantScannerViaNI, PolygonScannerViaNI)):
+            if external_line_clock_channel is None:
+                raise RuntimeError("Res-galvo/polygon-galvo scanning must specify a line clock channel for synchronization.")
             self._external_line_clock_channel = validate_ni_channel(external_line_clock_channel)
 
-            ao_sample_rate = units.SampleRate(ao_sample_rate)
+            if self._ao_sample_rate is None:
+                raise RuntimeError("Res-galvo/polygon-galvo scanning must specify an analog out sample rate on slow scanner")
+            
             device = get_device(self._analog_control_channel.split('/')[0])
-            low_sr = get_min_ao_rate(device)
+            low_sr = get_min_ao_rate(device) # this check might be redundant?
             high_sr = get_max_ao_rate(device)
-            if not low_sr < ao_sample_rate < high_sr:
-                raise ValueError(f"AO sample rate outside required bounds: "
-                                 f"low: {low_sr}, high {high_sr}, got {ao_sample_rate}")
-            self._ao_sample_rate = ao_sample_rate
+            if not low_sr < self._ao_sample_rate < high_sr:
+                raise ValueError(f"AO sample rate outside required bounds: low: "
+                                 f"{low_sr}, high {high_sr}, got {self._ao_sample_rate}")
 
             self._fast_scanner = fast_scanner
 
         else:
             raise ValueError("Unsupported fast scanner type for SlowGalvoScannerViaNI")
         
-        self._frame_clock_channel = validate_ni_channel(frame_clock_channel)
+        if frame_clock_channel is None:
+            self._frame_clock_channel = None
+        else:
+            self._frame_clock_channel = validate_ni_channel(frame_clock_channel)
         
     def start(self,
-              periods_per_frame: int = None,
+              periods_per_frame: int | None = None,
               adjustable = False): # allows changing amplitude & offset mid-acquisition, but may be taxing for very high frame rates
         
         self._active = True
@@ -674,6 +678,9 @@ class SlowGalvoScannerViaNI(GalvoScannerViaNI, SlowRasterScanner):
             if self._external_line_clock_channel:
                 if not isinstance(periods_per_frame, int) or periods_per_frame < 1:
                     raise ValueError("Periods per frame must be a positive integer")
+                
+                if self._ao_sample_rate is None:
+                    raise RuntimeError("Slow axis galvo must specify analog out sample rate.")
                 
                 n_periods = self._fast_scanner.frequency / self.frequency
                 rearm_periods = self._fast_scanner.frequency_error * n_periods
@@ -696,12 +703,12 @@ class SlowGalvoScannerViaNI(GalvoScannerViaNI, SlowRasterScanner):
                     samps_per_chan=periods_per_frame
                 )
 
+                # The AO task is a retriggered finite arbitrary wave generation,
+                # internally clocked but retriggering on each frame clock pulse
                 self._ao_task = nidaqmx.Task("Slow galvo waveform")
-
                 self._ao_task.ao_channels.add_ao_voltage_chan(
                     physical_channel=self._analog_control_channel
                 )
-                
                 self._ao_task.timing.cfg_samp_clk_timing(
                     rate=self._ao_sample_rate,
                     sample_mode=AcquisitionType.FINITE,
@@ -725,9 +732,13 @@ class SlowGalvoScannerViaNI(GalvoScannerViaNI, SlowRasterScanner):
                 ) 
                 if adjustable:
                     self._writer.start()
-
                 self._ao_task.start()
                 self._fclock_task.start()
+
+            else:
+                # If no external line clock, then assume this is the slow axis of 
+                # galvo-galvo pair -> Fast axis will manage all AO signals
+                pass
                 
         except:
             # start failed, so revert the _active flag, propagate the error up with 'raise'
