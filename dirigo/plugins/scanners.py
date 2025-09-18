@@ -11,12 +11,12 @@ from nidaqmx.stream_writers import AnalogMultiChannelWriter
 from nidaqmx.constants import AcquisitionType, RegenerationMode, LineGrouping
 
 from dirigo.components import units
-from dirigo.hw_interfaces.scanner import (
+from dirigo.hw_interfaces.scanner import (Waveforms,
     GalvoScanner, ResonantScanner, PolygonScanner,
     FastRasterScanner, SlowRasterScanner,
 )
 from dirigo.hw_interfaces import digitizer as dgtz
-#dgtz.InputMode.ANALOG
+
 
 
 def get_device(device_name: str = "Dev1") -> nidaqmx.system.Device:
@@ -284,7 +284,7 @@ class GalvoScannerViaNI(GalvoScanner):
 
             waveform = (self.amplitude/2) * np.cos(t) + offset # amplitude is pk-pk hence the 1/2
         
-        elif self.waveform in {'triangle', 'asymmetric triangle', 'sawtooth'}:
+        elif self.waveform == Waveforms.ASYM_TRIANGLE:
             # TODO clean this up
             num_up = round(exact_samples_per_period * self.duty_cycle) 
             A = self.amplitude
@@ -516,47 +516,30 @@ class FastGalvoScannerViaNI(GalvoScannerViaNI, FastRasterScanner):
                     line_grouping=LineGrouping.CHAN_PER_LINE
                 )
             
-            self._co_task = None # used if we need to divide down the input sample clock
+            # Insert frequency divider CO if sample rate too high
+            self._co_task = None 
             max_ao_rate = get_max_ao_rate(self._device)
+            if self._ao_sample_rate > max_ao_rate: # TODO correct this
+                if self._ao_clock_source is None:
+                    raise RuntimeError(f"Can't set AO clock={self._ao_sample_rate}, higher than device maximum: {max_ao_rate}")
+                # Counter Out task to divide sample clock frequency (useful for using S-series digitizers where max rate AI >> AO)
+                div_factor = int(2**np.ceil(np.log2(self._ao_sample_rate / max_ao_rate)))
+                high_ticks = div_factor // 2
 
-            if digitizer.input_mode == dgtz.InputMode.ANALOG:
-                # if sample_clock_source == dgtz.SampleClockSource.INTERNAL:
-                #     ao_clock_source = "/" + self._device.name + "/ai/SampleClock"
-                # else:
-                #     raise NotImplementedError("External sample clock not yet implemented")
-                
-                # Insert frequency divider if sample rate too high
-                if self._ao_sample_rate > max_ao_rate: # TODO correct this
-                    # Counter Out task to divide input sample clock frequency
-                    div_factor = 2**int(np.log2(input_sample_rate / max_ao_rate))
-                    if div_factor > 32: 
-                        raise RuntimeError("AI:AO clock frequency ratio cannot exceed 32 (record resolution)")
-                        # up to 32 (digitizer record resolution) guarantees divisible AO samples per frame
-                    high_ticks = div_factor // 2
+                self._co_task = nidaqmx.Task("AI clock frequency divided")
+                freq_div_ch = self._co_task.co_channels.add_co_pulse_chan_ticks(
+                    counter         = CounterRegistry.allocate_counter(),
+                    source_terminal = self._ao_clock_source,
+                    high_ticks      = high_ticks,
+                    low_ticks       = div_factor - high_ticks
+                )
+                self._co_task.timing.cfg_implicit_timing(
+                    sample_mode     = AcquisitionType.CONTINUOUS,
+                    samps_per_chan  = 64 # just selected arbitarily, OK?
+                )
 
-                    self._co_task = nidaqmx.Task("AI clock frequency divided")
-                    freq_div_ch = self._co_task.co_channels.add_co_pulse_chan_ticks(
-                        counter         = CounterRegistry.allocate_counter(),
-                        source_terminal = ao_clock_source,
-                        high_ticks      = high_ticks,
-                        low_ticks       = div_factor - high_ticks
-                    )
-                    self._co_task.timing.cfg_implicit_timing(
-                        sample_mode     = AcquisitionType.CONTINUOUS,
-                        samps_per_chan  = 20 # TODO, why 20?
-                    )
-
-                    ao_clock_source = freq_div_ch.co_pulse_term
-                    output_sample_rate = input_sample_rate / div_factor
-                
-            elif digitizer.input_mode == dgtz.InputMode.EDGE_COUNTING:
-                if sample_clock_source == dgtz.SampleClockSource.INTERNAL:
-                    ao_clock_source = None # denotes 'use internal clock'
-                    if input_sample_rate > max_ao_rate:
-                        raise RuntimeError("Edge counting sample rate set too high")
-                        # one could also set up some sort of divider
-                else:
-                    raise NotImplementedError("External sample clock not yet implemented")
+                self._ao_clock_source = freq_div_ch.co_pulse_term
+                self._ao_sample_rate = self._ao_sample_rate / div_factor
             
             # Set timing
             self._ao_task.timing.cfg_samp_clk_timing(

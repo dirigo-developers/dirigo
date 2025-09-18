@@ -17,7 +17,7 @@ from dirigo.hw_interfaces.digitizer import (
     Digitizer, DigitizerProfile, AuxiliaryIOEnums, SampleClockSource,
     InputMode, TriggerSource, StreamingMode
 )
-from dirigo.hw_interfaces.scanner import (
+from dirigo.hw_interfaces.scanner import (Waveforms,
     FastRasterScanner, SlowRasterScanner, GalvoScanner, ResonantScanner,
     ObjectiveZScanner
 )
@@ -450,7 +450,7 @@ class LineAcquisition(SampleAcquisition):
             dt = units.Time(1 / fast_scanner._ao_sample_rate) # TODO, NI AO lets setting arbitrary size output size
             T_rounded = round(T_exact / dt) * dt
             fast_scanner.frequency = 1 / T_rounded 
-            fast_scanner.waveform = "asymmetric triangle"
+            fast_scanner.waveform = Waveforms.ASYM_TRIANGLE
             fast_scanner.duty_cycle = self.spec.fill_fraction # TODO set duty cycle to 50% if doing bidi
         
         elif isinstance(fast_scanner, ResonantScanner):
@@ -814,7 +814,7 @@ class FrameAcquisition(LineAcquisition):
         self.hw.slow_raster_scanner.frequency = (
             self.hw.fast_raster_scanner.frequency / spec.records_per_buffer
         )
-        self.hw.slow_raster_scanner.waveform = 'asymmetric triangle'
+        self.hw.slow_raster_scanner.waveform = Waveforms.ASYM_TRIANGLE
         self.hw.slow_raster_scanner.duty_cycle = (
             1 - spec.flyback_periods / spec.records_per_buffer
         )

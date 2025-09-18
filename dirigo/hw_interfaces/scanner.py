@@ -1,5 +1,6 @@
-from abc import ABC, abstractmethod
-from typing import Literal, Any, get_args
+from abc import abstractmethod
+from typing import Literal, Any
+from enum import StrEnum
 
 from dirigo.components import units
 from dirigo.hw_interfaces.stage import LinearStage # for z-scanner
@@ -10,29 +11,43 @@ from dirigo.hw_interfaces.hw_interface import HardwareInterface
 Dirigo scanner interface.
 """
 
-WaveformNames = Literal['sinusoid', 'asymmetric triangle', 'sawtooth']
-                # e.g.   resonant    galvanometer           polygon
+
+class Waveforms(StrEnum):
+    SINUSOID        = "sinusoid"
+    TRIANGLE        = "triangle"
+    ASYM_TRIANGLE   = "asymmetric triangle"
+    SAWTOOTH        = "sawtooth"
+
+
+class Axes(StrEnum):
+    X   = "x"
+    Y   = "y"
+    Z   = "z"
 
 
 class RasterScanner(HardwareInterface):
     """Abstraction of a single raster scanner axis."""
     attr_name = "raster_scanner"
-    VALID_AXES = {'x', 'y'}
+    VALID_AXES = {Axes.X, Axes.Y} # not responsible for Z axis
 
-    def __init__(self, axis: str, angle_limits: dict, **kwargs):
+    def __init__(self, 
+                 axis: str, 
+                 angle_limits: dict, 
+                 **kwargs):
         """
         Initialize the raster scanner with parameters from a dictionary.
 
         Args:
-            - axis (str): The axis label. See `VALID_AXES` for options.
-            - angle_limits (dict): A dictionary with 'min' and 'max' keys defining the scan angle range.
+            - axis: (str) The axis label. See `VALID_AXES` for options.
+            - angle_limits: (dict) A dictionary with 'min' and 'max' keys defining the scan angle range.
         """
-        # Validate axis label and set in private attr
+        # Validate axis label and store in private attr
+        axis = Axes(axis)
         if axis not in self.VALID_AXES: 
             raise ValueError(f"axis must be one of {', '.join(self.VALID_AXES)}.")
         self._axis = axis
 
-        # validate angle limits and set in private attr
+        # validate angle limits and store in private attr
         if not isinstance(angle_limits, dict):
             raise ValueError("`angle_limits` must be a dictionary.")
         missing_keys = {'min', 'max'} - angle_limits.keys()
@@ -43,7 +58,7 @@ class RasterScanner(HardwareInterface):
         self._angle_limits = units.AngleRange(**angle_limits)
 
     @property
-    def axis(self) -> str:
+    def axis(self) -> Axes:
         """The axis along which the scanner operates."""
         return self._axis
 
@@ -89,11 +104,12 @@ class RasterScanner(HardwareInterface):
 
     @property
     @abstractmethod
-    def waveform(self) -> str:
+    def waveform(self) -> Waveforms:
         """
         Describes the scan angle waveform.
 
         Valid options: 'sinusoid', 'sawtooth', 'triangle', 'asymmetric triangle'
+        (see Waveforms enumeration)
 
         If waveform is not adjustable, implementations should raise 
         NotImplementedError in setter.
@@ -102,7 +118,7 @@ class RasterScanner(HardwareInterface):
 
     @waveform.setter
     @abstractmethod
-    def waveform(self, new_waveform: str):
+    def waveform(self, new_waveform: Waveforms):
         pass
 
     @property
@@ -168,12 +184,11 @@ class ResonantScanner(RasterScanner):
     Abstraction for resonant scanner.
     
     A resonant scanner oscillates with a fixed frequency and adjustable 
-    amplitude. Frequency may drift slightly depending on external factors such 
-    as temperature.
+    amplitude.
 
     A resonant scanner is almost always the fast axis when in a raster scanning 
     system, however implementations should explicitly inhert FastRasterScanner 
-    to mark it as such. 
+    to 'mark' it as such. 
 
     Implementations must include methods:
         __init__ (which should include a call to super().__init__ method)
@@ -185,6 +200,12 @@ class ResonantScanner(RasterScanner):
                  frequency_error: float,
                  response_time: str = "0 s",
                  **kwargs):
+        """
+        Args:
+            - frequency: (str) Nominal frequency with units (e.g. "7.91 kHz")
+            - frequency_error: (float) Normalized frequency error (e.g 1% = 0.01)
+            - response_time: (str, optional) Time needed to settle at new amplitude with units (e.g. "100 ms")
+        """
         super().__init__(**kwargs)
         
         frequency_obj = units.Frequency(frequency)
@@ -216,8 +237,8 @@ class ResonantScanner(RasterScanner):
         raise NotImplementedError("Frequency is fixed for resonant scanners.")
     
     @property
-    def waveform(self) -> str:
-        return 'sinusoid'
+    def waveform(self):
+        return Waveforms.SINUSOID
     
     @waveform.setter
     def waveform(self, _):
@@ -225,7 +246,7 @@ class ResonantScanner(RasterScanner):
     
     @property
     def duty_cycle(self) -> float:
-        return 0.5 # DC = 0.5 here just means the waveform is symmetric
+        return 0.5 # just means the waveform is symmetric
     
     @duty_cycle.setter
     def duty_cycle(self, _):
@@ -247,7 +268,7 @@ class PolygonScanner(RasterScanner):
 
     A polygon scanner is almost always the fast axis when in a raster scanning 
     system, however implementations should explicitly inhert FastRasterScanner 
-    to mark it as such. 
+    to 'mark' it as such. 
     """
     def __init__(self, facet_count: int, **kwargs):
         super().__init__(**kwargs)
@@ -267,8 +288,8 @@ class PolygonScanner(RasterScanner):
         raise NotImplementedError("Amplitude is not adjustable for polygonal scanners.")
 
     @property
-    def waveform(self) -> str:
-        return 'sawtooth'
+    def waveform(self):
+        return Waveforms.SAWTOOTH
     
     @waveform.setter
     def waveform(self, _):
@@ -296,7 +317,7 @@ class PolygonScanner(RasterScanner):
 
 class GalvoScanner(RasterScanner):
     """Abstraction for galvanometer mirror servo scanner."""
-    INPUT_DELAY_RANGE = units.TimeRange(min=0, max=units.Time('0.5 ms'))
+    INPUT_DELAY_RANGE = units.TimeRange(min=0, max=units.Time('0.5 ms')) # max is a bit arbitrary
 
     def __init__(self, 
                  ao_sample_rate: str | None = None, # This implies analog output (chance some users might want digital galvo control)
@@ -308,7 +329,7 @@ class GalvoScanner(RasterScanner):
         self._offset = units.Angle(0.0)
         
         self._frequency = units.Frequency(0)
-        self._waveform: WaveformNames = "asymmetric triangle"
+        self._waveform: Waveforms = Waveforms.ASYM_TRIANGLE
         self._duty_cycle: float = 0.0
 
         delay = units.Time(input_delay)
@@ -394,15 +415,15 @@ class GalvoScanner(RasterScanner):
         self._frequency = freq
 
     @property
-    def waveform(self) -> WaveformNames: 
+    def waveform(self) -> Waveforms: 
         return self._waveform
     
     @waveform.setter
-    def waveform(self, new_waveform: WaveformNames):
-        if new_waveform not in get_args(WaveformNames):
+    def waveform(self, new_waveform: Waveforms):
+        if not isinstance(new_waveform, Waveforms):
             raise ValueError(
-                f"Error setting waveform type. Valid options 'sinusoid', "
-                f"'sawtooth', 'triangle'. Recieved {new_waveform}"
+                f"Error setting waveform type. Valid options: "
+                f"{[w.value for w in Waveforms]}. Recieved {new_waveform}"
             )
         self._waveform = new_waveform
 
@@ -417,9 +438,9 @@ class GalvoScanner(RasterScanner):
         If the current waveform has a fixed duty cycle, setter will raise a 
         ValueError.
         """
-        if self.waveform in {'sinusoid', 'triangle'}:
+        if self.waveform in {Waveforms.SINUSOID, Waveforms.TRIANGLE}:
             return 0.5
-        elif self.waveform in {'sawtooth'}:
+        elif self.waveform in {Waveforms.SAWTOOTH}:
             return 1.0
         else:
             return self._duty_cycle
@@ -449,4 +470,4 @@ class ObjectiveZScanner(LinearStage):
     Dirigo definition of a scanner.
     """
     attr_name = "objective_z_scanner"
-    VALID_AXES = {'z'}
+    VALID_AXES = {Axes.Z}
