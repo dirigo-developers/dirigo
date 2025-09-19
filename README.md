@@ -16,3 +16,20 @@ Performance-critical operations are accelerated with [Numba](https://numba.pydat
 Dirigo follows a modular, package-oriented architecture: almost all components—hardware drivers, processing modules, GUIs—are separate Python packages that can be developed, installed, and updated independently.
 
 Dirigo is in *very* early development. While the API and architecture are functional, documentation and ready-to-use releases are in progress.
+
+
+## Digitizer ↔ LSM mode compatibility
+
+**Legend:** ✓ supported now · △ possible/experimental · ✗ not recommended/unsupported · — unknown  
+
+| Digitizer (vendor/model family) | Galvo–Galvo **analog** | Galvo–Galvo **photon counting** | Resonant–Galvo **analog** | Polygon–Galvo **analog** |
+|---|:---:|:---:|:---:|:---:|
+| **NI X-Series** (e.g., PCIe-63xx) | ✓* | ✓ (up to 4 chan.) | ✗† | ✗† |
+| **NI S-Series** (e.g., PCI-6110/6115) | ✓ | ✓ (up to 2 chan.) | △§ | △§ |
+| **AlazarTech** (e.g., ATS9440) | ✓ | ✗ | ✓ | ✓ |
+| **Other / custom** (contact [TDW](https://github.com/tweber225)) | — | — | — | — |
+
+*Notes*  
+\* Multichannel acquisition subject to aggregate AI sample rate (e.g 2 channels: 500 kS/s, 4 channels 250 kS/s).  
+† AI sample rate typically insufficient for resonant/polygon rates.  
+§ Borderline: Limited max sample rate may require heavy binning/decimation, dependent on scanner frequency. Not yet validated.  
