@@ -596,6 +596,9 @@ class FastGalvoScannerViaNI(GalvoScannerViaNI, FastRasterScanner):
             self._do_task.start() 
             self._ao_task.start()
 
+            # Start AI (ignored if already started)
+            digitizer.acquire.start()
+
         except Exception:
             self._active = False # actually not active
             raise # re-raise the ValueError so it propagates

@@ -32,4 +32,4 @@ Dirigo is in *very* early development. While the API and architecture are functi
 *Notes*  
 \* Multichannel acquisition subject to aggregate AI sample rate (e.g 2 channels: 500 kS/s, 4 channels 250 kS/s).  
 † AI sample rate typically insufficient for resonant/polygon rates.  
-§ Borderline: Limited max sample rate may require heavy binning/decimation, dependent on scanner frequency. Not yet validated.  
+§ Borderline: Max sample rate may limit pixels per line, dependent on scanner frequency. Not yet validated.  

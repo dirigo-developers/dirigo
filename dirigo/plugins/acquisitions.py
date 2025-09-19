@@ -442,6 +442,10 @@ class LineAcquisition(SampleAcquisition):
                 self.spec.line_width
             )
 
+            # if fast scanner AO sample rate not specified, assume clocked from digitizer AI clock
+            if fast_scanner._ao_sample_rate is None:
+                fast_scanner._ao_sample_rate = digi.sample_clock.rate
+
             # Fast axis period should be multiple of digitizer sample resolution
             T_exact = self.spec.pixel_time * self.spec.pixels_per_line / self.spec.fill_fraction
             # dt = units.Time(digi.acquire.record_length_resolution 
@@ -507,26 +511,6 @@ class LineAcquisition(SampleAcquisition):
                 pixels_per_period   = self.spec.pixels_per_line,
                 periods_per_write   = self.spec.records_per_buffer
             )
-
-            # if digi.input_mode == InputMode.ANALOG:
-            #     # Analog: AI clock is main clock, start AO task first
-            #     self.hw.fast_raster_scanner.start(
-            #         input_mode          = InputMode.ANALOG,
-            #         input_sample_rate   = digi.sample_clock.rate,
-            #         pixels_per_period   = self.spec.pixels_per_line,
-            #         periods_per_write   = self.spec.records_per_buffer
-            #     )
-            #     digi.acquire.start()
-
-            # elif digi.input_mode == InputMode.EDGE_COUNTING:
-            #     # Edge-counting: AO clock is main clock, start counting task first
-            #     digi.acquire.start()
-            #     self.hw.fast_raster_scanner.start(
-            #         input_mode          = InputMode.EDGE_COUNTING,
-            #         input_sample_rate   = digi.sample_clock.rate,
-            #         pixels_per_period   = self.spec.pixels_per_line,
-            #         periods_per_write   = self.spec.records_per_buffer
-            #     )
 
             self.active.set()
 
