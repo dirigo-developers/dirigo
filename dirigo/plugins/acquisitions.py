@@ -451,7 +451,7 @@ class LineAcquisition(SampleAcquisition):
             # dt = units.Time(digi.acquire.record_length_resolution 
             #                 / digi.sample_clock.rate)
             # Fast axis period should be multiple of ao sample resolution
-            dt = units.Time(1 / fast_scanner._ao_sample_rate) # TODO, NI AO lets setting arbitrary size output size
+            dt = units.Time(digi.acquire.record_length_resolution / fast_scanner._ao_sample_rate) 
             T_rounded = round(T_exact / dt) * dt
             fast_scanner.frequency = 1 / T_rounded 
             fast_scanner.waveform = Waveforms.ASYM_TRIANGLE
