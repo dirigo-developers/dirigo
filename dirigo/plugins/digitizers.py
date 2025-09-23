@@ -222,15 +222,21 @@ class NISampleClock(digitizer.SampleClock):
        - edge = "rising" or "falling"
     """
 
-    def __init__(self, device: nidaqmx.system.Device, channels: list[NIAnalogChannel]):
+    def __init__(self, 
+                 device: nidaqmx.system.Device, 
+                 external_clock_channel: str | None,
+                 channels: list[NIAnalogChannel]):
         self._device = device
+        if external_clock_channel is not None:
+            validate_ni_channel(external_clock_channel) # Typically a PFI channel
+        self._external_clock_channel = external_clock_channel 
         self._channels = channels
 
         # Check the type of Channels to infer mode
         if isinstance(self._channels[0], NIAnalogChannel):
-            self._mode = digitizer.InputMode.ANALOG
+            self._input_mode = digitizer.InputMode.ANALOG
         else:
-            self._mode = digitizer.InputMode.EDGE_COUNTING
+            self._input_mode = digitizer.InputMode.EDGE_COUNTING
 
         self._source = None
         self._rate = None 
@@ -287,7 +293,7 @@ class NISampleClock(digitizer.SampleClock):
         NI boards generally support a continuous range up to some max.
         If you want to provide a discrete set, adapt. 
         """
-        if self._mode == "analog":
+        if self._input_mode == digitizer.InputMode.ANALOG:
             if self._device.product_category == ProductCategory.X_SERIES_DAQ:
                 # For X-series analog sampling, sample rate is dependent on number of channels enabled
                 nchannels_enabled = sum([channel.enabled for channel in self._channels])
@@ -415,8 +421,11 @@ class NIAcquire(digitizer.Acquire):
     or a user-specified “finite” acquisition.
     """
 
-    def __init__(self, device: nidaqmx.system.Device, sample_clock: NISampleClock, 
-                 channels: list[NIAnalogChannel | NICounterChannel], trigger: NITrigger):
+    def __init__(self, 
+                 device: nidaqmx.system.Device, 
+                 sample_clock: NISampleClock, 
+                 channels: list[NIAnalogChannel | NICounterChannel], 
+                 trigger: NITrigger):
         self._device = device
         self._channels: list[NIAnalogChannel | NICounterChannel] = channels
         self._sample_clock: NISampleClock = sample_clock
@@ -434,6 +443,7 @@ class NIAcquire(digitizer.Acquire):
 
         # NI Tasks & state:
         self._task = None
+        self._ready = False # Initial start command will set ready flag to true
         self._started = False
         self._samples_acquired = 0
 
@@ -489,9 +499,9 @@ class NIAcquire(digitizer.Acquire):
 
     @property
     def record_length_resolution(self) -> int:
-        if self._mode == "analog":
+        if self._input_mode == digitizer.InputMode.ANALOG:
             return 32
-        elif self._mode == "edge counting":
+        elif self._input_mode == digitizer.InputMode.EDGE_COUNTING:
             return 1
 
     @property
@@ -528,7 +538,11 @@ class NIAcquire(digitizer.Acquire):
         self._timestamps_enabled = enable
 
     def start(self):
-
+        if not self._ready:
+            self._ready = True
+            # The next time start() method is called, this will actually run
+            return 
+        
         if self._started:
             return  # Already started
         
@@ -544,7 +558,7 @@ class NIAcquire(digitizer.Acquire):
             sample_mode = AcquisitionType.CONTINUOUS
             samples_per_chan = 2 * self.records_per_buffer * self.record_length 
 
-        if self._mode == digitizer.InputMode.ANALOG:
+        if self._input_mode == digitizer.InputMode.ANALOG:
 
             self._task = nidaqmx.Task("Analog input")
 
@@ -566,13 +580,16 @@ class NIAcquire(digitizer.Acquire):
 
             # Configure the sample clock
             if self._sample_clock.source == digitizer.SampleClockSource.INTERNAL:
-                source = None
+                source = None # This will enable use of the built-in analog input clock
+            elif self._sample_clock.source == digitizer.SampleClockSource.EXTERNAL:
+                source = self._sample_clock._external_clock_channel
+
             self._task.timing.cfg_samp_clk_timing(
-                rate=self._sample_clock.rate, 
-                source=source, 
-                active_edge=edge,
-                sample_mode=sample_mode,
-                samps_per_chan=samples_per_chan*2 #TODO, not sure about 2x
+                rate            = self._sample_clock.rate, 
+                source          = source, 
+                active_edge     = edge,
+                sample_mode     = sample_mode,
+                samps_per_chan  = samples_per_chan*2 #TODO, not sure about 2x
             )
 
             # Set up stream reader
@@ -630,7 +647,7 @@ class NIAcquire(digitizer.Acquire):
         )
 
         # Start the task(s)
-        if self._mode == digitizer.InputMode.ANALOG:
+        if self._input_mode == digitizer.InputMode.ANALOG:
             self._task.start()
         else:
             for task in self._tasks:
@@ -651,7 +668,7 @@ class NIAcquire(digitizer.Acquire):
         if not self._started:
             raise RuntimeError("Acquisition not started.")
         
-        if self._mode == "analog":
+        if self._input_mode == digitizer.InputMode.ANALOG:
             Ny, Ns, Nc = acq_product.data.shape
             self._reader.read_int16(
                 data=self._prealloc,
@@ -690,7 +707,7 @@ class NIAcquire(digitizer.Acquire):
             return
 
         # Stop the task(s)
-        if self._mode == "analog":
+        if self._input_mode == digitizer.InputMode.ANALOG:
             self._task.stop()
             self._task.close()
         else:
@@ -700,14 +717,15 @@ class NIAcquire(digitizer.Acquire):
                 task.close()
                 
         self._started = False
+        self._ready = False
         self._samples_acquired = 0
 
     @cached_property
-    def _mode(self):
+    def _input_mode(self) -> digitizer.InputMode:
         if isinstance(self._channels[0], NIAnalogChannel):
-            return "analog"
+            return digitizer.InputMode.ANALOG
         else:
-            return "edge counting"
+            return digitizer.InputMode.EDGE_COUNTING
 
 
 class NIAuxiliaryIO(digitizer.AuxiliaryIO):
@@ -731,8 +749,11 @@ class NIDigitizer(digitizer.Digitizer):
     Wires together the Channel, SampleClock, Trigger, Acquire, and AuxiliaryIO.
     """
     def __init__(self, 
-                 device_name: str = "Dev1", 
+                 device_name: str = "Dev1",
+                 external_clock_channel: str | None = None,
                  **kwargs): 
+        self.streaming_mode = digitizer.StreamingMode.CONTINUOUS # Operate as continuous streaming (S-series lacks retriggerable support)
+
         self._device = get_device(device_name)
 
         # Get channel names from default profile 
@@ -742,14 +763,18 @@ class NIDigitizer(digitizer.Digitizer):
         # Infer channel input mode from profile->channels->channels
         if channel_names[0].split('/')[-1][:2] == "ai":
             # if characters of channel names = "ai" then we are using analog mode
-            self._mode = digitizer.InputMode.ANALOG
+            self.input_mode = digitizer.InputMode.ANALOG
             self.channels = [NIAnalogChannel(self._device, chan) for chan in channel_names]
         else:
-            self._mode = digitizer.InputMode.EDGE_COUNTING
+            self.input_mode = digitizer.InputMode.EDGE_COUNTING
             self.channels = [NICounterChannel(self._device, chan) for chan in channel_names]
 
         # Create sample clock
-        self.sample_clock = NISampleClock(self._device, self.channels)
+        self.sample_clock = NISampleClock(
+            device                  = self._device,
+            external_clock_channel  = external_clock_channel, 
+            channels                = self.channels
+        )
 
         # Create trigger
         self.trigger = NITrigger(self._device)
@@ -768,7 +793,7 @@ class NIDigitizer(digitizer.Digitizer):
     @cached_property
     def data_range(self) -> units.IntRange:
         """Range of the returned data."""
-        if self._mode == "analog":
+        if self.input_mode == digitizer.InputMode.ANALOG:
             # Make dummy task to get at the .ai_resolution property
             with nidaqmx.Task("AI dummy") as task:
                 channel = task.ai_channels.add_ai_voltage_chan(

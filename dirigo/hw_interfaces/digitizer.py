@@ -134,7 +134,7 @@ class TriggerProfile:
     slope: TriggerSlope
     level: units.Voltage | None
     external_range: units.VoltageRange | ExternalTriggerRange | None
-    external_coupling: ExternalTriggerCoupling | None
+    external_coupling: ExternalTriggerCoupling = ExternalTriggerCoupling.DC
 
     @classmethod
     def from_dict(cls, d: dict) -> "TriggerProfile":
@@ -161,7 +161,7 @@ class TriggerProfile:
             slope = TriggerSlope(d["slope"].lower()),
             level = level,
             external_range = external_range,
-            external_coupling = external_coupling
+            external_coupling = external_coupling or ExternalTriggerCoupling.DC
         )
 
 
@@ -188,7 +188,7 @@ class DigitizerProfile:
      
     @classmethod
     def from_dict(cls, d: dict):
-        return cls(
+        return cls( 
             sample_clock = SampleClockProfile.from_dict(d["sample_clock"]),
             channels     = ChannelProfile.from_dict(d["channels"]),
             trigger      = TriggerProfile.from_dict(d["trigger"]),
@@ -207,8 +207,13 @@ class DigitizerProfile:
 
 
 class InputMode(StrEnum):
-    ANALOG =        "analog"
-    EDGE_COUNTING = "edge counting"
+    ANALOG          = "analog"
+    EDGE_COUNTING   = "edge counting" # e.g. photon counting
+
+
+class StreamingMode(StrEnum):
+    TRIGGERED   = "triggered"
+    CONTINUOUS  = "continuous"
 
 
 class Channel(ABC):
@@ -723,6 +728,8 @@ class Digitizer(HardwareInterface):
 
     @abstractmethod
     def __init__(self):
+        self.input_mode: InputMode
+        self.streaming_mode: StreamingMode
         self.profile: DigitizerProfile
         self.sample_clock: SampleClock
         self.channels: tuple[Channel]
@@ -748,14 +755,13 @@ class Digitizer(HardwareInterface):
         self.sample_clock.edge = self.profile.sample_clock.edge
 
         for channel, channel_profile in zip(self.channels, self.profile.channels):
-            #channel.enabled = channel_profile.enabled
             channel.coupling = channel_profile.coupling
             channel.impedance = channel_profile.impedance
             channel.range = channel_profile.range
 
         if self.profile.trigger.external_range and self.profile.trigger.external_coupling:
             self.trigger.external_range = self.profile.trigger.external_range
-            self.trigger.external_coupling = self.profile.trigger.external_coupling
+            self.trigger.external_coupling = self.profile.trigger.external_coupling 
         self.trigger.source = self.profile.trigger.source
         self.trigger.slope = self.profile.trigger.slope
         if self.profile.trigger.level:

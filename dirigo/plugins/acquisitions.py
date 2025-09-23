@@ -15,9 +15,9 @@ from dirigo.sw_interfaces.acquisition import Acquisition, AcquisitionSpec, Acqui
 from dirigo.hw_interfaces.detector import DetectorSet, Detector
 from dirigo.hw_interfaces.digitizer import (
     Digitizer, DigitizerProfile, AuxiliaryIOEnums, SampleClockSource,
-    InputMode
+    InputMode, TriggerSource, StreamingMode
 )
-from dirigo.hw_interfaces.scanner import (
+from dirigo.hw_interfaces.scanner import (Waveforms,
     FastRasterScanner, SlowRasterScanner, GalvoScanner, ResonantScanner,
     ObjectiveZScanner
 )
@@ -420,7 +420,8 @@ class LineAcquisition(SampleAcquisition):
     def __init__(self, hw, system_config, spec,
                  thread_name: str = "Line acquisition"):
         """Initialize a line acquisition worker."""
-        # Tip: since this method runs on main thread, limit to HW init tasks that will return fast, prepend slower tasks to run method
+        # Tip: since this method runs on main thread, limit to HW init tasks 
+        # that will return fast, prepend slower tasks to run method
         super().__init__(hw, system_config, spec, thread_name) # sets up thread, inbox, stores hw, checks resources
         self.spec: LineAcquisitionSpec # to refine type hints  
 
@@ -428,31 +429,36 @@ class LineAcquisition(SampleAcquisition):
         fast_scanner = self.hw.fast_raster_scanner
         optics = self.hw.laser_scanning_optics
         digi = self.hw.digitizer
-       
-        if digi.sample_clock.rate is None:          # TODO, is this still used?
-            # if sample rate not set, set it based on pixel dwell time
-            digi.sample_clock.rate = units.SampleRate(1 / spec.pixel_time)
 
-        # If using galvo scanner, then set it up based on acquisition spec parameters
         if isinstance(fast_scanner, GalvoScanner):
+            # For galvo scanning, most parameters are adjustable
             if self.spec.pixel_time is None:
                 raise ValueError("Specification must define a pixel (dwell) time.")
+            
+            if digi.sample_clock.rate is None:          
+                digi.sample_clock.rate = units.SampleRate(1 / self.spec.pixel_time)
             
             fast_scanner.amplitude = optics.object_position_to_scan_angle(
                 self.spec.line_width
             )
 
+            # if fast scanner AO sample rate not specified, assume clocked from digitizer AI clock
+            if fast_scanner._ao_sample_rate is None:
+                fast_scanner._ao_sample_rate = digi.sample_clock.rate
+
             # Fast axis period should be multiple of digitizer sample resolution
             T_exact = self.spec.pixel_time * self.spec.pixels_per_line / self.spec.fill_fraction
-            dt = units.Time(digi.acquire.record_length_resolution 
-                            / digi.sample_clock.rate)
+            # dt = units.Time(digi.acquire.record_length_resolution 
+            #                 / digi.sample_clock.rate)
+            # Fast axis period should be multiple of ao sample resolution
+            dt = units.Time(digi.acquire.record_length_resolution / fast_scanner._ao_sample_rate) 
             T_rounded = round(T_exact / dt) * dt
             fast_scanner.frequency = 1 / T_rounded 
-            fast_scanner.waveform = "asymmetric triangle"
+            fast_scanner.waveform = Waveforms.ASYM_TRIANGLE
             fast_scanner.duty_cycle = self.spec.fill_fraction # TODO set duty cycle to 50% if doing bidi
         
         elif isinstance(fast_scanner, ResonantScanner):
-            # for res scanner: fixed: frequency, waveform, duty cycle; 
+            # for res scanner most parameters are fixed: frequency, waveform, duty cycle 
             # adjustable: amplitude
             fast_scanner.amplitude = optics.object_position_to_scan_angle(
                 self.spec.extended_scan_width,
@@ -494,29 +500,19 @@ class LineAcquisition(SampleAcquisition):
             self.active.set()
 
         elif isinstance(self.hw.fast_raster_scanner, GalvoScanner):
-            # The start order of Digitizer and Galvo are dependent on input mode:
+            # The start order of Digitizer and Galvo are dependent on the configuration:
+            # Alazar + NI AO:   NI freeruns and triggers Alazar (enable Alazar first)
+            # NI AI + NI AO:    AI freeruns and clocks AO (AI starts after AO is enabled)
+            # NI CI + NI AO:    AO freeruns and clocks CI (CI starts first)
 
-            if digi._mode == InputMode.ANALOG:
-                # Analog: AI clock is main clock, start AO task first
-                self.hw.fast_raster_scanner.start(
-                    input_mode          = InputMode.ANALOG,
-                    input_sample_rate   = digi.sample_clock.rate,
-                    sample_clock_source = digi.sample_clock.source,
-                    pixels_per_period   = self.spec.pixels_per_line,
-                    periods_per_write   = self.spec.records_per_buffer
-                )
-                digi.acquire.start()
+            digi.acquire.start()
+            self.hw.fast_raster_scanner.start(
+                digitizer           = digi,
+                pixels_per_period   = self.spec.pixels_per_line,
+                periods_per_write   = self.spec.records_per_buffer
+            )
 
-            elif digi._mode == InputMode.EDGE_COUNTING:
-                # Edge-counting: AO clock is main clock, start counting task first
-                digi.acquire.start()
-                self.hw.fast_raster_scanner.start(
-                    input_mode          = InputMode.EDGE_COUNTING,
-                    input_sample_rate   = digi.sample_clock.rate,
-                    sample_clock_source = digi.sample_clock.source,
-                    pixels_per_period   = self.spec.pixels_per_line,
-                    periods_per_write   = self.spec.records_per_buffer
-                )
+            self.active.set()
 
         try:
             bpa = self.spec.buffers_per_acquisition
@@ -605,23 +601,31 @@ class LineAcquisition(SampleAcquisition):
         Acquisition record length, in sample periods. Rounds up to the nearest
         digitizer-compatible increment.
         """
-        scanner_info = self.system_config.fast_raster_scanner
+        fast_scanner = self.hw.fast_raster_scanner
         digitizer_rate = self.digitizer_profile.sample_clock.rate
 
-        if 'resonant' in scanner_info['type']:
-            nominal_period = units.Time(1 / units.Frequency(scanner_info['frequency']))
-            shortest_period = nominal_period / 1.005 # TODO set max frequency error
+        if self.hw.digitizer.streaming_mode == StreamingMode.TRIGGERED:
+            frequency_error = 0.005 # TODO set max frequency error elsewhere
+            rearm_samples = 512 # TODO, get actual rearm time
+            nominal_period = units.Time(1 / self.hw.fast_raster_scanner.frequency)
+            shortest_period = nominal_period/ (1 + frequency_error) # accounting for frequency error
 
             if self.spec.bidirectional_scanning:
+                # scanner duty cycle will be 50%, but we know we want almost the whole period
                 record_duration = shortest_period
-                record_length = record_duration * digitizer_rate - 512 # TODO, get actual rearm time
+                record_length = record_duration * digitizer_rate - rearm_samples
             else:
-                record_duration = shortest_period / 2
+                delay = fast_scanner.input_delay \
+                    if hasattr(fast_scanner, 'input_delay') else units.Time(0)
+                record_duration = min(
+                    nominal_period * fast_scanner.duty_cycle + delay, 
+                    shortest_period
+                )
                 record_length = record_duration * digitizer_rate
-
-        elif 'galvo' in scanner_info['type']:
+                
+        elif self.hw.digitizer.streaming_mode == StreamingMode.CONTINUOUS:
+            # For continuous streaming, we record 100% of the time (including flyback) 
             nominal_period = units.Time(1 / self.hw.fast_raster_scanner.frequency)
-            # For galvo-galvo scanning, we record 100% of time including flyback
             record_length = nominal_period * digitizer_rate
 
         else:
@@ -631,9 +635,12 @@ class LineAcquisition(SampleAcquisition):
         rlr = self.hw.digitizer.acquire.record_length_resolution
         record_length = rlr * round(record_length / rlr) 
 
-        # Also set enforce the min record length requirement
         if record_length < self.hw.digitizer.acquire.record_length_minimum:
-            record_length = self.hw.digitizer.acquire.record_length_minimum
+            rlm = self.hw.digitizer.acquire.record_length_minimum
+            raise RuntimeError(
+                f"Tried setting digitizer record length {record_length}. "
+                f"Below below minimum, {rlm}."
+            )
         
         return record_length
     
@@ -791,7 +798,7 @@ class FrameAcquisition(LineAcquisition):
         self.hw.slow_raster_scanner.frequency = (
             self.hw.fast_raster_scanner.frequency / spec.records_per_buffer
         )
-        self.hw.slow_raster_scanner.waveform = 'asymmetric triangle'
+        self.hw.slow_raster_scanner.waveform = Waveforms.ASYM_TRIANGLE
         self.hw.slow_raster_scanner.duty_cycle = (
             1 - spec.flyback_periods / spec.records_per_buffer
         )
