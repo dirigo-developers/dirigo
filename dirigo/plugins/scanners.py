@@ -19,7 +19,7 @@ from dirigo.hw_interfaces import digitizer as dgtz
 
 
 
-def get_device(device_name: str = "Dev1") -> nidaqmx.system.Device:
+def get_device(device_name: str) -> nidaqmx.system.Device:
     """Returns handle to the NIDAQ system device object."""
     return nidaqmx.system.System.local().devices[device_name]
 
@@ -226,9 +226,10 @@ class GalvoScannerViaNI(GalvoScanner):
                  **kwargs):
         
         super().__init__(**kwargs) # Sets axis & scan angle range
-        self._device = get_device()
-
         self._analog_control_channel = validate_ni_channel(analog_control_channel)
+        
+        device_name = self._analog_control_channel.split('/')[0]
+        self._device = get_device(device_name)
 
         if not isinstance(analog_control_range, dict):
             raise ValueError("`analog_control_range` must be a dictionary.")
@@ -555,18 +556,18 @@ class FastGalvoScannerViaNI(GalvoScannerViaNI, FastRasterScanner):
             )
 
             # Set start trigger
-            if self._ao_start_trigger is not None:
-                self._ao_task.triggers.start_trigger.cfg_dig_edge_start_trig(
-                    trigger_source=self._ao_start_trigger
-                )
-            # link DO/CO to AO start trigger
-            self._do_task.triggers.start_trigger.cfg_dig_edge_start_trig(
-                trigger_source=f"/{self._device.name}/ao/StartTrigger"
-            )
-            if self._co_task:
-                self._co_task.triggers.start_trigger.cfg_dig_edge_start_trig(
+            if self._ao_start_trigger is None: 
+                # meaning that AO triggers itself (e.g. Alazar G-G scanning)
+                self._do_task.triggers.start_trigger.cfg_dig_edge_start_trig(
                     trigger_source=f"/{self._device.name}/ao/StartTrigger"
                 )
+            else:
+                # AO clocks & triggers off AI (e.g. NI AI + G-G scanning)
+                # we can actually skip setting AO start trigger because it is clocked off AI/CO
+                if self._co_task:
+                    self._co_task.triggers.start_trigger.cfg_dig_edge_start_trig(
+                        trigger_source=f"/{self._device.name}/ao/StartTrigger"
+                    )
 
             if adjustable:
                 # Requires constantly supplying new waveform data, no regeneration
