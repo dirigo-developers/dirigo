@@ -115,8 +115,10 @@ class TriggerModes(Enum):
 
 class Camera(HardwareInterface):
     attr_name = "camera"
-    def __init__(self, frame_grabber: Optional[FrameGrabber], 
-                 pixel_size: str, **kwargs):
+    def __init__(self, 
+                 frame_grabber: Optional[FrameGrabber], 
+                 pixel_size: str, 
+                 **kwargs):
         self._frame_grabber = frame_grabber
         if self._frame_grabber is not None:
             self._frame_grabber._camera = self # give the frame grabber reference to camera
@@ -198,9 +200,12 @@ class Camera(HardwareInterface):
 
 class LineCamera(Camera):
     attr_name = "line_camera"
-    VALID_AXES = {'x', 'y'}
+    VALID_AXES = {'x', 'y'} # make these enumerations
 
-    def __init__(self, axis: str, **kwargs):
+    def __init__(self, 
+                 axis: str, 
+                 flip_line: bool, # only used by Processor
+                 **kwargs):
         super().__init__(**kwargs)
         self.axis = axis
 

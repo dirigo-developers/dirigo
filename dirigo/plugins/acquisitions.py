@@ -808,7 +808,7 @@ class FrameAcquisition(LineAcquisition):
             periods_per_frame=self.spec.records_per_buffer
         )
 
-        super()._work() # The hard work is done by super's _work() method
+        super()._work() # Most work is done by LineAcquisition._work() method
 
     def cleanup(self):
         """Extends LineAcquisition's cleanup method to stop both slow axis and fast"""
@@ -892,7 +892,7 @@ class StackAcquisition(Acquisition):
         self._frame_acquisition.add_subscriber(self)
 
         # Initialize object scanner
-        self.hw.objective_z_scanner.max_velocity = units.Velocity("300 um/s")
+        self.hw.objective_z_scanner.max_velocity = units.Velocity("250 um/s")
         self.hw.objective_z_scanner.acceleration = units.Acceleration("1 mm/s^2")
 
     def _receive_product(self, 

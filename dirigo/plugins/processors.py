@@ -93,7 +93,7 @@ sigs = [
     (uint16_3d_readonly, int64,         float32,            float32[:,:]),
     (int16_3d_readonly,  int64,         float32,            float32[:,:])
 ]
-#@njit(sigs, nogil=True, parallel=True, fastmath=True, cache=True)
+@njit(sigs, nogil=True, parallel=True, fastmath=True, cache=True)
 def crop_bidi_data(data: np.ndarray,
                    trigger_delay: int,
                    samples_per_period: float, # exact number of samples per fast axis period (can be noninteger)
@@ -102,9 +102,10 @@ def crop_bidi_data(data: np.ndarray,
     Select ranges, flips the reverse scan, and converts to float32 for phase
     correlation.
 
-    Note: operates on channel 0 only.
+    Note: operates on channels 0-1 only.
     """
     lines_per_frame, n = cropped.shape
+    Nc = data.shape[2]
 
     # Find the nominal midpoints and endpoints of fwd and rvs scans
     mid_fwd = samples_per_period/4
@@ -116,9 +117,14 @@ def crop_bidi_data(data: np.ndarray,
     rvs1 = int(mid_rvs) + n//2 - trigger_delay
 
     for rec in prange(lines_per_frame//2):
-        cropped[2*rec, :] = data[rec, fwd0:fwd1, 0].astype(np.float32)
-        cropped[2*rec+1, :] = data[rec, rvs1:rvs0:-1, 0].astype(np.float32) # flipped with the slicing
-        
+        for i in range(n):
+            temp0, temp1 = 0, 0
+            for c in range(Nc):
+                temp0 += data[rec, fwd0 + i, c]
+                temp1 += data[rec, rvs1 - i, c]
+            cropped[2*rec, i]   = temp0
+            cropped[2*rec+1, i] = temp1
+
 
 @njit(
     complex64[:](complex64[:,:]),
@@ -346,10 +352,10 @@ class RasterFrameProcessor(Processor[Acquisition]):
         PHASE_MAX = 320
 
         crop_bidi_data(
-            data =                  data, 
-            trigger_delay =         self._fixed_trigger_delay, 
-            samples_per_period =    self.samples_per_period,
-            cropped =               self._cropped
+            data                = data, 
+            trigger_delay       = self._fixed_trigger_delay, 
+            samples_per_period  = self.samples_per_period,
+            cropped             = self._cropped
         )
 
         F = fft.rfft(self._cropped, axis=1, workers=4)
@@ -418,6 +424,7 @@ class LineCameraLineProcessor(Processor[LineCameraLineAcquisition]):
         
         camera_profile = self._acquisition.camera_profile # TODO, do we need this?
         system_config = self._acquisition.system_config
+        self._flip_line: bool = system_config.line_camera['flip_line']
         runtime_info = self._acquisition.runtime_info
 
         # Compute shape & datatype. Pre-allocate Products
@@ -480,14 +487,14 @@ class LineCameraLineProcessor(Processor[LineCameraLineAcquisition]):
 
         Nc = out_product.data.shape[2]
         resample_kernel(
-            raw_data=in_product.data, 
-            invert_mask=np.ones(shape=(Nc,), dtype=np.int16), # never invert
-            offset=np.zeros(shape=(Nc,), dtype=np.int16), # no offsets
-            bit_shift=self._scaling_factor,
-            gradient=self._gradient,
-            resampled=out_product.data,
-            start_indices=self.start_indices, 
-            nsamples_to_sum=self.nsamples_to_sum
+            raw_data        = in_product.data, 
+            invert_mask     = np.ones(shape=(Nc,), dtype=np.int16), # never invert
+            offset          = np.zeros(shape=(Nc,), dtype=np.int16), # no offsets
+            bit_shift       = self._scaling_factor,
+            gradient        = self._gradient,
+            resampled       = out_product.data,
+            start_indices   = self.start_indices, 
+            nsamples_to_sum = self.nsamples_to_sum
         )
         out_product.positions = in_product.positions
 
@@ -498,14 +505,16 @@ class LineCameraLineProcessor(Processor[LineCameraLineAcquisition]):
         """Returns array of the pixel start indexes for resampling (dewarping)"""
         N_x = self._spec.pixels_per_line
 
-        x_sensor = np.arange(N_x+1) # sensor's coordinates (distorted relative to true spatial coordinates)
+        if self._flip_line:
+            x_sensor = np.arange(N_x, -1, -1)
+        else:
+            x_sensor = np.arange(N_x + 1) # sensor's coordinates (distorted relative to true spatial coordinates)
 
         # Use distortion polynomial to correct spatial edges
         int_p = self._distortion_polynomial.integ()
         x = np.linspace(0, N_x, 1_000_000)
         y = int_p(x)
         x_space = np.interp(x_sensor, y, x)
-
         x_space = x_space[np.newaxis, :]
 
         return np.ceil(x_space).astype(np.int32)
