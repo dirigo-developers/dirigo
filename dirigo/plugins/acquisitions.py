@@ -353,8 +353,9 @@ class LineAcquisitionSpec(SampleAcquisitionSpec):
         fill_fraction: float = 1.0,
         **kwargs
     ):
-        super().__init__(record_length=0, # will be overwritten
-                         **kwargs)
+        super().__init__(record_length=0, **kwargs)
+        #super().__init__(**kwargs)
+        
         self.bidirectional_scanning = bidirectional_scanning 
         if pixel_time:
             self.pixel_time = units.Time(pixel_time)
@@ -535,8 +536,7 @@ class LineAcquisition(SampleAcquisition):
 
                 self._publish(acq_product)
 
-                print(f"Acquired {digi.acquire.buffers_acquired} {"" if bpa==-1 else f"of {bpa}"} "
-                      )
+                print(f"Acquired {digi.acquire.buffers_acquired} {"" if bpa==-1 else f"of {bpa}"} ")
         finally:
             self.cleanup()
 

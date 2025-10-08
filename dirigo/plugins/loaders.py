@@ -50,7 +50,7 @@ class RawRasterFrameLoader(Loader):
             tags = tif.pages[0].tags
 
             cfg_dict = json.loads(tags[TiffLogger.SYSTEM_CONFIG_TAG].value)
-            self.system_config = SystemConfig(**cfg_dict)
+            self.system_config = SystemConfig(cfg_dict)
 
             runtime_dict = json.loads(tags[TiffLogger.RUNTIME_INFO_TAG].value)
             self.runtime_info = LineAcquisitionRuntimeInfo.from_dict(runtime_dict)
@@ -77,7 +77,7 @@ class RawRasterFrameLoader(Loader):
                 )
 
                 while self.frames_read < n_frames:
-                    frame = self.get_free_product()
+                    frame = self._get_free_product()
 
                     # Copy raw data
                     frame.data[...] = tif.pages[self.frames_read].asarray()

@@ -140,7 +140,7 @@ class Dirigo:
         return self.make("acquisition", name, **kw)
     
     def make_loader(self, name: str, file_path: Path, **kw: Any) -> "Loader":
-        return self.make("loader", name, file_path=file_path)
+        return self.make("loader", name, file_path=file_path, **kw)
     
     @overload
     def make_processor(self, name: Literal["rolling_average"], *,               # type: ignore
