@@ -40,24 +40,27 @@ class LineAcquisitionRuntimeInfo:
     scanner_amplitude: units.Angle
     digitizer_bit_depth: int
     digitizer_trigger_delay: int
+    n_channels: int
     stage_scanner_angle: units.Angle | None = None
 
     @classmethod
     def from_acquisition(cls, acquisition: "LineAcquisition"):
         return cls(
-            scanner_amplitude=acquisition.hw.fast_raster_scanner.amplitude,
-            digitizer_bit_depth=acquisition.hw.digitizer.bit_depth,
-            digitizer_trigger_delay=acquisition.hw.digitizer.acquire.trigger_delay_samples,
-            stage_scanner_angle=acquisition.hw.laser_scanning_optics.stage_scanner_angle
+            scanner_amplitude       = acquisition.hw.fast_raster_scanner.amplitude,
+            digitizer_bit_depth     = acquisition.hw.digitizer.bit_depth,
+            digitizer_trigger_delay = acquisition.hw.digitizer.acquire.trigger_delay_samples,
+            n_channels              = sum([c.enabled for c in acquisition.hw.digitizer.channels]),
+            stage_scanner_angle     = acquisition.hw.laser_scanning_optics.stage_scanner_angle
         )
     
     @classmethod
     def from_dict(cls, d: dict):
         return cls(
-            scanner_amplitude=units.Angle(d['scanner_amplitude']),
-            digitizer_bit_depth=int(d['digitizer_bit_depth']),
-            digitizer_trigger_delay=int(d['digitizer_trigger_delay']),
-            stage_scanner_angle=units.Angle(d['stage_scanner_angle'])
+            scanner_amplitude       = units.Angle(d['scanner_amplitude']),
+            digitizer_bit_depth     = int(d['digitizer_bit_depth']),
+            digitizer_trigger_delay = int(d['digitizer_trigger_delay']),
+            n_channels              = int(d['n_channels']),
+            stage_scanner_angle     = units.Angle(d['stage_scanner_angle'])
         )
     
     def to_dict(self) -> dict:
@@ -68,6 +71,7 @@ class LineAcquisitionRuntimeInfo:
 @dataclass
 class CameraAcquisitionRuntimeInfo:
     camera_bit_depth: int
+    n_channels: int
     frame_grabber_bytes_per_pixel: int | None = None
 
     @classmethod
@@ -79,15 +83,17 @@ class CameraAcquisitionRuntimeInfo:
         )
 
         return cls(
-            camera_bit_depth=acq.hw.line_camera.bit_depth,
-            frame_grabber_bytes_per_pixel=fg_bpp
+            camera_bit_depth                = acq.hw.line_camera.bit_depth,
+            n_channels                      = 3 if fg_bpp > 2 else 1, # either RGB or 8-16 bit mono
+            frame_grabber_bytes_per_pixel   = fg_bpp
         )
 
     @classmethod
     def from_dict(cls, d: dict):
         return cls(
-            camera_bit_depth=int(d['camera_bit_depth']),
-            frame_grabber_bytes_per_pixel=(
+            camera_bit_depth                = int(d['camera_bit_depth']),
+            n_channels                      = int(d["n_channels"]),
+            frame_grabber_bytes_per_pixel   = (
                 int(d["frame_grabber_bytes_per_pixel"])
                 if d.get("frame_grabber_bytes_per_pixel") is not None
                 else None
