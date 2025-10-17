@@ -2,10 +2,9 @@
 
 ## Install
 
-We recommend a fresh virtual environment (Conda or venv).
+We recommend a fresh Conda environment (use miniconda or miniforge).
 
 ```bash
-pip install -U pip
 pip install dirigo
 ```
 
@@ -15,7 +14,6 @@ For development from source:
 git clone https://github.com/dirigo-developers/dirigo
 cd dirigo
 pip install -e .
-pip install -r docs/requirements.txt
 ```
 
 ## Quickstart (simulated hardware)
@@ -25,10 +23,8 @@ pip install -r docs/requirements.txt
 import dirigo
 
 def main():
-    system = dirigo.System(simulated=True)
-    with system.acquire() as run:
-        frame = run.grab()
-        print(frame.shape, frame.dtype)
+    pass
+    # TODO
 
 if __name__ == "__main__":
     main()
