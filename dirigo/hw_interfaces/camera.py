@@ -122,7 +122,7 @@ class Camera(HardwareInterface):
         self._frame_grabber = frame_grabber
         if self._frame_grabber is not None:
             self._frame_grabber._camera = self # give the frame grabber reference to camera
-        self._pixel_size = units.Position(pixel_size)
+        self._pixel_size = units.Length(pixel_size)
 
     # essential parameters
     # sensor shape (max resolution)
@@ -130,7 +130,7 @@ class Camera(HardwareInterface):
     # frame rate / interval
 
     @property
-    def pixel_size(self) -> units.Position:
+    def pixel_size(self) -> units.Length:
         return self._pixel_size
 
     @property

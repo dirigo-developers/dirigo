@@ -19,7 +19,7 @@ class LinearEncoderViaNI(LinearEncoder):
     def __init__(self,
                  signal_a_channel: str, 
                  signal_b_channel: str,
-                 distance_per_pulse: units.Position, 
+                 distance_per_pulse: units.Length, 
                  sample_clock_channel: Optional[str] = None, 
                  trigger_channel: Optional[str] = None,
                  timestamp_trigger_events: bool = False,
@@ -52,14 +52,14 @@ class LinearEncoderViaNI(LinearEncoder):
         else:
             self._trigger_channel = None
 
-        self._distance_per_pulse = units.Position(distance_per_pulse)
+        self._distance_per_pulse = units.Length(distance_per_pulse)
         self._samples_per_channel = samples_per_channel
         self._timestamp_trigger_events = timestamp_trigger_events
 
         self._min_pulse_width = float(min_pulse_width)
 
     def start_logging(self, 
-                      initial_position: units.Position, 
+                      initial_position: units.Length, 
                       expected_sample_rate: units.SampleRate | units.Frequency):
         """Sets up the counter input task and starts it."""
         self._logging_task = nidaqmx.Task() # TODO give it a name
@@ -130,7 +130,7 @@ class LinearEncoderViaNI(LinearEncoder):
         return timestamps
     
     def start_triggering(self, 
-                         distance_per_trigger: units.Position,
+                         distance_per_trigger: units.Length,
                          direction: Literal['forward', 'reverse']
                          ) -> None:
         
@@ -271,7 +271,7 @@ class MultiAxisLinearEncodersViaNI(MultiAxisLinearEncoder):
             raise RuntimeError("Z encoder not initialized")
         return self._z
     
-    def start_logging(self, initial_position: list[units.Position], line_rate: units.Frequency):
+    def start_logging(self, initial_position: list[units.Length], line_rate: units.Frequency):
         """Starts logging on all available encoders.
         
         Expects to be passed a reference to the hardware container, needed to

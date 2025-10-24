@@ -163,11 +163,11 @@ class LinearStage(Stage):
     
     @property
     @abstractmethod
-    def position(self) -> units.Position:
+    def position(self) -> units.Length:
         ...
     
     @abstractmethod 
-    def move_to(self, position: units.Position, blocking: bool = False):
+    def move_to(self, position: units.Length, blocking: bool = False):
         """
         Initiate move to specified spatial position.
 

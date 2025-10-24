@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "dirigo"
-version = "0.3.0"
+version = "0.4.0"
 description = "Dirigo is a collection of interfaces for customizable image data acquisition"
 authors = [
     {name = "T. D. Weber", email = "tweber@mit.edu"}
@@ -13,7 +13,8 @@ license = {text = "MIT"}
 dependencies = [
     "numba",
     "scipy", "scipy-stubs",
-    "toml",
+    "tomlkit",
+    "pydantic",
     "platformdirs",
     "tifffile",
     "nidaqmx"
@@ -78,3 +79,7 @@ ni = "dirigo.plugins.digitizers:NIDigitizer"
 
 [project.entry-points."dirigo_detectors"]
 generic = "dirigo.plugins.detectors:GenericDetector"
+
+[project.entry-points."dirigo.devices.optics"]
+camera_optics = "dirigo.devices.optics.plugins.camera_optics:CameraOpticsDevice"
+laser_scanning_optics = "dirigo.devices.optics.plugins.laser_scanning_optics:LaserScanningOpticsDevice"

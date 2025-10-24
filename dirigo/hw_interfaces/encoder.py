@@ -58,7 +58,7 @@ class LinearEncoder(HardwareInterface):
 
     @abstractmethod
     def start_triggering(self, 
-                         distance_per_trigger: units.Position, 
+                         distance_per_trigger: units.Length, 
                          direction: Literal['forward', 'reverse']):
         """Start encoder-derived trigger output."""
         pass

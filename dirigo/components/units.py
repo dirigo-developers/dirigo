@@ -4,6 +4,8 @@ from typing import TypeVar, Generic, Dict, Optional
 from dataclasses import dataclass
 from collections import Counter
 
+from pydantic_core import core_schema, PydanticCustomError
+from pydantic import GetCoreSchemaHandler
 import numpy as np
 
 
@@ -242,6 +244,35 @@ class UnitQuantity(float):
             return other / float(self)
         return NotImplemented
 
+    @classmethod
+    def __get_pydantic_core_schema__(cls, _source_type, _handler: GetCoreSchemaHandler):
+        """
+        Allow fields annotated as `Time`, `Voltage`, etc. to accept:
+          - an existing instance (pass-through),
+          - a string like "120 ms",
+          - a number (interpreted as base unit).
+        Also define a default serializer.
+        """
+        def _validate(v):
+            if isinstance(v, cls):
+                return v
+            try:
+                return cls(v)
+            except Exception as e:
+                raise PydanticCustomError(
+                    'unit_parse',
+                    f"Could not parse {v!r} as {cls.__name__}: {e}"
+                )
+
+        def _serialize(v):
+            return str(v)
+
+        return core_schema.no_info_plain_validator_function(
+            _validate,
+            serialization=core_schema.plain_serializer_function_ser_schema(
+                _serialize, when_used='always'
+            )
+        )
 
 # ---------- Concrete unit quantity classes ----------
 class Voltage(UnitQuantity):
@@ -336,9 +367,9 @@ class Time(UnitQuantity):
     }
 
 
-class Position(UnitQuantity):
+class Length(UnitQuantity):
     """
-    Represents a spatial position value with units (e.g. m, cm, mm, μm, nm, km)
+    Represents a spatial value with units (e.g. m, cm, mm, μm, nm, km)
     """
     DIMENSIONAL_QUANTITY = ('L', '1')
     ALLOWED_UNITS_AND_MULTIPLIERS = {
@@ -565,11 +596,11 @@ class VoltageRange(RangeWithUnits[Voltage]):
     UNIT_QUANTITY_CLASS = Voltage
         
 
-class PositionRange(RangeWithUnits[Position]):
+class PositionRange(RangeWithUnits[Length]):
     """
     Represents a position range with units (e.g. m, mm, μm, nm, km)
     """
-    UNIT_QUANTITY_CLASS = Position
+    UNIT_QUANTITY_CLASS = Length
 
 
 class TimeRange(RangeWithUnits[Time]):

@@ -351,8 +351,8 @@ class LineAcquisitionSpec(SampleAcquisitionSpec):
     MAX_PIXEL_SIZE_ADJUSTMENT = 0.01
     def __init__(
         self,
-        line_width: units.Position | str,
-        pixel_size: units.Position | str,
+        line_width: units.Length | str,
+        pixel_size: units.Length | str,
         lines_per_buffer: int,
         bidirectional_scanning: bool = False,
         pixel_time: str | None = None, # e.g. "1 μs"
@@ -367,8 +367,8 @@ class LineAcquisitionSpec(SampleAcquisitionSpec):
             self.pixel_time = units.Time(pixel_time)
         else:
             self.pixel_time = None # None codes for non-constant pixel time (ie resonant scanning)
-        self.line_width = units.Position(line_width)
-        psize = units.Position(pixel_size)
+        self.line_width = units.Length(line_width)
+        psize = units.Length(pixel_size)
 
         # Adjust pixel size such that line_width/pixel_size is an integer
         self.pixel_size = self.line_width / round(self.line_width / psize)
@@ -386,13 +386,13 @@ class LineAcquisitionSpec(SampleAcquisitionSpec):
 
     # Convenience properties
     @property
-    def extended_scan_width(self) -> units.Position: # TODO remove this b/c this calculation should be done explicitly where its needed for transparency
+    def extended_scan_width(self) -> units.Length: # TODO remove this b/c this calculation should be done explicitly where its needed for transparency
         """
         Returns the desired line width divided by the fill fraction. For sinusoidal
         scan paths this is the full scan amplitude required to cover the line
         width given a certain fill fraction.
         """
-        return units.Position(self.line_width / self.fill_fraction)
+        return units.Length(self.line_width / self.fill_fraction)
     
     @property
     def records_per_buffer(self) -> int:
@@ -657,8 +657,8 @@ class LineAcquisition(SampleAcquisition):
 
 class LineCameraLineAcquisitionSpec(LineCameraAcquisitionSpec):
     def __init__(self, 
-                 line_width: units.Position | str,
-                 pixel_size: units.Position | str,  
+                 line_width: units.Length | str,
+                 pixel_size: units.Length | str,  
                  integration_time: units.Time | str,
                  line_period: units.Time | str,
                  lines_per_buffer: int,               
@@ -667,11 +667,11 @@ class LineCameraLineAcquisitionSpec(LineCameraAcquisitionSpec):
         Specify a line scan camera 1-D line acquisition.
         Note: `line_width` will be adjusted such that it is divisible by `pixel_size`
         """
-        self.pixel_size = units.Position(pixel_size)
+        self.pixel_size = units.Length(pixel_size)
 
-        lw = units.Position(line_width)
+        lw = units.Length(line_width)
         pixels_per_line = round(lw / self.pixel_size)
-        self.line_width = units.Position(pixels_per_line * self.pixel_size)
+        self.line_width = units.Length(pixels_per_line * self.pixel_size)
 
         super().__init__(
             integration_time=integration_time,
@@ -740,7 +740,7 @@ class FrameAcquisitionSpec(LineAcquisitionSpec):
     """Specifications for frame series acquisition"""
     MAX_PIXEL_HEIGHT_ADJUSTMENT = 0.01
     def __init__(self, 
-                 frame_height: str | units.Position, 
+                 frame_height: str | units.Length, 
                  flyback_periods: int, 
                  pixel_height: str = "", # leave empty to set pxiel height = width
                  **kwargs):
@@ -748,11 +748,11 @@ class FrameAcquisitionSpec(LineAcquisitionSpec):
         self.pixel_size = kwargs["pixel_size"]
         self.bidirectional_scanning = kwargs["bidirectional_scanning"]
         
-        self.frame_height = units.Position(frame_height)
+        self.frame_height = units.Length(frame_height)
         if pixel_height == "":
-            p_height = units.Position(self.pixel_size)
+            p_height = units.Length(self.pixel_size)
         else:
-            p_height = units.Position(pixel_height)
+            p_height = units.Length(pixel_height)
 
         self.pixel_height = self.frame_height / round(self.frame_height / p_height)
         if abs(self.pixel_height - p_height) / p_height > self.MAX_PIXEL_HEIGHT_ADJUSTMENT:
@@ -842,20 +842,20 @@ class FrameAcquisition(LineAcquisition):
 # ---------- 3-D acquisitions ----------
 class StackAcquisitionSpec(FrameAcquisitionSpec):
     def __init__(self, 
-                 lower_limit: str | units.Position, 
-                 upper_limit: str | units.Position, 
-                 depth_spacing: str | units.Position,
+                 lower_limit: str | units.Length, 
+                 upper_limit: str | units.Length, 
+                 depth_spacing: str | units.Length,
                  saved_frames_per_step: int = 2, 
                  sacrificial_frames_per_step: int = 2,
                  **kwargs):
         super().__init__(**kwargs)
 
-        self.lower_limit = units.Position(lower_limit)
-        self.upper_limit = units.Position(upper_limit)
+        self.lower_limit = units.Length(lower_limit)
+        self.upper_limit = units.Length(upper_limit)
         if self.depth_range < 0:
             raise ValueError("Stack upper limit must be greater than lower limit.")
 
-        self.depth_spacing = units.Position(depth_spacing)
+        self.depth_spacing = units.Length(depth_spacing)
         if self.depth_spacing <= 0:
             raise ValueError("Stack depth spacing must be greater than 0.")
         
@@ -868,7 +868,7 @@ class StackAcquisitionSpec(FrameAcquisitionSpec):
             raise ValueError("Sacrificial frames out of range [0,10)")
 
     @property
-    def depth_range(self) -> units.Position:
+    def depth_range(self) -> units.Length:
         return self.upper_limit - self.lower_limit
 
     @property

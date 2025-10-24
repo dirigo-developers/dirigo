@@ -155,12 +155,12 @@ class TriggerDelayCalibrationLogger(Logger):
 
 class StageTranslationCalibrationSpec(FrameAcquisition.Spec):
     def __init__(self,
-                 translation: units.Position | str,
+                 translation: units.Length | str,
                  ignore_frames: int = 10,
                  n_steps: int = 4,
                  **kwargs):
         super().__init__(**kwargs)
-        self.translation = units.Position(translation)
+        self.translation = units.Length(translation)
         self.ignore_frames = ignore_frames
         self.n_steps = n_steps
 
@@ -290,7 +290,7 @@ class LineDistortionCalibrationLogger(Logger):
                 mov_patch = frame[(yc-yr):(yc+yr), m0:(m0 + self.PATCH)]
 
                 _, j = self.x_corr(ref_patch, mov_patch)
-                print(units.Position(j * spec.pixel_size))
+                print(units.Length(j * spec.pixel_size))
 
                 dx_observed[p_idx, f_idx] = j + dx_true
                 ref_patch_center = p0 + self.PATCH//2

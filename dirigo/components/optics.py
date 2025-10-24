@@ -17,7 +17,7 @@ class LaserScanningOptics:
         """
         fast_axis_correction (float): extends scan by factor to correct mag error
         """
-        self._objective_focal_length = units.Position(objective_focal_length)
+        self._objective_focal_length = units.Length(objective_focal_length)
         self._relay_magnification = float(relay_magnification)
 
         # load line width calibration, TODO
@@ -27,7 +27,7 @@ class LaserScanningOptics:
         
 
     @property
-    def objective_focal_length(self) -> units.Position:
+    def objective_focal_length(self) -> units.Length:
         """Returns the objective focal length."""
         return self._objective_focal_length
     
@@ -41,7 +41,7 @@ class LaserScanningOptics:
     def scan_angle_to_object_position(self, 
                                       angle: units.Angle, 
                                       axis: Optional[str] = None
-                                      ) -> units.Position:
+                                      ) -> units.Length:
         """
         Return the focus position for a certain scanner angle (optical).
 
@@ -49,10 +49,10 @@ class LaserScanningOptics:
         """
         objective_angle = angle / self.relay_magnification 
         position = float(objective_angle) * self.objective_focal_length
-        return units.Position(position)
+        return units.Length(position)
 
     def object_position_to_scan_angle(self, 
-                                      position: units.Position) -> units.Angle:
+                                      position: units.Length) -> units.Angle:
         """
         Return the scanner angle (optical) required for a certain focus position.
 

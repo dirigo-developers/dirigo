@@ -86,8 +86,8 @@ def load_signal_offset(
 
 
 def load_line_gradient_calibration(
-        line_width: units.Position,
-        pixel_size: units.Position,
+        line_width: units.Length,
+        pixel_size: units.Length,
         path: Path = config_path() / "optics/line_gradient.csv"
     ):
     """Returns a function to correct intensity vignetting."""
