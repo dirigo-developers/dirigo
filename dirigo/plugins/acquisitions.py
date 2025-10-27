@@ -886,10 +886,11 @@ class StackAcquisition(Acquisition):
         super().__init__(hw, system_config, spec)
         self.spec: StackAcquisitionSpec # to refine type hints
 
+        self._original_z_position = self.hw.objective_z_scanner.position
         self._depths = np.arange(
-            start=self.spec.lower_limit,
-            stop=self.spec.upper_limit,
-            step=self.spec.depth_spacing
+            start   = self.spec.lower_limit,
+            stop    = self.spec.upper_limit,
+            step    = self.spec.depth_spacing
         )
 
         # Set up child FrameAcquisition & subscribe to it
@@ -898,7 +899,7 @@ class StackAcquisition(Acquisition):
         self._frame_acquisition.add_subscriber(self)
 
         # Initialize object scanner
-        self.hw.objective_z_scanner.max_velocity = units.Velocity("250 um/s")
+        self.hw.objective_z_scanner.max_velocity = units.Velocity("150 um/s")
         self.hw.objective_z_scanner.acceleration = units.Acceleration("1 mm/s^2")
 
     def _receive_product(self, 
@@ -953,7 +954,7 @@ class StackAcquisition(Acquisition):
         finally:
             self._frame_acquisition.stop()
             self._publish(None) # publish the sentinel
-            z_scanner.move_to(self._depths[0]) # move back to start
+            z_scanner.move_to(self._original_z_position) # move back to original position
 
     @property
     def digitizer_profile(self) -> DigitizerProfile:
@@ -962,5 +963,9 @@ class StackAcquisition(Acquisition):
     @property
     def runtime_info(self) -> LineAcquisitionRuntimeInfo:
         return self._frame_acquisition.runtime_info
+    
+    @classmethod
+    def get_specification(cls, spec_name = "default") -> StackAcquisitionSpec:
+        return super().get_specification(spec_name) # type: ignore
 
             

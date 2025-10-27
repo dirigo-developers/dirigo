@@ -11,7 +11,7 @@ from dirigo.sw_interfaces import Logger
 from dirigo.sw_interfaces.acquisition import Acquisition, AcquisitionProduct
 from dirigo.hw_interfaces import Digitizer
 from dirigo.plugins.acquisitions import SampleAcquisitionSpec, FrameAcquisition, FrameAcquisitionSpec
-
+    
 
 def serialize_float64_list(arrays: Sequence[np.ndarray]) -> bytes:
     """

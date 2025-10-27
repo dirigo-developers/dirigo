@@ -88,10 +88,10 @@ def resample_kernel(raw_data: np.ndarray,
 
 
 sigs = [
-#    data                trigger delay  samples_per_period  cropped
-    (int8_3d_readonly,   int64,         float32,            float32[:,:]),
-    (uint16_3d_readonly, int64,         float32,            float32[:,:]),
-    (int16_3d_readonly,  int64,         float32,            float32[:,:])
+#    data                trigger delay  samples_per_period   cropped
+    (int8_3d_readonly,   int64,         float32,             float32[:,:]),
+    (uint16_3d_readonly, int64,         float32,             float32[:,:]),
+    (int16_3d_readonly,  int64,         float32,             float32[:,:])
 ]
 @njit(sigs, nogil=True, parallel=True, fastmath=True, cache=True)
 def crop_bidi_data(data: np.ndarray,
@@ -112,8 +112,6 @@ def crop_bidi_data(data: np.ndarray,
     mid_rvs = mid_fwd + samples_per_period/2
 
     fwd0 = int(mid_fwd) - n//2 - trigger_delay
-    fwd1 = int(mid_fwd) + n//2 - trigger_delay
-    rvs0 = int(mid_rvs) - n//2 - trigger_delay
     rvs1 = int(mid_rvs) + n//2 - trigger_delay
 
     for rec in prange(lines_per_frame//2):
@@ -244,6 +242,7 @@ class RasterFrameProcessor(Processor[Acquisition]):
             self._gradient = np.ones((self._spec.pixels_per_line,), np.float32)
 
         self._phases = np.full(shape=(10,), fill_value=np.nan, dtype=np.float32)
+        self._phase_counter = 0
         self._frames_processed = 0
 
     def _receive_product(self, block: bool = True, timeout: float | None = None) -> AcquisitionProduct:
@@ -272,8 +271,11 @@ class RasterFrameProcessor(Processor[Acquisition]):
 
         # Measure phase from bidi data (in uni-directional, phase is not critical)
         if self._spec.bidirectional_scanning:
-            p = self._frames_processed % len(self._phases)
-            self._phases[p] = self.measure_phase(acq_product.data)
+            phase = self.measure_phase(acq_product.data)
+            if phase is not np.nan:
+                p = self._phase_counter % len(self._phases)
+                self._phases[p] = phase
+                self._phase_counter += 1
             self._trigger_error = np.median(self._phases[~np.isnan(self._phases)])
 
         # Update resampling start indices--these can change a bit if the scanner frequency drifts
@@ -282,21 +284,22 @@ class RasterFrameProcessor(Processor[Acquisition]):
 
         with timer("resample_kernel"):
             resample_kernel(
-                raw_data=acq_product.data, 
-                invert_mask=self._invert_mask,
-                offset=self.signal_offset,
-                bit_shift=self._scaling_factor,
-                gradient=self._gradient,
-                resampled=processed.data,
-                start_indices=start_indices, 
-                nsamples_to_sum=nsamples_to_sum
+                raw_data        = acq_product.data, 
+                invert_mask     = self._invert_mask,
+                offset          = self.signal_offset,
+                bit_shift       = self._scaling_factor,
+                gradient        = self._gradient,
+                resampled       = processed.data,
+                start_indices   = start_indices, 
+                nsamples_to_sum = nsamples_to_sum
             )
         processed.timestamps = acq_product.timestamps
         processed.positions = acq_product.positions
         
         if hasattr(self, "_fast_scanner_frequency"):
-            processed.phase = TWO_PI * self._trigger_error \
-            / (self._acquisition.digitizer_profile.sample_clock.rate * avg_trig_period)
+            # processed.phase = TWO_PI * self._trigger_error \
+            # / (self._acquisition.digitizer_profile.sample_clock.rate * avg_trig_period)
+            processed.phase = self._trigger_error
             processed.frequency = float(self._fast_scanner_frequency)
         
         return processed
@@ -349,7 +352,8 @@ class RasterFrameProcessor(Processor[Acquisition]):
         (for bidirectional scanning).
         """
         UPSAMPLE = 1        # TODO move this somewhere else
-        PHASE_MAX = 320
+        PHASE_MAX = 100
+        THRESH = 20
 
         crop_bidi_data(
             data                = data, 
@@ -357,6 +361,8 @@ class RasterFrameProcessor(Processor[Acquisition]):
             samples_per_period  = self.samples_per_period,
             cropped             = self._cropped
         )
+        if np.mean(self._cropped) - sum(self.signal_offset) < THRESH:
+            return np.nan
 
         F = fft.rfft(self._cropped, axis=1, workers=4)
         xps = compute_cross_power_spectrum(F)
@@ -563,7 +569,9 @@ def _rolling_average_kernel(ring_buffer: np.ndarray,
 
 class RollingAverageProcessor(Processor[RasterFrameProcessor]):
     def __init__(self,
-                 upstream):
+                 upstream,
+                 n_frame_average: int = 4,
+                 skip_n_frames: int = 0):
         super().__init__(upstream)
         self._data_range = upstream.data_range
         self._acquisition: FrameAcquisition | LineAcquisition 
@@ -578,12 +586,17 @@ class RollingAverageProcessor(Processor[RasterFrameProcessor]):
         self._reset_average_xy_cutoff_sqr = pixel_size ** 2 # TODO, may require some tuning to remove unwanted resets
         self._reset_average_z_cutoff = pixel_size # TODO, dido
 
+        self._average_buffer_lock = threading.Lock() # Use lock for thread safety
         self._prev_position = None
-        self._n_frame_average = 1
+        self.n_frame_average = n_frame_average
+        n_skip = int(skip_n_frames)
+        if n_skip < 0:
+            raise ValueError(f"Can't skip negative frames, received {n_skip}")
+        self._skip_n_frames = n_skip
+        self._skip_counter = 0
         self._average_buffer = None
         self._i: int = 0 # tracks rolling average index
-        self._average_buffer_lock = threading.Lock() # Use lock for thread safety
-
+        
     @property
     def n_frame_average(self) -> int:
         return self._n_frame_average
@@ -651,15 +664,20 @@ class RollingAverageProcessor(Processor[RasterFrameProcessor]):
                         a = self._i % self.n_frame_average
                         self._average_buffer[a] = in_product.data
 
-                        out_product = self._get_free_product()
+                        # Skip publishing certain frames
+                        if self._skip_counter < self._skip_n_frames:
+                            print(f"Skipping (counter={self._skip_counter})")
+                            self._skip_counter += 1
+                        else:
+                            out_product = self._get_free_product()
 
-                        _rolling_average_kernel(
-                            self._average_buffer, 
-                            self._i, 
-                            out_product.data
-                        )
-
-                        self._publish(out_product)
+                            _rolling_average_kernel(
+                                self._average_buffer, 
+                                self._i, 
+                                out_product.data
+                            )
+                            self._publish(out_product)
+                            self._skip_counter = 0
                         
                 self._i += 1
 
