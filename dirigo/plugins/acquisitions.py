@@ -873,7 +873,12 @@ class StackAcquisitionSpec(FrameAcquisitionSpec):
 
     @property
     def depths_per_acquisition(self) -> int:
-        return int(self.depth_range / self.depth_spacing)
+        return self.depths.size
+    
+    @property
+    def depths(self) -> np.ndarray:
+        """Returns the list of depths for each frame in the stack."""
+        return np.arange(self.lower_limit, self.upper_limit, self.depth_spacing)
     
 
 class StackAcquisition(Acquisition):
@@ -887,11 +892,7 @@ class StackAcquisition(Acquisition):
         self.spec: StackAcquisitionSpec # to refine type hints
 
         self._original_z_position = self.hw.objective_z_scanner.position
-        self._depths = np.arange(
-            start   = self.spec.lower_limit,
-            stop    = self.spec.upper_limit,
-            step    = self.spec.depth_spacing
-        )
+        self._depths = self.spec.depths
 
         # Set up child FrameAcquisition & subscribe to it
         self.spec.buffers_per_acquisition = -1 # codes for infinite buffers
