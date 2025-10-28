@@ -96,6 +96,7 @@ class ChannelProfile:
     coupling: ChannelCoupling
     impedance: units.Resistance
     range: units.VoltageRange
+    offset: units.Voltage = units.Voltage("0 V")
 
     @classmethod
     def from_dict(cls, channel_profile_list: List[dict]) -> List["ChannelProfile"]:
@@ -117,12 +118,16 @@ class ChannelProfile:
                 # if coming from toml file and using plus/minus, eg "±2 V"
                 input_range = units.VoltageRange(input_range)
 
+            offset = channel_profile.get("offset", units.Voltage("0 V"))
+            offset = units.Voltage(offset)
+
             channel = cls(
-                enabled=channel_profile["enabled"], 
-                inverted=channel_profile.get("inverted", False),
-                coupling=coupling, 
-                impedance=impedance, 
-                range=input_range
+                enabled     = channel_profile["enabled"], 
+                inverted    = channel_profile.get("inverted", False),
+                coupling    = coupling, 
+                impedance   = impedance, 
+                range       = input_range,
+                offset      = offset 
             )
             channel_list.append(channel)
         return channel_list
@@ -320,6 +325,27 @@ class Channel(ABC):
     @abstractmethod
     def range_options(self) -> set[units.VoltageRange]:
         """Set of available voltage ranges."""
+        pass
+
+    @property
+    @abstractmethod
+    def offset(self) -> units.Voltage:
+        """DC offset voltage"""
+        pass
+
+    @offset.setter
+    @abstractmethod
+    def offset(self, offset: units.Voltage):
+        """Set the DC offset voltage.
+
+        Must be within range specified by `offset_range`
+        """
+        pass
+
+    @property
+    @abstractmethod
+    def offset_range(self) -> units.VoltageRange:
+        """Settable range for analog DC offset."""
         pass
     
     
@@ -758,6 +784,7 @@ class Digitizer(HardwareInterface):
             channel.coupling = channel_profile.coupling
             channel.impedance = channel_profile.impedance
             channel.range = channel_profile.range
+            channel.offset = channel_profile.offset
 
         if self.profile.trigger.external_range and self.profile.trigger.external_coupling:
             self.trigger.external_range = self.profile.trigger.external_range
