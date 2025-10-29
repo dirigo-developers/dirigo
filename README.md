@@ -1,4 +1,6 @@
 # Dirigo
+[![Documentation Status](https://readthedocs.org/projects/dirigo/badge/?version=latest)](https://dirigo.readthedocs.io/en/latest/?badge=latest)
+
 **Dirigo** is an extensible, high-performance backend for scientific image acquisition, designed with high-speed laser scanning microscopy in mind but adaptable to a wide range of medium- to high-complexity imaging systems.
 
 Dirigo separates hardware control, acquisition logic, and user interface, making it easy to:
