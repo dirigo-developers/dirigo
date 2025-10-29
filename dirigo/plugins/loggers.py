@@ -202,8 +202,8 @@ class TiffLogger(Logger):
                 options['planarconfig'] = 'contig'
 
         self._fn = self.save_path / f"{self.basename}.tif"
-
-        with tifffile.TiffWriter(self._fn, bigtiff=True, ome=True) as tif:
+        
+        with tifffile.TiffWriter(self._file_path(), bigtiff=True, ome=True) as tif:
             tif.write(
                 np.array(self._stack_data),
                 metadata=metadata,
