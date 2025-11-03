@@ -459,10 +459,6 @@ class NIAcquire(digitizer.Acquire):
         self._trigger_delay_samples = samples
 
     @property
-    def trigger_delay_duration(self) -> units.Time:
-        return units.Time(self._trigger_delay_samples / self._sample_clock.rate)
-
-    @property
     def trigger_delay_sample_resolution(self) -> int:
         # Not a standard NI concept. We can return 1 as a fallback.
         return 1
@@ -488,10 +484,6 @@ class NIAcquire(digitizer.Acquire):
     @record_length.setter
     def record_length(self, length: int):
         self._record_length = length
-
-    @property
-    def record_duration(self) -> units.Time:
-        return units.Time(self._record_length / self._sample_clock.rate)
 
     @property
     def record_length_minimum(self) -> int:

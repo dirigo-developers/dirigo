@@ -532,8 +532,6 @@ class Acquire(ABC):
     def trigger_delay_samples(self) -> int:
         """
         Delay between trigger event and acquisition start, in sample clock periods.
-        
-        Use `trigger_delay_duration` for the same setting in terms of time.
         """
         # Arguably could be part of Trigger object, but put here because of role
         # in acquisition timing
@@ -544,16 +542,6 @@ class Acquire(ABC):
     def trigger_delay_samples(self, samples: int):
         """Set the trigger delay, in sample clock periods."""
         pass
-
-    @property
-    @abstractmethod
-    def trigger_delay_duration(self) -> units.Time:
-        """Delay between trigger event and acquisition start, in units of time.
-        
-        Use `trigger_delay_samples` for the same setting in terms of sample 
-        clock periods. 
-        """
-        pass # TODO, is this really needed?
 
     @property
     @abstractmethod
@@ -579,10 +567,7 @@ class Acquire(ABC):
     @property
     @abstractmethod
     def record_length(self) -> int:
-        """Record length in number samples.
-
-        Use `record_duration` for the same setting in terms of time. 
-        """
+        """ Record length in number samples. """
         pass
 
     @record_length.setter
@@ -592,16 +577,6 @@ class Acquire(ABC):
         
         Record length (in number of samples) must be greater than 
         `record_length_minimum` and divisible by `record_length_resolution`.
-        """
-        pass
-
-    @property
-    @abstractmethod
-    def record_duration(self) -> units.Time:
-        """Record duration.
-
-        Use `record_length` for the same setting in terms of number 
-        samples. 
         """
         pass
 
