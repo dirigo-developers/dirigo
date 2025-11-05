@@ -433,8 +433,8 @@ class NIAcquire(digitizer.Acquire):
 
         # The Dirigo interface wants these; for slow or mid-rate NI tasks, we 
         # often do single continuous acquisitions. We'll do a rough approach:
-        self._trigger_delay_samples = 0  # Not widely used in NI
-        self._record_length: int = None       # e.g. 1000 samples
+        self._trigger_offset: int = 0 # only support 0 (no pre-trigger or delay)
+        self._record_length: int = None
         self._records_per_buffer = None     
         self._buffers_per_acquisition = None
         self._buffers_allocated = 1
@@ -448,35 +448,26 @@ class NIAcquire(digitizer.Acquire):
         self._samples_acquired = 0
 
     @property
-    def trigger_delay_samples(self) -> int:
-        return self._trigger_delay_samples
-
-    @trigger_delay_samples.setter
-    def trigger_delay_samples(self, samples: int):
-        # NI doesn’t have a direct concept of “trigger delay in sample ticks” 
-        # for AI tasks (except with analog triggering + advanced timing). 
-        # We'll store but not apply directly.
-        self._trigger_delay_samples = samples
-
+    def trigger_offset(self) -> int:
+        return self._trigger_offset
+    
+    @trigger_offset.setter
+    def trigger_offset(self, offset: int):
+        if int(offset) != 0:
+            raise ValueError("No trigger offset (pre-trigger/delay) is supported for NI DAQ")
+    
     @property
-    def trigger_delay_sample_resolution(self) -> int:
-        # Not a standard NI concept. We can return 1 as a fallback.
-        return 1
-
-    @property
-    def pre_trigger_samples(self):
-        # NI can do “reference trigger” tasks with pre-trigger samples. 
-        # Let’s omit that for the example or store it as zero.
-        return 0
-
-    @pre_trigger_samples.setter
-    def pre_trigger_samples(self, value):
-        pass  # Not implementing
-
+    def trigger_offset_range(self) -> units.IntRange:
+        return units.IntRange(min=0, max=0)
+    
     @property
     def pre_trigger_resolution(self):
-        return 1
+        return None # no pre-trigger with NI
 
+    @property
+    def trigger_delay_resolution(self):
+        return None # no trigger delay with NI
+    
     @property
     def record_length(self) -> int:
         return self._record_length

@@ -526,42 +526,30 @@ class Acquire(ABC):
     def n_channels_enabled(self) -> int:
         """Number of channels enabled for acquisition."""
         return sum([c.enabled for c in self._channels])
-
-    @property
-    @abstractmethod
-    def trigger_delay_samples(self) -> int:
-        """
-        Delay between trigger event and acquisition start, in sample clock periods.
-        """
-        # Arguably could be part of Trigger object, but put here because of role
-        # in acquisition timing
-        pass
-
-    @trigger_delay_samples.setter
-    @abstractmethod
-    def trigger_delay_samples(self, samples: int):
-        """Set the trigger delay, in sample clock periods."""
-        pass
-
-    @property
-    @abstractmethod
-    def trigger_delay_sample_resolution(self) -> int:
-        """Resolution of the trigger delay setting, in sample clock periods."""
-        pass
     
-    # TODO, feasible to merge the next 3 into trigger_delay?
     @property
     @abstractmethod
-    def pre_trigger_samples(self):
+    def trigger_offset(self) -> int:
         pass
 
-    @pre_trigger_samples.setter
+    @trigger_offset.setter
     @abstractmethod
-    def pre_trigger_samples(self, value):
+    def trigger_offset(self, value: int):
         pass
 
     @property
-    def pre_trigger_resolution(self):
+    @abstractmethod
+    def trigger_offset_range(self) -> units.IntRange:
+        pass
+
+    @property
+    @abstractmethod
+    def pre_trigger_resolution(self) -> int:
+        pass
+
+    @property
+    @abstractmethod
+    def trigger_delay_resolution(self) -> int:
         pass
 
     @property
