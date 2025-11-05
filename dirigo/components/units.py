@@ -602,6 +602,9 @@ class IntRange:
     def range(self) -> int:
         return 1 + self.max - self.min
     
+    def within_range(self, value: int) -> bool:
+        return self.min <= value <= self.max
+    
     @property
     def recommended_dtype(self):
         """
