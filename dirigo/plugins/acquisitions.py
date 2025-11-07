@@ -14,7 +14,7 @@ from dirigo.hw_interfaces.hw_interface import NoBuffers
 from dirigo.sw_interfaces.acquisition import Acquisition, AcquisitionSpec, AcquisitionProduct
 from dirigo.hw_interfaces.detector import DetectorSet, Detector
 from dirigo.hw_interfaces.digitizer import (
-    Digitizer, DigitizerProfile, AuxiliaryIOEnums, SampleClockSource,
+    Digitizer, DigitizerProfile, AuxiliaryIOMode, SampleClockSource,
     InputMode, TriggerSource, StreamingMode
 )
 from dirigo.hw_interfaces.scanner import (Waveforms,
@@ -470,7 +470,7 @@ class LineAcquisition(SampleAcquisition):
             fast_scanner.amplitude = optics.object_position_to_scan_angle(
                 self.spec.extended_scan_width,
             )
-            digi.aux_io.configure_mode(AuxiliaryIOEnums.OutTrigger)
+            digi.aux_io.configure_mode(AuxiliaryIOMode.OUT_TRIGGER)
             
         # Scanner settings implemented, configure digitizer acquisition params
         self.configure_digitizer()
@@ -503,6 +503,7 @@ class LineAcquisition(SampleAcquisition):
             # pause for a little while to allow res scanner to reach steady state
             if hasattr(self.hw.fast_raster_scanner, 'response_time'):
                 time.sleep(self.hw.fast_raster_scanner.response_time)
+
             digi.acquire.start() # This includes the buffer allocation
             self.active.set()
 
@@ -558,6 +559,7 @@ class LineAcquisition(SampleAcquisition):
 
         try:
             self.hw.digitizer.acquire.stop()
+            #self.hw.digitizer.aux_io.configure_mode(AuxiliaryIOMode.DISABLE) # TESTING THIS
         except:
             pass  # TODO, remove these try except blocks
         try:
@@ -596,7 +598,7 @@ class LineAcquisition(SampleAcquisition):
             start_index = 0  
 
         # Round 
-        tdr = self.hw.digitizer.acquire.trigger_delay_sample_resolution
+        tdr = self.hw.digitizer.acquire.trigger_delay_resolution
         start_index = tdr * round(start_index / tdr)
 
         return start_index

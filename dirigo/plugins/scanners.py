@@ -633,6 +633,7 @@ class SlowGalvoScannerViaNI(GalvoScannerViaNI, SlowRasterScanner):
     def __init__(self,
                  fast_scanner: FastRasterScanner, 
                  external_line_clock_channel: str | None = None, # to sync to external line clock (e.g. a resonant scanner)
+                 external_start_trigger_channel: str | None = None,
                  frame_clock_channel: str | None = None, 
                  **kwargs):
         
@@ -640,6 +641,7 @@ class SlowGalvoScannerViaNI(GalvoScannerViaNI, SlowRasterScanner):
         
         if isinstance(fast_scanner, FastGalvoScannerViaNI):
             self._external_line_clock_channel = None
+            self._external_start_trigger_channel = None
             self._ao_sample_rate = None # for Galvo-Galvo scanning, AO rate = pixel rate
             self._fast_scanner = fast_scanner
             # pass itself as reference to the fast scanner--fast scanner will know to manage AO/DO tasks
@@ -649,6 +651,9 @@ class SlowGalvoScannerViaNI(GalvoScannerViaNI, SlowRasterScanner):
             if external_line_clock_channel is None:
                 raise RuntimeError("Res-galvo/polygon-galvo scanning must specify a line clock channel for synchronization.")
             self._external_line_clock_channel = validate_ni_channel(external_line_clock_channel)
+
+            if external_start_trigger_channel is not None:
+                self._external_start_trigger_channel = validate_ni_channel(external_start_trigger_channel)
 
             if self._ao_sample_rate is None:
                 raise RuntimeError("Res-galvo/polygon-galvo scanning must specify an analog out sample rate on slow scanner")
@@ -694,11 +699,22 @@ class SlowGalvoScannerViaNI(GalvoScannerViaNI, SlowRasterScanner):
 
                 high_ticks = round(self.duty_cycle * periods_per_frame)
                 fclk_ch = self._fclock_task.co_channels.add_co_pulse_chan_ticks(
-                    counter=CounterRegistry.allocate_counter(),
-                    source_terminal=self._external_line_clock_channel,
-                    low_ticks=periods_per_frame - high_ticks, 
-                    high_ticks=high_ticks
+                    counter         = CounterRegistry.allocate_counter(),
+                    source_terminal = self._external_line_clock_channel,
+                    low_ticks       = periods_per_frame - high_ticks, 
+                    high_ticks      = high_ticks
                 )
+                if self._external_start_trigger_channel is not None:
+                    # use when digitizer can not provide trigger out synced to real record acquisitions
+                    # (e.g. Teledyne)
+                    self._fclock_task.triggers.start_trigger.cfg_dig_edge_start_trig(
+                        trigger_source  = self._external_start_trigger_channel
+                    )
+                else:
+                    # task will start immediately rather than wait for external trigger
+                    # used when digitizer can provide trigger out pulses synced with actual acquistion 
+                    # (e.g. Alazar AuxIO TriggerOut mode)
+                    pass 
 
                 fclk_ch.co_pulse_term = self._frame_clock_channel
 
@@ -718,7 +734,6 @@ class SlowGalvoScannerViaNI(GalvoScannerViaNI, SlowRasterScanner):
                     sample_mode=AcquisitionType.FINITE,
                     samps_per_chan=self.generate_waveform(self._ao_sample_rate, rearm_time).shape[0]
                 )
-
                 self._ao_task.triggers.start_trigger.cfg_dig_edge_start_trig(
                     trigger_source=self._frame_clock_channel
                 )

@@ -68,11 +68,24 @@ class ExternalTriggerCoupling(StrEnum):
     AC = "ac"
     DC = "dc"
 
+class ExternalTriggerImpedance(StrEnum):
+    HIGH = "high" # for "high-Z"
+    # for 50 ohms, use a units.Resistance object instead
+
 class ExternalTriggerRange(StrEnum):
     TTL = "ttl"
     # True voltage ranges should use the units.VoltageRange class
 
+class AuxiliaryIOMode(StrEnum):
+    DISABLE             = "disable"
+    OUT_TRIGGER         = "out_trigger"
+    OUT_PACER           = "out_pacer"
+    OUT_DIGITAL         = "out_digital"
+    IN_TRIGGER_ENABLE   = "in_trigger_enable"
+    IN_DIGITAL          = "in_digital"
 
+
+# ---------- Digitizer profiles ----------
 @dataclass(frozen=True, slots=True)
 class SampleClockProfile:
     source: SampleClockSource
@@ -138,8 +151,9 @@ class TriggerProfile:
     source: TriggerSource
     slope: TriggerSlope
     level: units.Voltage | None
+    external_coupling: ExternalTriggerCoupling | None
+    external_impedance: units.Resistance | ExternalTriggerImpedance | None
     external_range: units.VoltageRange | ExternalTriggerRange | None
-    external_coupling: ExternalTriggerCoupling = ExternalTriggerCoupling.DC
 
     @classmethod
     def from_dict(cls, d: dict) -> "TriggerProfile":
@@ -147,6 +161,19 @@ class TriggerProfile:
             level = units.Voltage(d["level"])
         else:
             level = None
+
+        if "external_coupling" in d.keys():
+            external_coupling = ExternalTriggerCoupling(d["external_coupling"].lower())
+        else:
+            external_coupling = None
+
+        if "external_impedance" in d.keys():
+            try:
+                external_impedance = ExternalTriggerImpedance(d["external_impedance"].lower())
+            except:
+                external_impedance = units.Resistance(d["external_impedance"])
+        else:
+            external_impedance = None
 
         if "external_range" in d.keys():
             try:
@@ -156,17 +183,13 @@ class TriggerProfile:
         else:
             external_range = None
 
-        if "external_coupling" in d.keys():
-            external_coupling = ExternalTriggerCoupling(d["external_coupling"].lower())
-        else:
-            external_coupling = None
-
         return cls(
             source = TriggerSource(d["source"].lower()),
             slope = TriggerSlope(d["slope"].lower()),
             level = level,
+            external_coupling = external_coupling or ExternalTriggerCoupling.DC,
+            external_impedance = external_impedance,
             external_range = external_range,
-            external_coupling = external_coupling or ExternalTriggerCoupling.DC
         )
 
 
@@ -493,6 +516,21 @@ class Trigger(ABC):
     def external_coupling_options(self) -> set[ExternalTriggerCoupling]:
         """Set of available external coupling modes."""
         pass
+    
+    @property
+    @abstractmethod
+    def external_impedance(self) -> units.Resistance | ExternalTriggerImpedance: 
+        pass
+
+    @external_impedance.setter
+    @abstractmethod
+    def external_impedance(self, imp: units.Resistance | ExternalTriggerImpedance): 
+        pass
+
+    @property
+    @abstractmethod
+    def external_impedance_options(self) -> set[units.Resistance | ExternalTriggerImpedance]: 
+        pass
 
     @property
     @abstractmethod
@@ -668,25 +706,16 @@ class Acquire(ABC):
     def _inverted_channels(self) -> list[bool]:
         return [chan.inverted for chan in self._channels if chan.enabled]
 
-
-class AuxiliaryIOEnums(Enum):
-    # Mostly based on Alazar AuxIO enums, for now
-    OutTrigger      = 0
-    OutPacer        = 1
-    OutDigital      = 2
-    InTriggerEnable = 3
-    InDigital       = 4
-
     
 class AuxiliaryIO(ABC):
     """Abstract base class for auxiliary input/output functionality."""
 
     @abstractmethod
-    def configure_mode(self, mode: AuxiliaryIOEnums, **kwargs):
+    def configure_mode(self, mode: AuxiliaryIOMode, **kwargs):
         """Configure the auxiliary I/O mode.
 
         Args:
-            mode (AuxiliaryIOEnums): The I/O mode to configure.
+            mode (AuxiliaryIOMode): The I/O mode to configure.
             **kwargs: Additional parameters for configuration.
         """
         pass
@@ -733,29 +762,38 @@ class Digitizer(HardwareInterface):
             profile_name (str): Name of the profile to load (without file extension).
         """
         profile_path = self.PROFILE_LOCATION / (profile_name + ".toml")
-        self.profile = DigitizerProfile.from_toml(profile_path)
+        profile = DigitizerProfile.from_toml(profile_path)
 
-        for channel, channel_profile in zip(self.channels, self.profile.channels):
+        for channel, channel_profile in zip(self.channels, profile.channels):
             channel.enabled = channel_profile.enabled
             # NI X-series requires # channels enabled to check max (aggregate) sample rate
+            # Teledyne also requires channels to be enabled (nof_records > 0) to not ignore some settings
         
-        self.sample_clock.source = self.profile.sample_clock.source
-        self.sample_clock.rate = self.profile.sample_clock.rate
-        self.sample_clock.edge = self.profile.sample_clock.edge
+        self.sample_clock.source = profile.sample_clock.source
+        self.sample_clock.rate = profile.sample_clock.rate
+        self.sample_clock.edge = profile.sample_clock.edge
 
-        for channel, channel_profile in zip(self.channels, self.profile.channels):
+        for channel, channel_profile in zip(self.channels, profile.channels):
             channel.coupling = channel_profile.coupling
             channel.impedance = channel_profile.impedance
             channel.range = channel_profile.range
             channel.offset = channel_profile.offset
 
-        if self.profile.trigger.external_range and self.profile.trigger.external_coupling:
-            self.trigger.external_range = self.profile.trigger.external_range
-            self.trigger.external_coupling = self.profile.trigger.external_coupling 
-        self.trigger.source = self.profile.trigger.source
-        self.trigger.slope = self.profile.trigger.slope
-        if self.profile.trigger.level:
-            self.trigger.level = self.profile.trigger.level
+        # Trigger settings
+        self.trigger.source = profile.trigger.source
+        if profile.trigger.external_coupling is not None:
+            self.trigger.external_coupling = profile.trigger.external_coupling
+        if profile.trigger.external_impedance is not None:
+            self.trigger.external_impedance = profile.trigger.external_impedance
+        if profile.trigger.external_range is not None:
+            self.trigger.external_range = profile.trigger.external_range
+        self.trigger.slope = profile.trigger.slope
+        if profile.trigger.level is not None:
+            self.trigger.level = profile.trigger.level
+
+        # try, except AttributeError  for any of these?
+
+        self.profile = profile
 
     @property
     @abstractmethod
