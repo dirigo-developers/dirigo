@@ -654,6 +654,8 @@ class SlowGalvoScannerViaNI(GalvoScannerViaNI, SlowRasterScanner):
 
             if external_start_trigger_channel is not None:
                 self._external_start_trigger_channel = validate_ni_channel(external_start_trigger_channel)
+            else:
+                self._external_start_trigger_channel = None
 
             if self._ao_sample_rate is None:
                 raise RuntimeError("Res-galvo/polygon-galvo scanning must specify an analog out sample rate on slow scanner")
