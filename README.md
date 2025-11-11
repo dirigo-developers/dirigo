@@ -1,4 +1,6 @@
 # Dirigo
+[![Documentation Status](https://readthedocs.org/projects/dirigo/badge/?version=latest)](https://dirigo.readthedocs.io/en/latest/?badge=latest)
+
 **Dirigo** is an extensible, high-performance backend for scientific image acquisition, designed with high-speed laser scanning microscopy in mind but adaptable to a wide range of medium- to high-complexity imaging systems.
 
 Dirigo separates hardware control, acquisition logic, and user interface, making it easy to:
@@ -27,6 +29,7 @@ Dirigo is in *very* early development. While the API and architecture are functi
 | **NI X-Series** (e.g., PCIe-63xx) | ✓* | ✓ (up to 4 chan.) | ✗† | ✗† |
 | **NI S-Series** (e.g., PCI-6110/6115) | ✓ | ✓ (up to 2 chan.) | △§ | △§ |
 | **AlazarTech** (e.g., ATS9440) | ✓ | ✗ | ✓ | ✓ |
+| **Teledyne SP Devices** (e.g., ADQ32) | ✓ | ✗ | ✓ | ✓ |
 | **Other / custom** (contact [TDW](https://github.com/tweber225)) | — | — | — | — |
 
 *Notes*  
