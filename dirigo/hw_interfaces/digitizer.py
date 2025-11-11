@@ -1,11 +1,11 @@
+import math, tomllib, threading
 from abc import ABC, abstractmethod
 from functools import cached_property
 from dataclasses import dataclass, asdict
 from pathlib import Path
-import math
-from typing import Literal, List, TYPE_CHECKING
-import tomllib
-from enum import StrEnum, Enum
+from typing import List, TYPE_CHECKING
+from enum import StrEnum
+
 
 from platformdirs import user_config_dir
 
@@ -71,10 +71,6 @@ class ExternalTriggerCoupling(StrEnum):
 class ExternalTriggerImpedance(StrEnum):
     HIGH = "high" # for "high-Z"
     # for 50 ohms, use a units.Resistance object instead
-
-class ExternalTriggerRange(StrEnum):
-    TTL = "ttl"
-    # True voltage ranges should use the units.VoltageRange class
 
 class AuxiliaryIOMode(StrEnum):
     DISABLE             = "disable"
@@ -153,7 +149,7 @@ class TriggerProfile:
     level: units.Voltage | None
     external_coupling: ExternalTriggerCoupling | None
     external_impedance: units.Resistance | ExternalTriggerImpedance | None
-    external_range: units.VoltageRange | ExternalTriggerRange | None
+    external_range: units.VoltageRange | None
 
     @classmethod
     def from_dict(cls, d: dict) -> "TriggerProfile":
@@ -176,10 +172,7 @@ class TriggerProfile:
             external_impedance = None
 
         if "external_range" in d.keys():
-            try:
-                external_range = ExternalTriggerRange(d["external_range"].lower())
-            except: 
-                external_range = units.VoltageRange(d["external_range"])
+            external_range = units.VoltageRange(**d["external_range"])
         else:
             external_range = None
 
@@ -534,13 +527,13 @@ class Trigger(ABC):
 
     @property
     @abstractmethod
-    def external_range(self) -> units.VoltageRange | ExternalTriggerRange: # return dirigo.VoltageRange?
+    def external_range(self) -> units.VoltageRange: # return dirigo.VoltageRange?
         """Voltage range for external triggers."""
         pass
     
     @external_range.setter
     @abstractmethod
-    def external_range(self, range: units.VoltageRange | ExternalTriggerRange):
+    def external_range(self, range: units.VoltageRange):
         """Set the voltage range for external triggers.
         
         Must match one of the options provided by `external_range_options`.
@@ -549,7 +542,7 @@ class Trigger(ABC):
 
     @property
     @abstractmethod
-    def external_range_options(self) -> set[units.VoltageRange | ExternalTriggerRange]:
+    def external_range_options(self) -> set[units.VoltageRange]:
         """Set of available external trigger voltage ranges."""
         pass
 
@@ -559,6 +552,7 @@ class Acquire(ABC):
 
     def __init__(self):
         self._channels: tuple[Channel, ...]
+        self._active = threading.Event()
 
     @property
     def n_channels_enabled(self) -> int:
@@ -812,3 +806,7 @@ class Digitizer(HardwareInterface):
         
         Requires data_range to be set up accurately in subclass."""
         return math.ceil(math.log2(self.data_range.range))
+    
+    @property
+    def is_active(self) -> bool:
+        return self.acquire._active.is_set()
