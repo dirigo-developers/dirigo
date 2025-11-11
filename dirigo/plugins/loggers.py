@@ -9,7 +9,6 @@ from dirigo.sw_interfaces.worker import EndOfStream
 from dirigo.sw_interfaces.processor import Processor, ProcessorProduct
 from dirigo.sw_interfaces import Logger
 from dirigo.sw_interfaces.acquisition import Acquisition, AcquisitionProduct
-from dirigo.hw_interfaces import Digitizer
 from dirigo.plugins.acquisitions import (
     SampleAcquisitionSpec, FrameAcquisition, FrameAcquisitionSpec, 
     StackAcquisitionSpec
@@ -68,7 +67,7 @@ class TiffLogger(Logger):
     def __init__(self, 
                  upstream: Acquisition | Processor,
                  max_frames_per_file: int = 1,
-                 mode: Literal['z-stack', 't-series'] = 't-series',
+                 mode: Literal['z-stack', 't-series'] = 't-series',   # TODO make this an enum
                  **kwargs):
         super().__init__(upstream, **kwargs)
         self.file_ext = "tif"
@@ -133,14 +132,19 @@ class TiffLogger(Logger):
                 self._fn = self.save_path / f"{self.basename}.tif"
             else:
                 self._fn = self.save_path / f"{self.basename}_{self.files_saved}.tif"
-            self._writer = tifffile.TiffWriter(self._fn, bigtiff=self._use_big_tiff, imagej=True)
+            self._writer = tifffile.TiffWriter(self._fn, bigtiff=self._use_big_tiff)
             options['extratags'] = self._extra_tags
 
         if isinstance(self._acquisition.spec, SampleAcquisitionSpec):
             if sum(c.enabled for c in self._acquisition.digitizer_profile.channels) > 1:
                 options['planarconfig'] = 'contig'
 
-        self._writer.write(frame.data, **options)
+        print("Saving shape", frame.data.shape)
+        self._writer.write(
+            data        = frame.data, 
+            metadata    = {'axes': 'TYXC'},
+            **options
+        )
         self.frames_saved += 1
 
         # Accumulate timestamps & positions
@@ -155,6 +159,7 @@ class TiffLogger(Logger):
 
     def _store_z_plane(self, frame: AcquisitionProduct | ProcessorProduct):
         self._stack_data.append(frame.data)
+        print(f"stored z plane {len(self._stack_data)}")
 
     def _close_and_write_metadata(self):
         if self._writer:
@@ -189,7 +194,7 @@ class TiffLogger(Logger):
             'resolution':   (self._x_dpi, self._y_dpi),
         }
         metadata = {
-            'axes': 'ZYXS',
+            'axes': 'ZYXC',
             'PhysicalSizeX': float(spec.pixel_size),
             'PhysicalSizeXUnit': 'm',
             'PhysicalSizeY': float(spec.pixel_size),
