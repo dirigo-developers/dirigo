@@ -48,7 +48,7 @@ class LineAcquisitionRuntimeInfo:
         return cls(
             scanner_amplitude       = acquisition.hw.fast_raster_scanner.amplitude,
             digitizer_bit_depth     = acquisition.hw.digitizer.bit_depth,
-            digitizer_trigger_offset = acquisition.hw.digitizer.acquire.trigger_offset,
+            digitizer_trigger_offset = acquisition.hw.digitizer.acquire.trigger_delay,
             n_channels              = sum([c.enabled for c in acquisition.hw.digitizer.channels]),
             stage_scanner_angle     = acquisition.hw.laser_scanning_optics.stage_scanner_angle
         )
@@ -173,7 +173,7 @@ class SampleAcquisition(Acquisition):
         acq = self.hw.digitizer.acquire # for brevity
 
         # Configure acquisition timing and sizes
-        acq.trigger_offset = self.trigger_delay
+        acq.trigger_delay = self.trigger_delay
         acq.timestamps_enabled = self.spec.timestamps_enabled
         acq.record_length = self.record_length
         acq.records_per_buffer = self.spec.records_per_buffer
@@ -457,7 +457,7 @@ class LineAcquisition(SampleAcquisition):
             # dt = units.Time(digi.acquire.record_length_resolution 
             #                 / digi.sample_clock.rate)
             # Fast axis period should be multiple of ao sample resolution
-            dt = units.Time(digi.acquire.record_length_resolution / fast_scanner._ao_sample_rate) 
+            dt = units.Time(digi.acquire.record_length_step / fast_scanner._ao_sample_rate) 
             T_rounded = round(T_exact / dt) * dt
             fast_scanner.frequency = 1 / T_rounded 
             fast_scanner.waveform = Waveforms.ASYM_TRIANGLE
@@ -597,8 +597,8 @@ class LineAcquisition(SampleAcquisition):
             start_index = 0  
 
         # Round 
-        tdr = self.hw.digitizer.acquire.trigger_delay_resolution
-        start_index = tdr * round(start_index / tdr)
+        step = self.hw.digitizer.acquire.post_trigger_delay_step
+        start_index = step * round(start_index / step)
 
         return start_index
 
@@ -639,7 +639,7 @@ class LineAcquisition(SampleAcquisition):
             raise RuntimeError("Unsupported fast axis scanner.")
         
         # Round record length up to the nearest allowable size (or the min)
-        rlr = self.hw.digitizer.acquire.record_length_resolution
+        rlr = self.hw.digitizer.acquire.record_length_step
         record_length = rlr * round(record_length / rlr) 
 
         if record_length < self.hw.digitizer.acquire.record_length_minimum:
