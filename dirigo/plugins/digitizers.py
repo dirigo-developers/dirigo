@@ -1,6 +1,5 @@
 import numpy as np
 from functools import cached_property
-import time
 
 import nidaqmx
 import nidaqmx.system
@@ -62,67 +61,65 @@ class NIAnalogChannel(digitizer.Channel):
         self._index = self.__class__._INDEX
         self.__class__._INDEX += 1
 
-        self._coupling: Coupling = None 
-        self._impedance: float = None  # Not adjustable on most boards
-        self._range: tuple[float, float] = None # (min, max)
+        self._coupling: digitizer.ChannelCoupling | None = None 
+        self._impedance: units.Resistance | digitizer.ImpedanceMode | None = None  # Not adjustable on most boards
+        self._input_range: units.VoltageRange | None = None 
 
     @property
     def index(self) -> int:
-        # gets the numbers after ai in "Dev1/ai0"
         return self._index
 
     @property
-    def coupling(self) -> str:
-        for k, v in self._coupling_map.items():
-            if v == self._coupling:
-                return k
+    def coupling(self) -> digitizer.ChannelCoupling:
+        if self._coupling is None:
+            raise RuntimeError("Coupling not initialized.")
+        return self._coupling
 
     @coupling.setter
     def coupling(self, coupling: digitizer.ChannelCoupling):
         if coupling not in self.coupling_options:
             raise ValueError(f"Coupling mode, {coupling} not supported by the device")
-        self._coupling = self._coupling_map[coupling] # store as NI enum
+        self._coupling = coupling
 
     @cached_property
     def coupling_options(self) -> set[digitizer.ChannelCoupling]:
-        couplings = self._device.ai_couplings
-        dirigo_couplings = []
-        for ni_coupling in couplings:
-            dirigo_couplings.extend(
-                [k for k,v in self._coupling_map.items() if v==ni_coupling]
-            )
-        return set(dirigo_couplings)
+        ni_couplings: list[Coupling] = self._device.ai_couplings
+        rvs_table = {v: k for k, v in self._coupling_map.items()}
+        return set([rvs_table[ni_c] for ni_c in ni_couplings])
 
     @property
-    def impedance(self) -> units.Resistance:
+    def impedance(self) -> units.Resistance | digitizer.ImpedanceMode:
         if len(self.impedance_options) == 1:
-            return self.impedance_options[0]
+            return next(iter(self.impedance_options))
         else:
             raise NotImplementedError("Multiple impedances not yet implemented.")
 
     @impedance.setter
-    def impedance(self, impedance: str):
-        pass # just ignore
+    def impedance(self, impedance: units.Resistance | digitizer.ImpedanceMode):
+        pass # no-op for now
 
     @cached_property
-    def impedance_options(self) -> set[str]:
+    def impedance_options(self) -> set[units.Resistance | digitizer.ImpedanceMode]:
         if self._device.product_category == ProductCategory.X_SERIES_DAQ:
-            return {units.Resistance("10 Gohm")}
-        
-        # TODO add impedance for S series
+            return set([digitizer.ImpedanceMode.HIGH,])
+        elif self._device.product_category == ProductCategory.S_SERIES_DAQ:
+            raise NotImplementedError("Impedance not implemented for S-series")
+        else:
+            raise RuntimeError(f"Unsupported device series {self._device.product_category}")
 
     @property
-    def range(self) -> units.VoltageRange:
-        return units.VoltageRange(min=self._range[0], max=self._range[1])
+    def input_range(self) -> units.VoltageRange:
+        if self._input_range is None:
+            raise RuntimeError("Input range is not initialized.")
+        return self._input_range
 
-    @range.setter
-    def range(self, new_rng: units.VoltageRange):
-        #if not any(new_rng == r for r in self.range_options):
+    @input_range.setter
+    def input_range(self, new_rng: units.VoltageRange):
         if new_rng not in self.range_options:
             valid = list(self.range_options)
             raise ValueError(f"Range {new_rng} invalid. Valid options: {valid}")
-        # generally we store data in closest form to underlying API, here just some float values
-        self._range = (float(new_rng.min), float(new_rng.max)) 
+        
+        self._input_range = new_rng
 
     @cached_property
     def range_options(self) -> set[units.VoltageRange]:
@@ -161,41 +158,43 @@ class NICounterChannel(digitizer.Channel):
         return self._index
 
     @property
-    def coupling(self) -> str:
-        # Digital input 
-        return NotImplemented
+    def coupling(self) -> digitizer.ChannelCoupling:
+        return digitizer.ChannelCoupling.DC # TODO, for digital input is DC OK?
     
     @coupling.setter
     def coupling(self, coupling: str):
-        pass
+        if coupling != digitizer.ChannelCoupling.DC:
+            raise ValueError("Counter inputs can only be DC coupled.")
 
     @cached_property
-    def coupling_options(self) -> set[str]:
-        return None
+    def coupling_options(self) -> set[digitizer.ChannelCoupling]:
+        return set([digitizer.ChannelCoupling.DC])
     
     @property
-    def impedance(self) -> units.Resistance:
-        return NotImplemented
+    def impedance(self) -> units.Resistance | digitizer.ImpedanceMode:
+        return digitizer.ImpedanceMode.HIGH
     
     @impedance.setter
-    def impedance(self, impedance: str):
-        pass 
+    def impedance(self, impedance: units.Resistance | digitizer.ImpedanceMode):
+        if impedance != digitizer.ImpedanceMode.HIGH:
+            raise ValueError("Counter input impedance can only be high") 
 
     @cached_property
-    def impedance_options(self) -> set[str]:
-        return None
+    def impedance_options(self) -> set[units.Resistance | digitizer.ImpedanceMode]:
+        return set([digitizer.ImpedanceMode.HIGH])
     
     @property
-    def range(self) -> units.VoltageRange:
-        return NotImplemented
+    def input_range(self) -> units.VoltageRange:
+        return units.VoltageRange("0 V", "5 V")
 
-    @range.setter
-    def range(self, new_rng: units.VoltageRange):
-        pass 
+    @input_range.setter
+    def input_range(self, new_rng: units.VoltageRange):
+        if new_rng != units.VoltageRange("0 V", "5 V"):
+            raise ValueError("Counter input range is not settable.") 
 
     @cached_property
     def range_options(self) -> set[units.VoltageRange]:
-        return None
+        return set([units.VoltageRange("0 V", "5 V")])
 
     @property
     def inverted(self) -> bool:
@@ -205,7 +204,8 @@ class NICounterChannel(digitizer.Channel):
     
     @inverted.setter
     def inverted(self, invert: bool):
-        pass
+        if invert is True:
+            raise ValueError("Cannot invert counter input channel")
 
     @property
     def channel_name(self) -> str:
@@ -238,18 +238,20 @@ class NISampleClock(digitizer.SampleClock):
         else:
             self._input_mode = digitizer.InputMode.EDGE_COUNTING
 
-        self._source = None
+        self._source: digitizer.SampleClockSource | None = None
         self._rate = None 
         self._edge = "rising"
 
     @property
-    def source(self) -> str:
+    def source(self) -> digitizer.SampleClockSource:
         """
         Digitizer sample clock source.
         
         Pass None to use internal AI clock engine or pass a valid terminal 
         string to use an external sample clock.
         """
+        if self._source is None:
+            raise RuntimeError("Trigger source not initialized.")
         return self._source
 
     @source.setter
@@ -265,20 +267,13 @@ class NISampleClock(digitizer.SampleClock):
 
     @property
     def rate(self) -> units.SampleRate:
-        if self._rate:
-            return units.SampleRate(self._rate)
-        else:
-            return None
+        if self._rate is None:
+            raise RuntimeError("Sample rate not initialized.")
+        return units.SampleRate(self._rate)
 
     @rate.setter
-    def rate(self, value: units.SampleRate | None):
-        if value is None:
-            self._rate = None
-            return
-        
-        if not isinstance(value, units.SampleRate):
-            value = units.SampleRate(value)
-
+    def rate(self, value: units.SampleRate):        
+        value = units.SampleRate(value)
         if not self.rate_options.within_range(value):
             raise ValueError(
                 f"Requested pixel sample rate ({value}) is outside "
@@ -307,6 +302,8 @@ class NISampleClock(digitizer.SampleClock):
                     min=get_min_ai_rate(self._device), 
                     max=get_max_ai_rate(self._device)
                 )
+            else:
+                raise RuntimeError(f"Unsupported product category: {self._device.product_category}")
         else:
             # For edge counting, rate must be in AO rate range (which will be sample/pixel clock)
             return units.SampleRateRange(
@@ -337,15 +334,19 @@ class NITrigger(digitizer.Trigger):
     def __init__(self, device: nidaqmx.system.Device):
         self._device = device
 
-        self._source = "/Dev1/ao/StartTrigger"  # e.g. "PFI0" or "None" for immediate 
-        self._slope: digitizer.TriggerSource | None = None
+        self._source_channel: str = "/Dev1/ao/StartTrigger"  # e.g. "PFI0" or "None" for immediate 
+        self._slope: digitizer.TriggerSlope | None = None
         self._level = units.Voltage(0.0)
         self._ext_coupling = "DC"
         self._ext_range = "+/-10V"
 
+    # trigger source with NI is tricky to abstract because it could come from many different channels
     @property
     def source(self) -> digitizer.TriggerSource:
-        return self._source
+        if "/ao/StartTrigger" in self._source_channel:
+            return digitizer.TriggerSource.INTERNAL
+        else:
+            return digitizer.TriggerSource.EXTERNAL
 
     @source.setter
     def source(self, source: digitizer.TriggerSource):
@@ -360,6 +361,8 @@ class NITrigger(digitizer.Trigger):
 
     @property
     def slope(self) -> digitizer.TriggerSlope:
+        if self._slope is None:
+            raise RuntimeError("Trigger slope not initialized")
         return self._slope
 
     @slope.setter
@@ -448,16 +451,16 @@ class NIAcquire(digitizer.Acquire):
         self._samples_acquired = 0
 
     @property
-    def trigger_offset(self) -> int:
+    def trigger_delay(self) -> int:
         return self._trigger_offset
     
-    @trigger_offset.setter
-    def trigger_offset(self, offset: int):
+    @trigger_delay.setter
+    def trigger_delay(self, offset: int):
         if int(offset) != 0:
             raise ValueError("No trigger offset (pre-trigger/delay) is supported for NI DAQ")
     
     @property
-    def trigger_offset_range(self) -> units.IntRange:
+    def trigger_delay_range(self) -> units.IntRange:
         return units.IntRange(min=0, max=0)
     
     @property
@@ -465,7 +468,7 @@ class NIAcquire(digitizer.Acquire):
         return None # no pre-trigger with NI
 
     @property
-    def trigger_delay_resolution(self):
+    def post_trigger_resolution(self):
         return None # no trigger delay with NI
     
     @property
@@ -481,7 +484,7 @@ class NIAcquire(digitizer.Acquire):
         return 1
 
     @property
-    def record_length_resolution(self) -> int:
+    def record_length_step(self) -> int:
         if self._input_mode == digitizer.InputMode.ANALOG:
             return 32
         elif self._input_mode == digitizer.InputMode.EDGE_COUNTING:
@@ -551,8 +554,8 @@ class NIAcquire(digitizer.Acquire):
                 
                 ai_channel = self._task.ai_channels.add_ai_voltage_chan(
                     physical_channel=channel.channel_name,
-                    min_val=channel.range.min,
-                    max_val=channel.range.max,
+                    min_val=channel.input_range.min,
+                    max_val=channel.input_range.max,
                 )
                 ai_channel.ai_coupling = channel._coupling # _coupling has the NI enumeration; coupling has Dirigo enumeration
                 if self._device.product_category == ProductCategory.X_SERIES_DAQ:
