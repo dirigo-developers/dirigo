@@ -81,5 +81,12 @@ ni = "dirigo.plugins.digitizers:NIDigitizer"
 generic = "dirigo.plugins.detectors:GenericDetector"
 
 [project.entry-points."dirigo.devices.optics"]
-camera_optics = "dirigo.devices.optics.plugins.camera_optics:CameraOpticsDevice"
-laser_scanning_optics = "dirigo.devices.optics.plugins.laser_scanning_optics:LaserScanningOpticsDevice"
+camera_optics = "dirigo.devices.optics.plugins.camera_optics:CameraOptics"
+laser_scanning_optics = "dirigo.devices.optics.plugins.laser_scanning_optics:LaserScanningOptics"
+
+[project.entry-points."dirigo.devices.scanners"]
+resonant_scanner_via_ni = "dirigo.devices.scanners.plugins.resonant_scanner_via_ni:ResonantScannerViaNIDevice"
+
+[project.entry-points."dirigo.devices.digitizers"]
+ni = "dirigo.devices.digitizers.plugins.ni_digitizer:NiDigitizerDevice"
+

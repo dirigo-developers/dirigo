@@ -10,7 +10,7 @@ class CameraOpticsConfig(OpticsDeviceConfig):
     )
 
 
-class CameraOpticsDevice(OpticsDevice[CameraOpticsConfig]):
+class CameraOptics(OpticsDevice[CameraOpticsConfig]):
     ConfigModel = CameraOpticsConfig 
 
     def __init__(self, config: CameraOpticsConfig) -> None:

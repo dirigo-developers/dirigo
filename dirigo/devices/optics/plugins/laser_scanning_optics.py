@@ -14,7 +14,7 @@ class LaserScanningOpticsConfig(OpticsDeviceConfig):
     )
 
 
-class LaserScanningOpticsDevice(OpticsDevice[LaserScanningOpticsConfig]):
+class LaserScanningOptics(OpticsDevice[LaserScanningOpticsConfig]):
     ConfigModel = LaserScanningOpticsConfig 
 
     def __init__(self, config: LaserScanningOpticsConfig) -> None:

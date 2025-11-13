@@ -51,7 +51,6 @@ class Dirigo2:
                 config=plugin_cls.validate_config(device_def.config)
             )
 
-        a=1
 
 
 
