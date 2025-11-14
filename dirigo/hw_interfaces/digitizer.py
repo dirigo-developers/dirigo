@@ -207,11 +207,16 @@ class TriggerProfile:
         else:
             external_impedance = None
 
-        external_range = (
-            units.VoltageRange(cast(dict, d["external_range"])["min"],
-                               cast(dict, d["external_range"])["max"])
-            if "external_range" in d else None
-        )
+        if "external_range" in d:
+            if isinstance(d["external_range"], dict):
+                external_range = units.VoltageRange(
+                    min=d["external_range"]["min"], 
+                    max=d["external_range"]["max"]
+                )
+            else:
+                external_range = units.VoltageRange(d["external_range"])
+        else:
+            external_range = None
 
         return cls(
             source              = TriggerSource(str(d["source"]).lower()),
