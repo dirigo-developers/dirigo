@@ -458,7 +458,7 @@ class LineAcquisition(SampleAcquisition):
             )
 
             # if fast scanner AO sample rate not specified, assume clocked from digitizer AI clock
-            if fast_scanner._ao_sample_rate is None:
+            if (fast_scanner._ao_sample_rate is None) or (fast_scanner._co_task): # TODO, this is a little hacky:
                 fast_scanner._ao_sample_rate = digi.sample_clock.rate
 
             # Fast axis period should be multiple of digitizer sample resolution
