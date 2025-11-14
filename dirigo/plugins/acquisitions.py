@@ -176,10 +176,10 @@ class SampleAcquisition(Acquisition):
         acq.trigger_delay = self.trigger_delay
         acq.timestamps_enabled = self.spec.timestamps_enabled
         acq.record_length = self.record_length
-        acq.records_per_buffer = self.spec.records_per_buffer
+        acq.records_per_buffer = self._records_per_buffer
         acq.buffers_per_acquisition = self.spec.buffers_per_acquisition
         acq.buffers_allocated = self.spec.buffers_allocated
-
+    
     def _work(self):
         # TODO, should start and stop digitizer, set `active` event
         # 1) configure digitizer
@@ -195,11 +195,20 @@ class SampleAcquisition(Acquisition):
         return self.spec.trigger_delay_samples
     
     @property
+    def _records_per_buffer(self) -> int:
+        """
+        Number of records (triggered multi-sample acquisitions) per buffer.
+        
+        Subclasses should shadow this method to provide more specific behavior.
+        """
+        return self.spec.records_per_buffer
+    
+    @property
     def record_length(self) -> int:
         """
         Acquisition record length, in sample periods.
         
-        Subclassses can override this to synchronize with other hardware.
+        Subclassses should shadow this method to provide more specific behavior.
         """
         return self.spec.record_length
     
@@ -489,7 +498,7 @@ class LineAcquisition(SampleAcquisition):
 
         # Set up acquisition buffer pool
         shape = (
-            self.spec.records_per_buffer, 
+            self._records_per_buffer, 
             digi.acquire.record_length,
             digi.acquire.n_channels_enabled
         )
@@ -516,7 +525,7 @@ class LineAcquisition(SampleAcquisition):
             self.hw.fast_raster_scanner.start(
                 digitizer           = digi,
                 pixels_per_period   = self.spec.pixels_per_line,
-                periods_per_write   = self.spec.records_per_buffer
+                periods_per_write   = self._records_per_buffer
             )
 
             self.active.set()
@@ -742,7 +751,6 @@ class FrameAcquisitionSpec(LineAcquisitionSpec):
     MAX_PIXEL_HEIGHT_ADJUSTMENT = 0.01
     def __init__(self, 
                  frame_height: str | units.Position, 
-                 flyback_periods: int, 
                  pixel_height: str = "", # leave empty to set pxiel height = width
                  **kwargs):
         # set some parameters early so line_per_frame property can work
@@ -761,8 +769,6 @@ class FrameAcquisitionSpec(LineAcquisitionSpec):
                 f"To maintain integer number of pixels in frame height, required adjusting " \
                 f"the pixel height by more than pre-specified limit: {100*self.MAX_PIXEL_HEIGHT_ADJUSTMENT}%"
             )
-
-        self.flyback_periods = flyback_periods
         
         super().__init__(lines_per_buffer=self.lines_per_frame, **kwargs)
 
@@ -777,16 +783,16 @@ class FrameAcquisitionSpec(LineAcquisitionSpec):
         else:
             return round(self.frame_height / self.pixel_height)
 
-    @property
-    def records_per_buffer(self) -> int:
-        """Returns the number of digitizer records per buffer.
+    # @property # DEPRECATE
+    # def records_per_buffer(self) -> int:
+    #     """Returns the number of digitizer records per buffer.
 
-        Includes records that may be part of the slow raster axis flyback.        
-        """
-        if self.bidirectional_scanning:
-            return (self.lines_per_frame // 2) + self.flyback_periods
-        else:
-            return self.lines_per_frame + self.flyback_periods
+    #     Includes records that may be part of the slow raster axis flyback.        
+    #     """
+    #     if self.bidirectional_scanning:
+    #         return (self.lines_per_frame // 2) + self.flyback_periods
+    #     else:
+    #         return self.lines_per_frame + self.flyback_periods
 
 
 class FrameAcquisition(LineAcquisition):
@@ -803,16 +809,33 @@ class FrameAcquisition(LineAcquisition):
         self.hw.slow_raster_scanner.amplitude = \
             self.hw.laser_scanning_optics.object_position_to_scan_angle(spec.frame_height)
         self.hw.slow_raster_scanner.frequency = (
-            self.hw.fast_raster_scanner.frequency / spec.records_per_buffer
+            self.hw.fast_raster_scanner.frequency / self._records_per_buffer
         )
         self.hw.slow_raster_scanner.waveform = Waveforms.ASYM_TRIANGLE
         self.hw.slow_raster_scanner.duty_cycle = (
-            1 - spec.flyback_periods / spec.records_per_buffer
+            1 - self._flyback_periods / self._records_per_buffer
         )
+
+    @property
+    def _flyback_periods(self) -> int:
+        p: units.Time = 1 / self.hw.fast_raster_scanner.frequency
+        if self.hw.slow_raster_scanner.flyback_time is None:
+            # If flyback time is not available, assume something reasonable
+            flyback_time = 10 * p
+        else:
+            flyback_time = self.hw.slow_raster_scanner.flyback_time
+        return round(flyback_time / p)
+
+    @property
+    def _records_per_buffer(self) -> int:
+        if self.spec.bidirectional_scanning:
+            return (self.spec.lines_per_frame // 2) + self._flyback_periods
+        else:
+            return self.spec.lines_per_frame + self._flyback_periods
 
     def _work(self):
         self.hw.slow_raster_scanner.start(
-            periods_per_frame=self.spec.records_per_buffer
+            periods_per_frame=self._records_per_buffer
         )
 
         super()._work() # Most work is done by LineAcquisition._work() method

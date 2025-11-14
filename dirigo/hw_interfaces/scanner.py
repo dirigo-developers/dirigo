@@ -177,6 +177,7 @@ class SlowRasterScanner(RasterScanner):
     a raster scanning system.
     """
     attr_name = "slow_raster_scanner"
+    flyback_time: units.Time | None
 
 
 class ResonantScanner(RasterScanner):
@@ -322,6 +323,7 @@ class GalvoScanner(RasterScanner):
     def __init__(self, 
                  ao_sample_rate: str | None = None, # This implies analog output (chance some users might want digital galvo control)
                  input_delay: str = "0 s",
+                 flyback_time: str | None = None, # intended for Y axis flyback time, leave none for X axis
                  **kwargs):
         super().__init__(**kwargs)
 
@@ -336,6 +338,11 @@ class GalvoScanner(RasterScanner):
         if not self.INPUT_DELAY_RANGE.within_range(delay):
             raise ValueError(f"input_delay out of valid range ({self.INPUT_DELAY_RANGE})")
         self.input_delay = delay
+
+        if flyback_time is not None:
+            self.flyback_time = units.Time(flyback_time)
+        else:
+            self.flyback_time = None
 
         # Validate sample rate
         if ao_sample_rate is not None:
