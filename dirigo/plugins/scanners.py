@@ -135,7 +135,10 @@ def get_min_ao_rate(device: nidaqmx.system.Device) -> units.SampleRate:
 
 
 def get_max_ao_rate(device: nidaqmx.system.Device, n_channels: int = 1) -> units.SampleRate:
+    """Maximum supported AO rate according to NIDAQmx"""
     if device.product_category == ProductCategory.S_SERIES_DAQ:
+        # These are the listed Specifications
+        # In practice, we observed desync when >1 MS/s 2-chan w/ continuous regeneration
         if n_channels == 1:
             return units.SampleRate("4 MS/s")
         elif n_channels == 2:
@@ -231,6 +234,7 @@ class PolygonScannerViaNI(PolygonScanner, FastRasterScanner):
 
 
 class GalvoScannerViaNI(GalvoScanner):
+    AO_RATE_LIMIT = units.SampleRate("500 kS/s") # beyond this rate is unnecessary for driving galvos
     def __init__(self, 
                  analog_control_channel: str, # e.g. 'Dev1/ao1'
                  analog_control_range: dict, # e.g. {'min': '-10 V', 'max': '10 V'}
@@ -464,7 +468,7 @@ class GalvoWaveformWriter(threading.Thread):
 class FastGalvoScannerViaNI(GalvoScannerViaNI, FastRasterScanner):    
     def __init__(self, 
                  ao_clock_source: str | None = None,
-                 ao_start_trigger: str | None = None,
+                 ao_start_trigger: str | None = "internal",
                  line_clock_channel: str | None = None, 
                  **kwargs):
         
@@ -531,9 +535,12 @@ class FastGalvoScannerViaNI(GalvoScannerViaNI, FastRasterScanner):
             
             # Insert frequency divider CO if sample rate too high
             n_channels = 2 if self._slow_scanner else 1
-            max_ao_rate = get_max_ao_rate(self._device, n_channels=n_channels)
-            if self._ao_sample_rate > max_ao_rate: # TODO correct this
+            max_ao_rate = min(
+                get_max_ao_rate(self._device, n_channels), self.AO_RATE_LIMIT
+            ) 
+            if self._ao_sample_rate > max_ao_rate:
                 if self._ao_clock_source is None:
+                    # if user indicates using built-in AO clock, but sets rate too high
                     raise RuntimeError(f"Can't set AO clock={self._ao_sample_rate}, " 
                                        f"higher than device maximum: {max_ao_rate}")
                 # Counter Out task to divide sample clock frequency (useful for using S-series digitizers where max rate AI >> AO)
@@ -557,21 +564,22 @@ class FastGalvoScannerViaNI(GalvoScannerViaNI, FastRasterScanner):
                 self._ao_sample_rate = self._ao_sample_rate / div_factor
             
             # Set timing/sampling clock
+            samples_per_period = round(self._ao_sample_rate / self.frequency)
             self._ao_task.timing.cfg_samp_clk_timing(
                 rate            = self._ao_sample_rate,
                 source          = self._ao_clock_source, # see above about frequency divider counter
                 sample_mode     = AcquisitionType.CONTINUOUS,
-                samps_per_chan  = self._periods_per_write * self._pixels_per_period # TODO should be samples not pixels per period
+                samps_per_chan  = self._periods_per_write * samples_per_period
             )
             self._do_task.timing.cfg_samp_clk_timing(
                 rate            = self._ao_sample_rate,
                 source          = self._ao_clock_source, # see above about frequency divider counter
                 sample_mode     = AcquisitionType.CONTINUOUS,
-                samps_per_chan  = self._periods_per_write * self._pixels_per_period 
+                samps_per_chan  = self._periods_per_write * samples_per_period 
             )
 
             # Set start trigger
-            if self._ao_start_trigger is None: 
+            if (self._ao_start_trigger is None) and (self._ao_clock_source is None): 
                 # meaning that AO triggers itself (e.g. Alazar G-G scanning)
                 self._do_task.triggers.start_trigger.cfg_dig_edge_start_trig(
                     trigger_source=f"/{self._device.name}/ao/StartTrigger"
