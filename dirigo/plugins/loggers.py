@@ -1,6 +1,6 @@
 from functools import cached_property
 import json, struct
-from typing import Sequence
+from typing import Sequence, Literal
 
 import tifffile
 import numpy as np
@@ -9,8 +9,10 @@ from dirigo.sw_interfaces.worker import EndOfStream
 from dirigo.sw_interfaces.processor import Processor, ProcessorProduct
 from dirigo.sw_interfaces import Logger
 from dirigo.sw_interfaces.acquisition import Acquisition, AcquisitionProduct
-from dirigo.hw_interfaces import Digitizer
-from dirigo.plugins.acquisitions import SampleAcquisitionSpec, FrameAcquisition, FrameAcquisitionSpec
+from dirigo.plugins.acquisitions import (
+    SampleAcquisitionSpec, FrameAcquisition, FrameAcquisitionSpec, 
+    StackAcquisitionSpec
+)
     
 
 def serialize_float64_list(arrays: Sequence[np.ndarray]) -> bytes:
@@ -65,16 +67,17 @@ class TiffLogger(Logger):
     def __init__(self, 
                  upstream: Acquisition | Processor,
                  max_frames_per_file: int = 1,
+                 mode: Literal['z-stack', 't-series'] = 't-series',   # TODO make this an enum
                  **kwargs):
         super().__init__(upstream, **kwargs)
         self.file_ext = "tif"
 
         self.frames_per_file = int(max_frames_per_file) 
         
-        #self._fn = None
         self._writer = None # generated upon attempt to save first frame
         self.frames_saved = 0
         self.files_saved = 0
+        self.mode = mode
 
         try:
             if upstream.product_shape[2] == 3 and upstream.product_dtype == np.uint8:
@@ -86,6 +89,7 @@ class TiffLogger(Logger):
 
         self._timestamps = [] # accumulate as frames arrive from acquistion or processor
         self._positions = []
+        self._stack_data = []
 
     def _receive_product(self) ->  AcquisitionProduct | ProcessorProduct:
         return super()._receive_product(self) # type: ignore
@@ -100,35 +104,47 @@ class TiffLogger(Logger):
             self._publish(None)
 
         finally:
-            self._close_and_write_metadata()
+            if self.mode == 't-series':
+                self._close_and_write_metadata()
+            elif self.mode == 'z-stack':
+                self._write_stack()
 
     def save_data(self, frame: AcquisitionProduct | ProcessorProduct):
         """Save data and metadata to a TIFF file"""
 
+        if self.mode == 't-series':
+            self._save_frame(frame)
+        elif self.mode == 'z-stack':
+            self._store_z_plane(frame)
+        else:
+            raise ValueError("Unsupported TiffLogger mode: {self.mode}")
+
+    def _save_frame(self, frame: AcquisitionProduct | ProcessorProduct):
         # Create the writer object if necessary
         options = {
-                'photometric': self._photometric,
-                'resolution': (self._x_dpi, self._y_dpi),
-                'contiguous': True
-            }
+            'photometric':  self._photometric,
+            'resolution':   (self._x_dpi, self._y_dpi),
+            'contiguous':   True,
+        }
+        
         if self._writer is None:
-
             if self.frames_per_file == float('inf'):
                 self._fn = self.save_path / f"{self.basename}.tif"
             else:
                 self._fn = self.save_path / f"{self.basename}_{self.files_saved}.tif"
-
             self._writer = tifffile.TiffWriter(self._fn, bigtiff=self._use_big_tiff)
-
             options['extratags'] = self._extra_tags
-        else:
-            options['contiguous'] = True 
 
         if isinstance(self._acquisition.spec, SampleAcquisitionSpec):
             if sum(c.enabled for c in self._acquisition.digitizer_profile.channels) > 1:
                 options['planarconfig'] = 'contig'
 
-        self._writer.write(frame.data, **options)
+        print("Saving shape", frame.data.shape)
+        self._writer.write(
+            data        = frame.data, 
+            metadata    = {'axes': 'TYXC'},
+            **options
+        )
         self.frames_saved += 1
 
         # Accumulate timestamps & positions
@@ -140,30 +156,64 @@ class TiffLogger(Logger):
         # when number of frames per file reached, close writer & write metadata
         if self.frames_saved % self.frames_per_file == 0:
             self._close_and_write_metadata()
-           
+
+    def _store_z_plane(self, frame: AcquisitionProduct | ProcessorProduct):
+        self._stack_data.append(frame.data)
+        print(f"stored z plane {len(self._stack_data)}")
+
     def _close_and_write_metadata(self):
         if self._writer:
-
+            
+            self.last_saved_file_path = self._fn
             self._writer.close()
             self._writer = None
             self.files_saved += 1
 
-            # write metadata by overwrite (appends data to end of file and
-            # 'patches' the offset to point at this new location, tifffile does
-            # all of this automatically)
-            with tifffile.TiffFile(self._fn, mode='r+b') as tif: # type: ignore
+            if self._timestamps or self._positions:
+                # write metadata by overwrite (appends data to end of file and
+                # patches the offset to point at this new location, tifffile does
+                # all of this automatically)
+                with tifffile.TiffFile(self._fn, mode='r+b') as tif: # type: ignore
 
-                if len(self._timestamps) > 0:
-                    data = serialize_float64_list(self._timestamps)
-                    tif.pages[0].tags[self.TIMESTAMPS_TAG].overwrite(data) # type: ignore
+                    if len(self._timestamps) > 0:
+                        data = serialize_float64_list(self._timestamps)
+                        tif.pages[0].tags[self.TIMESTAMPS_TAG].overwrite(data) # type: ignore
 
-                if len(self._positions) > 0:
-                    data = serialize_float64_list(self._positions)
-                    tif.pages[0].tags[self.POSITIONS_TAG].overwrite(data) # type: ignore
+                    if len(self._positions) > 0:
+                        data = serialize_float64_list(self._positions)
+                        tif.pages[0].tags[self.POSITIONS_TAG].overwrite(data) # type: ignore
 
             # Clear accumulants
             self._timestamps = []
             self._positions = []
+    
+    def _write_stack(self):
+        spec: StackAcquisitionSpec = self._acquisition.spec     # type: ignore
+        options = {
+            'photometric':  self._photometric,
+            'resolution':   (self._x_dpi, self._y_dpi),
+        }
+        metadata = {
+            'axes': 'ZYXC',
+            'PhysicalSizeX': float(spec.pixel_size),
+            'PhysicalSizeXUnit': 'm',
+            'PhysicalSizeY': float(spec.pixel_size),
+            'PhysicalSizeYUnit': 'm',
+            'PhysicalSizeZ': float(spec.depth_spacing),
+            'PhysicalSizeZUnit': 'm',
+        }
+        if isinstance(self._acquisition.spec, SampleAcquisitionSpec):
+            if sum(c.enabled for c in self._acquisition.digitizer_profile.channels) > 1:
+                options['planarconfig'] = 'contig'
+
+        self._fn = self.save_path / f"{self.basename}.tif"
+        
+        with tifffile.TiffWriter(self._file_path(), bigtiff=True, ome=True) as tif:
+            tif.write(
+                np.array(self._stack_data),
+                metadata=metadata,
+                **options
+            )
 
     @cached_property
     def _use_big_tiff(self) -> bool:

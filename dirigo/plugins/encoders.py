@@ -11,7 +11,7 @@ from nidaqmx.stream_readers import CounterReader
 
 from dirigo.components import units
 from dirigo.hw_interfaces.encoder import LinearEncoder, MultiAxisLinearEncoder
-from dirigo.plugins.scanners import CounterRegistry, validate_ni_channel
+from dirigo.plugins.scanners import CounterRegistry, validate_ni_channel, get_device
 
 
 
@@ -29,10 +29,10 @@ class LinearEncoderViaNI(LinearEncoder):
         super().__init__(**kwargs) # sets axis
 
         # A & B quadrature encoder signals (required)
-        validate_ni_channel(signal_a_channel)
-        validate_ni_channel(signal_b_channel)
-        self._signal_a_channel = signal_a_channel
-        self._signal_b_channel = signal_b_channel
+        self._signal_a_channel = validate_ni_channel(signal_a_channel)
+        self._signal_b_channel = validate_ni_channel(signal_b_channel)
+
+        self._device = get_device(self._signal_a_channel.split('/')[1])
 
         # Ensure at least one of sample_clock_channel or trigger_channel is provided
         if sample_clock_channel is None and trigger_channel is None:
@@ -66,7 +66,7 @@ class LinearEncoderViaNI(LinearEncoder):
 
         chan = self._logging_task.ci_channels.add_ci_lin_encoder_chan(
             decoding_type=EncoderType.X_2,
-            counter=CounterRegistry.allocate_counter(),
+            counter=CounterRegistry.allocate_counter(self._device.name),
             dist_per_pulse=self._distance_per_pulse,
             initial_pos=initial_position
         )
@@ -145,7 +145,7 @@ class LinearEncoderViaNI(LinearEncoder):
         # use angular encoder to trig out on every N pulses
         a = -pulses_per_trigger-1 if direction == "forward" else pulses_per_trigger
         chan = self._trigger_task.ci_channels.add_ci_ang_encoder_chan(
-            counter         = CounterRegistry.allocate_counter(),
+            counter         = CounterRegistry.allocate_counter(self._device.name),
             decoding_type   = EncoderType.X_1,      # TODO make this adjustable
             zidx_enable     = True,
             zidx_val        = a,
@@ -177,10 +177,10 @@ class LinearEncoderViaNI(LinearEncoder):
 
             # Configure a period measurement channel on free counter
             self._timestamp_task.ci_channels.add_ci_period_chan(
-                counter=CounterRegistry.allocate_counter(),           
-                min_val=10e-6, # 100 kHz, TODO set this flexibly
-                max_val=1.0,
-                units=TimeUnits.SECONDS
+                counter = CounterRegistry.allocate_counter(self._device.name),           
+                min_val = 10e-6, # 100 kHz, TODO set this flexibly
+                max_val = 1.0,
+                units   = TimeUnits.SECONDS
             )
 
             # Set to the internal signal exported by ctr0/1.
@@ -222,7 +222,7 @@ class LinearEncoderViaNI(LinearEncoder):
 
     def measure_pulse_frequency(self, measurement_time = units.Time('1 s')):
         with nidaqmx.Task() as task:
-            ctr = CounterRegistry.allocate_counter()
+            ctr = CounterRegistry.allocate_counter(self._device.name)
             chan = task.ci_channels.add_ci_freq_chan(
                 counter=ctr,           
                 min_val=40e3,

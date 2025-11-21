@@ -193,7 +193,7 @@ class RasterFrameProcessor(Processor[Acquisition]):
         self._init_product_pool(n=4, shape=self.processed_shape, dtype=dt)
 
         # Trigger timing/delay
-        self._fixed_trigger_delay = runtime_info.digitizer_trigger_delay
+        self._fixed_trigger_delay = runtime_info.digitizer_trigger_offset
 
         if "galvo" in system_config.fast_raster_scanner['type'].lower():
             delay = units.Time(system_config.fast_raster_scanner['input_delay'])
@@ -375,9 +375,9 @@ class RasterFrameProcessor(Processor[Acquisition]):
             shift -= n
 
         # if phase is outside the pre-determined range, then return NaN (indeterminate)
-        if abs(shift) > PHASE_MAX * UPSAMPLE * 2:
-            return np.nan
-
+        # if abs(shift) > PHASE_MAX * UPSAMPLE * 2:
+        #     return np.nan
+        print(shift)
         return shift / UPSAMPLE / 2 - 1
     
     def calibrated_trigger_delay(self, scanner_amplitude: units.Angle) -> float:

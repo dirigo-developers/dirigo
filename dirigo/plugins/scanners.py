@@ -1,6 +1,6 @@
-from functools import cached_property
 import threading
-import time
+from functools import cached_property
+from typing import cast
 
 import numpy as np
 
@@ -8,7 +8,9 @@ import nidaqmx
 import nidaqmx.system
 import nidaqmx.errors
 from nidaqmx.stream_writers import AnalogMultiChannelWriter
-from nidaqmx.constants import AcquisitionType, RegenerationMode, LineGrouping
+from nidaqmx.constants import (
+    AcquisitionType, RegenerationMode, LineGrouping, ProductCategory
+)
 
 from dirigo.components import units
 from dirigo.hw_interfaces.scanner import (Waveforms,
@@ -21,7 +23,8 @@ from dirigo.hw_interfaces import digitizer as dgtz
 
 def get_device(device_name: str) -> nidaqmx.system.Device:
     """Returns handle to the NIDAQ system device object."""
-    return nidaqmx.system.System.local().devices[device_name]
+    return cast(nidaqmx.system.Device,
+                nidaqmx.system.System.local().devices[device_name])
 
 
 def validate_ni_channel(channel_name: str) -> str:
@@ -89,7 +92,7 @@ class CounterRegistry:
     _device_name: str | None = None
 
     @classmethod
-    def initialize(cls, device_name="Dev1"):
+    def initialize(cls, device_name: str):
         device = nidaqmx.system.Device(device_name)
         cls._available_counters = [chan.name for chan in device.ci_physical_chans]
         cls._in_use.clear()
@@ -97,7 +100,7 @@ class CounterRegistry:
         cls._device_name = device_name
 
     @classmethod
-    def allocate_counter(cls, device_name="Dev1") -> str:
+    def allocate_counter(cls, device_name: str) -> str:
         """
         Returns a free counter from the registry, marking it in use.
         Lazily initializes the registry if not already done.
@@ -131,8 +134,19 @@ def get_min_ao_rate(device: nidaqmx.system.Device) -> units.SampleRate:
     return units.SampleRate(device.ao_min_rate)
 
 
-def get_max_ao_rate(device: nidaqmx.system.Device) -> units.SampleRate:
-    return units.SampleRate(device.ao_max_rate)
+def get_max_ao_rate(device: nidaqmx.system.Device, n_channels: int = 1) -> units.SampleRate:
+    """Maximum supported AO rate according to NIDAQmx"""
+    if device.product_category == ProductCategory.S_SERIES_DAQ:
+        # These are the listed Specifications
+        # In practice, we observed desync when >1 MS/s 2-chan w/ continuous regeneration
+        if n_channels == 1:
+            return units.SampleRate("4 MS/s")
+        elif n_channels == 2:
+            return units.SampleRate("2.5 MS/s")
+        else:
+            raise ValueError(f"Only 1 or 2 AO output channels allowed for NI S-series DAQ, got {n_channels}")
+    else: # X-series
+        return units.SampleRate(device.ao_max_rate)
 
 
 
@@ -220,6 +234,7 @@ class PolygonScannerViaNI(PolygonScanner, FastRasterScanner):
 
 
 class GalvoScannerViaNI(GalvoScanner):
+    AO_RATE_LIMIT = units.SampleRate("500 kS/s") # beyond this rate is unnecessary for driving galvos
     def __init__(self, 
                  analog_control_channel: str, # e.g. 'Dev1/ao1'
                  analog_control_range: dict, # e.g. {'min': '-10 V', 'max': '10 V'}
@@ -453,7 +468,7 @@ class GalvoWaveformWriter(threading.Thread):
 class FastGalvoScannerViaNI(GalvoScannerViaNI, FastRasterScanner):    
     def __init__(self, 
                  ao_clock_source: str | None = None,
-                 ao_start_trigger: str | None = None,
+                 ao_start_trigger: str | None = "internal",
                  line_clock_channel: str | None = None, 
                  **kwargs):
         
@@ -472,6 +487,8 @@ class FastGalvoScannerViaNI(GalvoScannerViaNI, FastRasterScanner):
         self._line_clock_channel = validate_ni_channel(line_clock_channel)
 
         self._slow_scanner: SlowGalvoScannerViaNI = None
+
+        self._co_task = None
 
     def start(self, 
               digitizer: dgtz.Digitizer,
@@ -517,19 +534,24 @@ class FastGalvoScannerViaNI(GalvoScannerViaNI, FastRasterScanner):
                 )
             
             # Insert frequency divider CO if sample rate too high
-            self._co_task = None 
-            max_ao_rate = get_max_ao_rate(self._device)
-            if self._ao_sample_rate > max_ao_rate: # TODO correct this
+            n_channels = 2 if self._slow_scanner else 1
+            max_ao_rate = min(
+                get_max_ao_rate(self._device, n_channels), self.AO_RATE_LIMIT
+            ) 
+            if self._ao_sample_rate > max_ao_rate:
                 if self._ao_clock_source is None:
-                    raise RuntimeError(f"Can't set AO clock={self._ao_sample_rate}, higher than device maximum: {max_ao_rate}")
+                    # if user indicates using built-in AO clock, but sets rate too high
+                    raise RuntimeError(f"Can't set AO clock={self._ao_sample_rate}, " 
+                                       f"higher than device maximum: {max_ao_rate}")
                 # Counter Out task to divide sample clock frequency (useful for using S-series digitizers where max rate AI >> AO)
                 div_factor = int(2**np.ceil(np.log2(self._ao_sample_rate / max_ao_rate)))
+                div_factor = max(div_factor, 4) # Must divide by at least 4X (NIDAQmx limitation on number of high ticks)
                 high_ticks = div_factor // 2
 
                 self._co_task = nidaqmx.Task("AI clock frequency divided")
                 freq_div_ch = self._co_task.co_channels.add_co_pulse_chan_ticks(
-                    counter         = CounterRegistry.allocate_counter(),
-                    source_terminal = self._ao_clock_source,
+                    counter         = CounterRegistry.allocate_counter(self._device.name),
+                    source_terminal = f"/{self._device.name}/ai/SampleClock",
                     high_ticks      = high_ticks,
                     low_ticks       = div_factor - high_ticks
                 )
@@ -541,33 +563,31 @@ class FastGalvoScannerViaNI(GalvoScannerViaNI, FastRasterScanner):
                 self._ao_clock_source = freq_div_ch.co_pulse_term
                 self._ao_sample_rate = self._ao_sample_rate / div_factor
             
-            # Set timing
+            # Set timing/sampling clock
+            samples_per_period = round(self._ao_sample_rate / self.frequency)
             self._ao_task.timing.cfg_samp_clk_timing(
                 rate            = self._ao_sample_rate,
                 source          = self._ao_clock_source, # see above about frequency divider counter
                 sample_mode     = AcquisitionType.CONTINUOUS,
-                samps_per_chan  = self._periods_per_write * self._pixels_per_period # TODO should be samples not pixels per period
+                samps_per_chan  = self._periods_per_write * samples_per_period
             )
             self._do_task.timing.cfg_samp_clk_timing(
                 rate            = self._ao_sample_rate,
                 source          = self._ao_clock_source, # see above about frequency divider counter
                 sample_mode     = AcquisitionType.CONTINUOUS,
-                samps_per_chan  = self._periods_per_write * self._pixels_per_period 
+                samps_per_chan  = self._periods_per_write * samples_per_period 
             )
 
             # Set start trigger
-            if self._ao_start_trigger is None: 
+            if (self._ao_start_trigger is None) and (self._ao_clock_source is None): 
                 # meaning that AO triggers itself (e.g. Alazar G-G scanning)
                 self._do_task.triggers.start_trigger.cfg_dig_edge_start_trig(
                     trigger_source=f"/{self._device.name}/ao/StartTrigger"
                 )
             else:
-                # AO clocks & triggers off AI (e.g. NI AI + G-G scanning)
-                # we can actually skip setting AO start trigger because it is clocked off AI/CO
-                if self._co_task:
-                    self._co_task.triggers.start_trigger.cfg_dig_edge_start_trig(
-                        trigger_source=f"/{self._device.name}/ao/StartTrigger"
-                    )
+                # AO clocks & triggers off AI (e.g. NI AI + G-G scanning) (or CO, if high sampling rate)
+                # we can actually skip setting AO/DO start trigger because it is clocked off AI (or CO)
+                pass
 
             if adjustable:
                 # Requires constantly supplying new waveform data, no regeneration
@@ -598,7 +618,8 @@ class FastGalvoScannerViaNI(GalvoScannerViaNI, FastRasterScanner):
             self._ao_task.start()
 
             # Start AI (ignored if already started)
-            digitizer.acquire.start()
+            if not digitizer.is_active:
+                digitizer.acquire.start()
 
         except Exception:
             self._active = False # actually not active
@@ -623,7 +644,9 @@ class FastGalvoScannerViaNI(GalvoScannerViaNI, FastRasterScanner):
 
         if self._co_task:
             self._co_task.stop()
-            CounterRegistry.free_counter(self._co_task.co_channels[0].physical_channel.name)
+            CounterRegistry.free_counter(
+                counter_name=self._co_task.co_channels[0].physical_channel.name
+            )
             self._co_task.close()
 
         self._active = False
@@ -633,6 +656,7 @@ class SlowGalvoScannerViaNI(GalvoScannerViaNI, SlowRasterScanner):
     def __init__(self,
                  fast_scanner: FastRasterScanner, 
                  external_line_clock_channel: str | None = None, # to sync to external line clock (e.g. a resonant scanner)
+                 external_start_trigger_channel: str | None = None,
                  frame_clock_channel: str | None = None, 
                  **kwargs):
         
@@ -640,6 +664,7 @@ class SlowGalvoScannerViaNI(GalvoScannerViaNI, SlowRasterScanner):
         
         if isinstance(fast_scanner, FastGalvoScannerViaNI):
             self._external_line_clock_channel = None
+            self._external_start_trigger_channel = None
             self._ao_sample_rate = None # for Galvo-Galvo scanning, AO rate = pixel rate
             self._fast_scanner = fast_scanner
             # pass itself as reference to the fast scanner--fast scanner will know to manage AO/DO tasks
@@ -649,6 +674,11 @@ class SlowGalvoScannerViaNI(GalvoScannerViaNI, SlowRasterScanner):
             if external_line_clock_channel is None:
                 raise RuntimeError("Res-galvo/polygon-galvo scanning must specify a line clock channel for synchronization.")
             self._external_line_clock_channel = validate_ni_channel(external_line_clock_channel)
+
+            if external_start_trigger_channel is not None:
+                self._external_start_trigger_channel = validate_ni_channel(external_start_trigger_channel)
+            else:
+                self._external_start_trigger_channel = None
 
             if self._ao_sample_rate is None:
                 raise RuntimeError("Res-galvo/polygon-galvo scanning must specify an analog out sample rate on slow scanner")
@@ -694,11 +724,22 @@ class SlowGalvoScannerViaNI(GalvoScannerViaNI, SlowRasterScanner):
 
                 high_ticks = round(self.duty_cycle * periods_per_frame)
                 fclk_ch = self._fclock_task.co_channels.add_co_pulse_chan_ticks(
-                    counter=CounterRegistry.allocate_counter(),
-                    source_terminal=self._external_line_clock_channel,
-                    low_ticks=periods_per_frame - high_ticks, 
-                    high_ticks=high_ticks
+                    counter         = CounterRegistry.allocate_counter(self._device.name),
+                    source_terminal = self._external_line_clock_channel,
+                    low_ticks       = periods_per_frame - high_ticks, 
+                    high_ticks      = high_ticks
                 )
+                if self._external_start_trigger_channel is not None:
+                    # use when digitizer can not provide trigger out synced to real record acquisitions
+                    # (e.g. Teledyne)
+                    self._fclock_task.triggers.start_trigger.cfg_dig_edge_start_trig(
+                        trigger_source  = self._external_start_trigger_channel
+                    )
+                else:
+                    # task will start immediately rather than wait for external trigger
+                    # used when digitizer can provide trigger out pulses synced with actual acquistion 
+                    # (e.g. Alazar AuxIO TriggerOut mode)
+                    pass 
 
                 fclk_ch.co_pulse_term = self._frame_clock_channel
 
@@ -718,7 +759,6 @@ class SlowGalvoScannerViaNI(GalvoScannerViaNI, SlowRasterScanner):
                     sample_mode=AcquisitionType.FINITE,
                     samps_per_chan=self.generate_waveform(self._ao_sample_rate, rearm_time).shape[0]
                 )
-
                 self._ao_task.triggers.start_trigger.cfg_dig_edge_start_trig(
                     trigger_source=self._frame_clock_channel
                 )

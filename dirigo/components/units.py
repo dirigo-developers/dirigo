@@ -581,14 +581,14 @@ class TimeRange(RangeWithUnits[Time]):
 
 class FrequencyRange(RangeWithUnits[Frequency]):
     """
-    Represents a position range with units (e.g. Hz, kHz, MHz, GHz)
+    Represents a frequency range with units (e.g. Hz, kHz, MHz, GHz)
     """
     UNIT_QUANTITY_CLASS = Frequency
 
 
 class SampleRateRange(RangeWithUnits[SampleRate]):
     """
-    Represents a position range with units (e.g. S/s, kS/s, MS/s, GS/s)
+    Represents a sample rate range with units (e.g. S/s, kS/s, MS/s, GS/s)
     """
     UNIT_QUANTITY_CLASS = SampleRate
 
@@ -601,6 +601,9 @@ class IntRange:
     @property
     def range(self) -> int:
         return 1 + self.max - self.min
+    
+    def within_range(self, value: int) -> bool:
+        return self.min <= value <= self.max
     
     @property
     def recommended_dtype(self):

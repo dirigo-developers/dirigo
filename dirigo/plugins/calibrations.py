@@ -13,7 +13,7 @@ from dirigo.plugins.acquisitions import FrameAcquisition, SampleAcquisition
 from dirigo.plugins.processors import RasterFrameProcessor
 
 from dirigo.hw_interfaces import Digitizer, FastRasterScanner
-from dirigo.hw_interfaces.digitizer import AuxiliaryIOEnums
+from dirigo.hw_interfaces.digitizer import AuxiliaryIOMode
 
 """
 Calibrations are special instances of Acquisition designed to produce data for
@@ -517,7 +517,7 @@ class LaserPulseFrequencyCalibration(SampleAcquisition):
         
         # Setup pulse frequency divider
         self.hw.digitizer.aux_io.configure_mode(
-            mode    = AuxiliaryIOEnums.OutPacer,
+            mode    = AuxiliaryIOMode.OUT_PACER,
             divider = self.DIVIDER
         )
 
