@@ -23,8 +23,8 @@ spec.pixel_height = spec.pixel_height / 100
 
 acquisition = diri.make("acquisition", "raster_frame", spec=spec)
 processor   = diri.make("processor", "raster_frame", upstream=acquisition)
-logger      = diri.make("logger", "line_gradient_calibration", upstream=processor)
+writer      = diri.make("writer", "line_gradient_calibration", upstream=processor)
 
 acquisition.start()
-logger.join()
+writer.join()
 

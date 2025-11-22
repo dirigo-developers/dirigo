@@ -13,7 +13,7 @@ worker_var     = contextvars.ContextVar("dirigo_worker", default=None)  # option
 @dataclass(frozen=True)
 class MetricEvent:
     run_id: str | None
-    group:  str | None       # "acquisition" | "processor" | "logger" | ...
+    group:  str | None       # "acquisition" | "processor" | "writer" | ...
     plugin: str | None       # entry point name, e.g., "raster_line"
     worker: str | None       # thread name or friendly name
     stage:  str              # e.g., "digitizer.get_completed"

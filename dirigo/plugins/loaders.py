@@ -6,7 +6,7 @@ import tifffile
 import numpy as np
 
 from dirigo.sw_interfaces.acquisition import Loader
-from dirigo.plugins.loggers import TiffLogger
+from dirigo.plugins.writers import TiffWriter
 from dirigo.components.io import SystemConfig
 from dirigo.plugins.acquisitions import LineAcquisitionRuntimeInfo, FrameAcquisitionSpec
 from dirigo.hw_interfaces.digitizer import DigitizerProfile
@@ -49,16 +49,16 @@ class RawRasterFrameLoader(Loader):
 
             tags = tif.pages[0].tags
 
-            cfg_dict = json.loads(tags[TiffLogger.SYSTEM_CONFIG_TAG].value)
+            cfg_dict = json.loads(tags[TiffWriter.SYSTEM_CONFIG_TAG].value)
             self.system_config = SystemConfig(cfg_dict)
 
-            runtime_dict = json.loads(tags[TiffLogger.RUNTIME_INFO_TAG].value)
+            runtime_dict = json.loads(tags[TiffWriter.RUNTIME_INFO_TAG].value)
             self.runtime_info = LineAcquisitionRuntimeInfo.from_dict(runtime_dict)
 
-            spec_dict = json.loads(tags[TiffLogger.ACQUISITION_SPEC_TAG].value)
+            spec_dict = json.loads(tags[TiffWriter.ACQUISITION_SPEC_TAG].value)
             self.spec = spec_class(**spec_dict)
 
-            digi_dict = json.loads(tags[TiffLogger.DIGITIZER_PROFILE_TAG].value)
+            digi_dict = json.loads(tags[TiffWriter.DIGITIZER_PROFILE_TAG].value)
             self.digitizer_profile = DigitizerProfile.from_dict(digi_dict)
 
             self.frames_read = 0
@@ -70,10 +70,10 @@ class RawRasterFrameLoader(Loader):
                 n_frames = len(tif.pages)
                 
                 self._timestamps = deserialize_float64_list(
-                    tif.pages[0].tags[TiffLogger.TIMESTAMPS_TAG].value
+                    tif.pages[0].tags[TiffWriter.TIMESTAMPS_TAG].value
                 )
                 self._positions = deserialize_float64_list(
-                    tif.pages[0].tags[TiffLogger.POSITIONS_TAG].value
+                    tif.pages[0].tags[TiffWriter.POSITIONS_TAG].value
                 )
 
                 while self.frames_read < n_frames:

@@ -8,7 +8,7 @@ from dirigo.components.hardware import Hardware
 from dirigo.sw_interfaces.display import DisplayPixelFormat
 
 if TYPE_CHECKING:
-    from dirigo.sw_interfaces import Acquisition, Processor, Display, Logger
+    from dirigo.sw_interfaces import Acquisition, Processor, Display, Writer
     from dirigo.sw_interfaces.acquisition import AcquisitionSpec, Loader
     from dirigo.plugins.processors import RollingAverageProcessor
     from dirigo.plugins.displays import FrameDisplay
@@ -85,13 +85,13 @@ class Dirigo:
              **kw: Any) -> "Display": ...
     
     @overload
-    def make(self, group: Literal["logger"], name: str, *,
-             upstream: "Acquisition | Processor", **kw: Any) -> "Logger": ...
+    def make(self, group: Literal["writer"], name: str, *,
+             upstream: "Acquisition | Processor", **kw: Any) -> "Writer": ...
 
     def make(self, group: str, name: str, **kw: Any
-             ) -> "Acquisition | Loader | Processor | Display | Logger":
+             ) -> "Acquisition | Loader | Processor | Display | Writer":
         """
-        Make pluggable pipeline elements (acquisitions, processors, loggers,
+        Make pluggable pipeline elements (acquisitions, processors, writers,
         displays)
         """
         plugins = _load_entry_points(group)
@@ -103,7 +103,7 @@ class Dirigo:
                 f"No {group} plugin named '{name}'. Available: {set(plugins)}"
             )
         
-        if group not in ("acquisition", "loader", "display", "processor", "logger"):
+        if group not in ("acquisition", "loader", "display", "processor", "writer"):
             raise PluginError(f"Unsupported plugin group '{group}'.")
 
         # special handling per group
@@ -160,5 +160,5 @@ class Dirigo:
     def make_display_processor(self, name: str, *, upstream, **kw: Any) -> "Display":
         return self.make("display", name, upstream=upstream, **kw)
     
-    def make_logger(self, name: str, *, upstream, **kw: Any) -> "Logger":
-        return self.make("logger", name, upstream=upstream, **kw)
+    def make_writer(self, name: str, *, upstream, **kw: Any) -> "Writer":
+        return self.make("writer", name, upstream=upstream, **kw)

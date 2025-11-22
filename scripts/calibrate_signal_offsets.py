@@ -10,8 +10,8 @@ axis parked (alterantively: keep shutter closed), so there is no real signal
 diri = Dirigo()
 
 acquisition = diri.make("acquisition", "raster_line")
-logger      = diri.make("logger", "signal_offset_calibration", upstream=acquisition)
+writer      = diri.make("writer", "signal_offset_calibration", upstream=acquisition)
 
 acquisition.start()
-logger.join()
+writer.join()
 

@@ -7,7 +7,7 @@ import numpy as np
 
 from dirigo.sw_interfaces.worker import EndOfStream
 from dirigo.sw_interfaces.processor import Processor, ProcessorProduct
-from dirigo.sw_interfaces import Logger
+from dirigo.sw_interfaces import Writer
 from dirigo.sw_interfaces.acquisition import Acquisition, AcquisitionProduct
 from dirigo.plugins.acquisitions import (
     SampleAcquisitionSpec, FrameAcquisition, FrameAcquisitionSpec, 
@@ -49,7 +49,7 @@ def serialize_float64_list(arrays: Sequence[np.ndarray]) -> bytes:
     return header + stack.ravel().tobytes()
 
 
-class TiffLogger(Logger):
+class TiffWriter(Writer):
     """
     Saves image stream and metadata to tiff file.
 
@@ -117,7 +117,7 @@ class TiffLogger(Logger):
         elif self.mode == 'z-stack':
             self._store_z_plane(frame)
         else:
-            raise ValueError("Unsupported TiffLogger mode: {self.mode}")
+            raise ValueError("Unsupported TiffWriter mode: {self.mode}")
 
     def _save_frame(self, frame: AcquisitionProduct | ProcessorProduct):
         # Create the writer object if necessary

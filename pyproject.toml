@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "dirigo"
-version = "0.3.1"
+version = "0.3.2"
 description = "Dirigo is a collection of interfaces for customizable image data acquisition"
 authors = [
     {name = "T. D. Weber", email = "tweber@mit.edu"}
@@ -52,14 +52,14 @@ inverted_gamma = "dirigo.plugins.displays:InvertedGamma"
 [project.entry-points."dirigo_displays"] # e.g. display processors
 frame = "dirigo.plugins.displays:FrameDisplay"
 
-[project.entry-points."dirigo_loggers"]
-tiff = "dirigo.plugins.loggers:TiffLogger"
-# special calibration loggers
-trigger_delay_calibration = "dirigo.plugins.calibrations:TriggerDelayCalibrationLogger"
-line_distortion_calibration = "dirigo.plugins.calibrations:LineDistortionCalibrationLogger"
-stage_scanner_angle_calibration = "dirigo.plugins.calibrations:StageScannerAngleCalibrationLogger"
-signal_offset_calibration = "dirigo.plugins.calibrations:SignalOffsetCalibrationLogger"
-line_gradient_calibration = "dirigo.plugins.calibrations:LineGradientCalibrationLogger"
+[project.entry-points."dirigo_writers"]
+tiff = "dirigo.plugins.writers:TiffWriter"
+# special calibration writers
+trigger_delay_calibration = "dirigo.plugins.calibrations:TriggerDelayCalibrationWriter"
+line_distortion_calibration = "dirigo.plugins.calibrations:LineDistortionCalibrationWriter"
+stage_scanner_angle_calibration = "dirigo.plugins.calibrations:StageScannerAngleCalibrationWriter"
+signal_offset_calibration = "dirigo.plugins.calibrations:SignalOffsetCalibrationWriter"
+line_gradient_calibration = "dirigo.plugins.calibrations:LineGradientCalibrationWriter"
 
 [project.entry-points."dirigo_encoders"]
 linear_encoders_via_ni = "dirigo.plugins.encoders:MultiAxisLinearEncodersViaNI"
