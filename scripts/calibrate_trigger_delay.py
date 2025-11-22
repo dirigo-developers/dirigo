@@ -33,9 +33,9 @@ spec = TriggerDelayCalibration.Spec(
 name = "trigger_delay_calibration"
 acquisition = diri.make("acquisition", name, spec=spec)
 processor   = diri.make("processor", "raster_frame", upstream=acquisition)
-logger      = diri.make("logger", name, upstream=processor)
+writer      = diri.make("writer", name, upstream=processor)
 
 acquisition.start()
 
-# wait until logger finishes
-logger.join()
+# wait until writer finishes
+writer.join()

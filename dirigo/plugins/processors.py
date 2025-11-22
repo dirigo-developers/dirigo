@@ -253,7 +253,7 @@ class RasterFrameProcessor(Processor[Acquisition]):
             while True: 
                 with self._receive_product() as acquisition_product:
                     processed = self._process_frame(acquisition_product)
-                    self._publish(processed) # sends off to Logger and/or Display workers
+                    self._publish(processed) # sends off to Writer and/or Display workers
                     self._frames_processed += 1
 
         except EndOfStream:

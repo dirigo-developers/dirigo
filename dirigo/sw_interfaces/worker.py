@@ -81,7 +81,7 @@ class Worker(threading.Thread, ABC):
         self._product_dtype = None # numpy dtype
         
         # Set context
-        self._dirigo_group: str | None = None    # "acquisition"/"processor"/"logger"/"display"/"loader"
+        self._dirigo_group: str | None = None    # "acquisition"/"processor"/"writer"/"display"/"loader"
         self._dirigo_plugin: str | None = None   # entry point name, e.g. "raster_line"
         self._dirigo_run_id: str | None = None   # set by acquisitions; others inherit
 

@@ -7,7 +7,7 @@ and plugin discovery via entry points. Expand with diagrams as the design stabil
 flowchart LR
   A[Acquisition Worker] --> B[Processor Worker]
   B --> C[Display Worker]
-  B --> D[Logger Worker]
+  B --> D[Writer Worker]
   subgraph Hardware Plugins
     H1[Digitizer]:::hw
     H2[Stages]:::hw

@@ -22,8 +22,8 @@ spec = StageTranslationCalibration.Spec(
 
 acquisition = diri.make("acquisition", "stage_translation_calibration", spec=spec)
 processor   = diri.make("processor", "raster_frame", upstream=acquisition)
-logger      = diri.make("logger", "stage_scanner_angle_calibration", upstream=processor)
+writer      = diri.make("writer", "stage_scanner_angle_calibration", upstream=processor)
 
 acquisition.start()
-logger.join()
+writer.join()
 

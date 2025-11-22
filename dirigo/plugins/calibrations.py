@@ -7,7 +7,7 @@ from scipy import fft
 
 from dirigo import units
 from dirigo import io
-from dirigo.sw_interfaces import Acquisition, Processor, Logger
+from dirigo.sw_interfaces import Acquisition, Processor, Writer
 from dirigo.sw_interfaces.worker import EndOfStream
 from dirigo.plugins.acquisitions import FrameAcquisition, SampleAcquisition
 from dirigo.plugins.processors import RasterFrameProcessor
@@ -98,7 +98,7 @@ class TriggerDelayCalibration(Acquisition):
             self._publish(None)
 
 
-class TriggerDelayCalibrationLogger(Logger):
+class TriggerDelayCalibrationWriter(Writer):
     """Logs measured trigger delay at amplitudes."""
     def __init__(self, upstream: Processor):
         super().__init__(upstream)
@@ -231,7 +231,7 @@ class StageTranslationCalibration(Acquisition):
             self._frame_acquisition.stop()
 
 
-class LineDistortionCalibrationLogger(Logger):
+class LineDistortionCalibrationWriter(Writer):
     """Logs apparent distortion use patches to create a local distortion field."""
     UPSAMPLE_X     = 20
     UPSAMPLE_Y     = 1
@@ -351,7 +351,7 @@ class LineDistortionCalibrationLogger(Logger):
         return i / cls.UPSAMPLE_Y, j / cls.UPSAMPLE_X
     
 
-class StageScannerAngleCalibrationLogger(LineDistortionCalibrationLogger):
+class StageScannerAngleCalibrationWriter(LineDistortionCalibrationWriter):
     UPSAMPLE_X     = 10
     UPSAMPLE_Y     = 10
 
@@ -360,7 +360,7 @@ class StageScannerAngleCalibrationLogger(LineDistortionCalibrationLogger):
         self.basename = "stage_scanner_angle"
         self.filepath = io.config_path() / "optics" / (self.basename + ".csv")
 
-    # run() is same as LineDistortionCalibrationLogger
+    # run() is same as LineDistortionCalibrationWriter
 
     def save_data(self):
         """Compare pairs of frames"""
@@ -390,7 +390,7 @@ class StageScannerAngleCalibrationLogger(LineDistortionCalibrationLogger):
         )
 
 
-class SignalOffsetCalibrationLogger(Logger):
+class SignalOffsetCalibrationWriter(Writer):
     
     def __init__(self, upstream: Processor):
         super().__init__(upstream)
@@ -434,7 +434,7 @@ class SignalOffsetCalibrationLogger(Logger):
         )
 
 
-class LineGradientCalibrationLogger(Logger):
+class LineGradientCalibrationWriter(Writer):
     
     def __init__(self, upstream: Processor):
         super().__init__(upstream)

@@ -167,7 +167,7 @@ class Display(Worker):
         
         #self.gamma = gamma # gamma setter will validate this
 
-        if isinstance(upstream, (Processor, Display)): # TODO, refactor this into some sort of mixin (with Logger's corresponding block)
+        if isinstance(upstream, (Processor, Display)): # TODO, refactor this into some sort of mixin (with Writer's corresponding block)
             self._processor = upstream
             self._acquisition = upstream._acquisition
         elif isinstance(upstream, Acquisition):

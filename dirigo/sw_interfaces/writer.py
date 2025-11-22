@@ -11,14 +11,14 @@ from dirigo.sw_interfaces.processor import Processor, ProcessorProduct
 from dirigo.sw_interfaces.display import Display
 
 
-class Logger(Worker):
-    """Dirigo interface for data logging."""
+class Writer(Worker):
+    """Dirigo interface for data writing."""
     def __init__(self, 
                  upstream: Acquisition | Loader | Processor,
                  basename: str = "experiment",
                  ) -> None:
         """Instantiate with either an upstream Acquisition or Processor"""
-        super().__init__("Logger") # sets up the thread and the publisher-subcriber interface
+        super().__init__("Writer") # sets up the thread and the publisher-subcriber interface
         
         if isinstance(upstream, (Processor, Display)): 
             self._processor = upstream
