@@ -469,8 +469,11 @@ class LineAcquisition(SampleAcquisition):
             dt = units.Time(digi.acquire.record_length_step / fast_scanner._ao_sample_rate) 
             T_rounded = round(T_exact / dt) * dt
             fast_scanner.frequency = 1 / T_rounded 
-            fast_scanner.waveform = Waveforms.ASYM_TRIANGLE
-            fast_scanner.duty_cycle = self.spec.fill_fraction # TODO set duty cycle to 50% if doing bidi
+            if self.spec.bidirectional_scanning:
+                fast_scanner.waveform = Waveforms.LINEAR_BIDIRECTIONAL
+            else:
+                fast_scanner.waveform = Waveforms.LINEAR_UNIDIRECTIONAL
+            fast_scanner.ramp_time_fraction = self.spec.fill_fraction # TODO set duty cycle to 50% if doing bidi
         
         elif isinstance(fast_scanner, ResonantScanner):
             # for res scanner most parameters are fixed: frequency, waveform, duty cycle 
@@ -601,7 +604,8 @@ class LineAcquisition(SampleAcquisition):
         """
 
         if self.spec.bidirectional_scanning:
-            start_index = 256 # should be half the trigger re-arm time TODO, get actual rearm time
+            start_index = min(self.hw.digitizer.acquire.trigger_delay_range.max,
+                              256) # should be half the trigger re-arm time TODO, get actual rearm time
         else:
             start_index = 0  
 
@@ -634,7 +638,7 @@ class LineAcquisition(SampleAcquisition):
                 delay = fast_scanner.input_delay \
                     if hasattr(fast_scanner, 'input_delay') else units.Time(0)
                 record_duration = min(
-                    nominal_period * fast_scanner.duty_cycle + delay, 
+                    nominal_period * fast_scanner.ramp_time_fraction + delay, 
                     shortest_period
                 )
                 record_length = record_duration * digitizer_rate
@@ -811,8 +815,8 @@ class FrameAcquisition(LineAcquisition):
         self.hw.slow_raster_scanner.frequency = (
             self.hw.fast_raster_scanner.frequency / self._records_per_buffer
         )
-        self.hw.slow_raster_scanner.waveform = Waveforms.ASYM_TRIANGLE
-        self.hw.slow_raster_scanner.duty_cycle = (
+        self.hw.slow_raster_scanner.waveform = Waveforms.LINEAR_UNIDIRECTIONAL # only support slow axis unidi
+        self.hw.slow_raster_scanner.ramp_time_fraction = (
             1 - self._flyback_periods / self._records_per_buffer
         )
 

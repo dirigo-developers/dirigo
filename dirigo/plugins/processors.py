@@ -101,28 +101,33 @@ def crop_bidi_data(data: np.ndarray,
     """
     Select ranges, flips the reverse scan, and converts to float32 for phase
     correlation.
-
-    Note: operates on channels 0-1 only.
     """
-    lines_per_frame, n = cropped.shape
+    subtract_mean = True # Testing
+
+    lines_per_frame = cropped.shape[0]
+    n = cropped.shape[1]
+    r = n / 2
     Nc = data.shape[2]
 
-    # Find the nominal midpoints and endpoints of fwd and rvs scans
-    mid_fwd = samples_per_period/4
-    mid_rvs = mid_fwd + samples_per_period/2
+    # Find the start and end points for fwd and rvs
+    fwd_start_exact = samples_per_period/4 - r - trigger_delay
+    rvs_end_exact   = 3*samples_per_period/4 + r - 1 - trigger_delay
 
-    fwd0 = int(mid_fwd) - n//2 - trigger_delay
-    rvs1 = int(mid_rvs) + n//2 - trigger_delay
+    fwd_start = round(fwd_start_exact)
+    rvs_end   = round(rvs_end_exact)
+
+    bias = (fwd_start_exact-fwd_start) - (rvs_end_exact-rvs_end)
 
     for rec in prange(lines_per_frame//2):
         for i in range(n):
             temp0, temp1 = 0, 0
             for c in range(Nc):
-                temp0 += data[rec, fwd0 + i, c]
-                temp1 += data[rec, rvs1 - i, c]
+                temp0 += data[rec, fwd_start + i, c]
+                temp1 += data[rec, rvs_end - i, c]
             cropped[2*rec, i]   = temp0
             cropped[2*rec+1, i] = temp1
 
+    return bias
 
 @njit(
     complex64[:](complex64[:,:]),
@@ -134,13 +139,13 @@ def compute_cross_power_spectrum(F: np.ndarray):
     n_pairs = F.shape[0] // 2  # Number of record pairs
     xps = np.zeros(n_freqs, dtype=np.complex64)  # Output array
 
-    for i in prange(n_freqs * n_pairs):
+    for i in range(n_freqs * n_pairs): # Was parallel, but this was a race condition, if need more perf, convert to 2D and use temp array
         pair = i // n_freqs
         freq = i % n_freqs
         xps[freq] += F[2 * pair, freq] * np.conj(F[2 * pair + 1, freq])  
 
     # normalize
-    EPS = 1e-1  # Small constant
+    EPS = 1e-10  # Small constant
     for freq in prange(n_freqs):
         mag = np.abs(xps[freq]) + EPS
         xps[freq] /= mag
@@ -212,12 +217,13 @@ class RasterFrameProcessor(Processor[Acquisition]):
             except:
                 # Calibration could not be loaded, don't use
                 self._initial_trigger_error = None
-                self._trigger_error = 0
+                self._trigger_error = 0            
 
-            # Preallocate a cropping buffer for bidi acquisitions
-            lines_per_frame = self.processed_shape[0]
-            n = 2**int(np.log2(self.samples_per_period/2 - 2*self._fixed_trigger_delay))
-            self._cropped = np.zeros((lines_per_frame, n), dtype=np.float32) # preallocate
+            if self._spec.bidirectional_scanning:
+                # Preallocate a cropping buffer for bidi acquisitions
+                lines_per_frame = self.processed_shape[0]
+                n = 2**int(np.log2(self.samples_per_period/2 - 2*self._fixed_trigger_delay))
+                self._cropped = np.zeros((lines_per_frame, n), dtype=np.float32) # preallocate
         
         try:
             ampl = runtime_info.scanner_amplitude
@@ -241,8 +247,8 @@ class RasterFrameProcessor(Processor[Acquisition]):
         except:
             self._gradient = np.ones((self._spec.pixels_per_line,), np.float32)
 
-        self._phases = np.full(shape=(10,), fill_value=np.nan, dtype=np.float32)
-        self._phase_counter = 0
+        self._lags = np.full(shape=(10,), fill_value=np.nan, dtype=np.float32)
+        self._lag_counter = 0
         self._frames_processed = 0
 
     def _receive_product(self, block: bool = True, timeout: float | None = None) -> AcquisitionProduct:
@@ -269,14 +275,14 @@ class RasterFrameProcessor(Processor[Acquisition]):
             self._fast_scanner_frequency = 1 / avg_trig_period
             print(self._fast_scanner_frequency)
 
-        # Measure phase from bidi data (in uni-directional, phase is not critical)
+        # Estimate lag from bidi data (not need in uni-directional)
         if self._spec.bidirectional_scanning:
-            phase = self.measure_phase(acq_product.data)
-            if phase is not np.nan:
-                p = self._phase_counter % len(self._phases)
-                self._phases[p] = phase
-                self._phase_counter += 1
-            self._trigger_error = np.median(self._phases[~np.isnan(self._phases)])
+            lag = self.measure_relative_lag(acq_product.data)
+            if lag is not np.nan:
+                p = self._lag_counter % len(self._lags)
+                self._lags[p] = lag
+                self._lag_counter += 1
+            self._trigger_error = np.median(self._lags[~np.isnan(self._lags)]) / 2
 
         # Update resampling start indices--these can change a bit if the scanner frequency drifts
         start_indices = self.calculate_start_indices(self._trigger_error) - self._fixed_trigger_delay
@@ -311,6 +317,7 @@ class RasterFrameProcessor(Processor[Acquisition]):
 
         # Create a resampling function based on fast axis waveform type
         if 'resonant' in self._acquisition.system_config.fast_raster_scanner['type'].lower():
+            # Fill fraction
             # image line should be taken from center of sinusoid sweep
             pixel_edges = np.linspace(ff, -ff, self._spec.pixels_per_line + 1) 
 
@@ -323,12 +330,25 @@ class RasterFrameProcessor(Processor[Acquisition]):
             # arccos inverts the cosinusoidal path, normalize scan period to 0.0 to 1.0
             temporal_edges = np.arccos(modified_pixel_edges) / TWO_PI
 
-        else: #TODO, rename to smooth triangle or something
+        else:
+            # Instead of FF, use ramp_time_fraction (rtf)
+            rtf = self._spec.fill_fraction
             # Fill fraction needs to be slightly adjusted to reflect pixel period rounding 
-            ff_corrected = self._spec.pixels_per_line / round(self._spec.pixels_per_line / self._spec.fill_fraction)
+            rtf_corrected = self._spec.pixels_per_line / round(self._spec.pixels_per_line / rtf)
 
-            # assume we start at 0 and go to corrected fill fraction
-            pixel_edges = np.linspace(0, ff_corrected, self._spec.pixels_per_line + 1)
+            if self._spec.bidirectional_scanning:
+                pixel_edges = np.linspace(
+                    start   = (1 - rtf_corrected) / 4, 
+                    stop    = 0.5 - (1 - rtf_corrected) / 4, 
+                    num     = self._spec.pixels_per_line + 1
+                )
+            else:
+                # assume we start at 0 and go to corrected fill fraction
+                pixel_edges = np.linspace(
+                    start   = 0, 
+                    stop    = rtf_corrected, 
+                    num     = self._spec.pixels_per_line + 1
+                )
 
             temporal_edges = pixel_edges # The scan should already be linearized
 
@@ -344,41 +364,55 @@ class RasterFrameProcessor(Processor[Acquisition]):
     def calculate_start_indices(self, trigger_phase: int = 0):
         """Calculate the start position in digitizer records for each pixel."""
         starts_exact = self._temporal_edges * self.samples_per_period + trigger_phase
-        return np.ceil(starts_exact - 1e-6).astype(np.int32) 
+        if self._spec.bidirectional_scanning:
+            return np.stack([
+                np.ceil(starts_exact[0,:] - 1e-6), 
+                np.floor(starts_exact[1,:] + 1e-6)
+            ]).astype(np.int32)
+        else:
+            return np.ceil(starts_exact - 1e-6).astype(np.int32) 
     
-    def measure_phase(self, data: np.ndarray) -> float:
+    def measure_relative_lag(self, data: np.ndarray, upsample_factor: int = 1) -> float:
         """
-        Measure the apparent fast raster scanner trigger phase, in samples
-        (for bidirectional scanning).
+        Estimate fast-axis trigger timing error (samples) using bidirectional 
+        lines.
         """
-        UPSAMPLE = 1        # TODO move this somewhere else
+        UPSAMPLE = 1
         PHASE_MAX = 100
         THRESH = 20
 
-        crop_bidi_data(
+        if not hasattr(self, "_cropped"):
+            # Allocate a cropping buffer for bidi acquisitions
+            lines_per_frame = self.processed_shape[0]
+            n = 2**int(np.log2(self.samples_per_period/2 - 2*self._fixed_trigger_delay))
+            self._cropped = np.zeros((lines_per_frame, n), dtype=np.float32)
+
+        bias = crop_bidi_data(
             data                = data, 
             trigger_delay       = self._fixed_trigger_delay, 
             samples_per_period  = self.samples_per_period,
             cropped             = self._cropped
         )
-        if np.mean(self._cropped) - sum(self.signal_offset) < THRESH:
-            return np.nan
+        # if np.mean(self._cropped) - np.sum(self.signal_offset) < THRESH:
+        #     return np.nan
 
         F = fft.rfft(self._cropped, axis=1, workers=4)
         xps = compute_cross_power_spectrum(F)
 
-        n = self._cropped.shape[1] * UPSAMPLE
+        n = self._cropped.shape[1] * upsample_factor
         corr = np.abs(fft.irfft(xps, n))
+        corr[0] = 0 # testing
 
-        shift = float(np.argmax(corr))
-        if shift > (n//2):  # Handle wrap-around for negative shifts
-            shift -= n
+        max_index = float(np.argmax(corr))
+        if max_index > (n//2):  # Handle wrap-around for negative shifts
+            max_index -= n
+        lag = max_index / upsample_factor
 
         # if phase is outside the pre-determined range, then return NaN (indeterminate)
-        # if abs(shift) > PHASE_MAX * UPSAMPLE * 2:
+        # if abs(shift) > PHASE_MAX * upsample_factor * 2:
         #     return np.nan
-        print(shift)
-        return shift / UPSAMPLE / 2 - 1
+        print("LAG:", lag, "BIAS:", bias)
+        return lag + bias # or minus bias?
     
     def calibrated_trigger_delay(self, scanner_amplitude: units.Angle) -> float:
         ampls, freqs, phases = io.load_scanner_calibration()

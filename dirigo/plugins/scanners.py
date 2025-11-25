@@ -1,5 +1,5 @@
 import threading
-from functools import cached_property
+from functools import cached_property, cache
 from typing import cast
 
 import numpy as np
@@ -27,24 +27,28 @@ def get_device(device_name: str) -> nidaqmx.system.Device:
                 nidaqmx.system.System.local().devices[device_name])
 
 
+@cache
+def _get_all_ni_channels_for_device(device_name: str) -> set[str]:
+    """
+    Return a cached set of all channel/terminal names for a given NI device.
+    """
+    device = get_device(device_name)
+
+    names: set[str] = set()
+    names.update(chan.name for chan in device.ai_physical_chans)
+    names.update(chan.name for chan in device.ao_physical_chans)
+    names.update(chan.name for chan in device.di_lines)
+    names.update(chan.name for chan in device.do_lines)
+    names.update(device.terminals)
+
+    return names
+
+
 def validate_ni_channel(channel_name: str) -> str:
     """
     Confirm if a given channel or terminal exists on a device.
-    
-    Parameters:
-    - channel_name: str, the full channel name to check (e.g., 'Dev1/ai0', 
-      'Dev1/ao0', '/Dev1/PFI0').
-      Note: Terminals (e.g., PFI0) must include a leading '/' (e.g., '/Dev1/PFI0'). 
-
-    Raises:
-    - ValueError: If the channel name format is invalid or the channel/terminal
-      does not exist.
-    - KeyError: If the specified device does not exist.
-
-    Returns:
-    - None: If the channel exists (raises no exception).
     """
-    # Ensure channel_name includes both device and channel/terminal parts
+    # Basic format check
     if '/' not in channel_name or channel_name.count('/') > 3:
         raise ValueError(
             f"Invalid channel name format, {channel_name}. "
@@ -52,37 +56,26 @@ def validate_ni_channel(channel_name: str) -> str:
             f"Examples: 'Dev1/ao0', '/Dev1/PFI4', '/Dev1/ao/SampleClock'"
         )
 
-    # Split device name from the rest of the channel name
     parts = channel_name.split('/')
     if channel_name.startswith('/'):
-        # Handle terminal format: '/Dev1/PFI0'
+        # '/Dev1/PFI0'
         device_name = parts[1]
     else:
-        # Handle channel format: 'Dev1/ai0'
+        # 'Dev1/ai0'
         device_name = parts[0]
 
     try:
-        # Get the device
-        device = get_device(device_name)
-
+        all_channels = _get_all_ni_channels_for_device(device_name)
     except KeyError:
         raise ValueError(f"Device {device_name} not found in the system.")
 
-    # Collect all channel and terminal names from the device
-    all_channels = []
-    all_channels.extend(chan.name for chan in device.ai_physical_chans)
-    all_channels.extend(chan.name for chan in device.ao_physical_chans)
-    all_channels.extend(chan.name for chan in device.di_lines)
-    all_channels.extend(chan.name for chan in device.do_lines)
-    all_channels.extend(device.terminals)
-
-    # Check if the specified channel exists
     if channel_name not in all_channels:
         raise ValueError(
             f"Channel/terminal, {channel_name} not found on device, {device_name}"
         )
-    # If no exception is raised, the channel is valid
+
     return channel_name
+
 
 
 class CounterRegistry:
@@ -211,7 +204,7 @@ class ResonantScannerViaNI(ResonantScanner, FastRasterScanner):
         try:
             with nidaqmx.Task() as task: 
                 task.ao_channels.add_ao_voltage_chan(self._amplitude_control_channel)
-                task.write(analog_value, auto_start=True)
+                task.write(analog_value)
         except nidaqmx.DaqError as e:
             raise RuntimeError(f"Failed to set analog output: {e}") from e
 
@@ -264,7 +257,7 @@ class GalvoScannerViaNI(GalvoScanner):
         try:
             with nidaqmx.Task() as task: 
                 task.ao_channels.add_ao_voltage_chan(self._analog_control_channel)
-                task.write(analog_value, auto_start=True)
+                task.write(analog_value)
         except nidaqmx.DaqError as e:
             raise RuntimeError(f"Failed to park scanner: {e}") from e
         
@@ -274,7 +267,7 @@ class GalvoScannerViaNI(GalvoScanner):
         try:
             with nidaqmx.Task() as task: 
                 task.ao_channels.add_ao_voltage_chan(self._analog_control_channel)
-                task.write(analog_value, auto_start=True)
+                task.write(analog_value)
         except nidaqmx.DaqError as e:
             raise RuntimeError(f"Failed to center scanner: {e}") from e
     
@@ -288,20 +281,19 @@ class GalvoScannerViaNI(GalvoScanner):
                           rearm_time: units.Time = units.Time(0)) -> np.ndarray:
         # TODO, njit? parameters: waveform, amplitude, duty_cycle, waveform_length, samples_per_period
         """Returns are waveform vector in units of radian."""
-        offset = self.offset
-        # TODO, adjustable phase?
+        offset = self.offset # shifts whole waveform up or down (useful for alignment)
 
         exact_samples_per_period = sample_rate / self.frequency
         waveform_length = round(exact_samples_per_period - rearm_time * sample_rate)
 
-        if self.waveform == 'sinusoid':
+        if self.waveform == Waveforms.SINUSOID:
             t = np.linspace(start=0, stop=2*np.pi, num=waveform_length)
 
             waveform = (self.amplitude/2) * np.cos(t) + offset # amplitude is pk-pk hence the 1/2
         
-        elif self.waveform == Waveforms.ASYM_TRIANGLE:
+        elif self.waveform == Waveforms.LINEAR_UNIDIRECTIONAL:
             # TODO clean this up
-            num_up = round(exact_samples_per_period * self.duty_cycle) 
+            num_up = round(exact_samples_per_period * self.ramp_time_fraction)
             A = self.amplitude
             F = num_up / waveform_length # fill fraction (aka duty cycle, %scan with usable data)
             F2 = (F + 1) / 2
@@ -318,17 +310,53 @@ class GalvoScannerViaNI(GalvoScanner):
                 k*t2**2/2 + A*t2/F - k*t2 + k/2 - A/F       # flyback II (+accel)
             )
             waveform = np.concatenate(parts, axis=0) - A/2 # minus A/2 to center around 0 degrees (rather than 0 to +A)
+        
+        elif self.waveform == Waveforms.LINEAR_BIDIRECTIONAL:
+            T   = waveform_length
+            rtf = self.ramp_time_fraction
+            A   = float(self.amplitude) / 2 # half pk-pk amplitude
+            w0  = (T/4) * (1 - rtf)
+            w1  = (T/4) * (1 + rtf)
+            w2  = (T/4) * (3 - rtf)
+            w3  = (T/4) * (3 + rtf)
+            m   = 4 * A / (T * rtf)
+            k   = 16 * A / (T**2 * rtf * (1-rtf))
+
+            t0 = np.arange(0,  w0 - 0.5)
+            t1 = np.arange(t0[-1]+1, w1 - 0.5) # linear up ramp
+            t2 = np.arange(t1[-1]+1, w2 - 0.5)
+            t3 = np.arange(t2[-1]+1, w3 - 0.5) # linear down ramp
+            t4 = np.arange(t3[-1]+1, T - 0.5)
+
+            f0 = 0.5 * k * (t0**2 - w0**2) - A
+            f1 = m * (t1 - w0) - A
+            f2 = 0.5 * k * (w1**2 - t2**2) + 0.5 * k * T * (t2 - w1) + A
+            f3 = m * (w2 - t3) + A
+            f4 = 0.5 * k * (t4**2 - w3**2) + k * T * (w3 - t4) - A
+
+            waveform = np.concatenate((f0,f1,f2,f3,f4), axis=0)
+        
+        else:
+            raise RuntimeError(f"Unsupported waveform type {self.waveform}")
+
+        # Shift phase
+        shift_amount = round(-self.input_delay * sample_rate)
+        if abs(shift_amount) > waveform_length:
+            raise RuntimeError("Scanner input delay greater than line period. "
+                               "Choose longer line period, or check input delay setting.")
+        waveform = np.roll(waveform, shift=shift_amount)
 
         return waveform * self._volts_per_radian
     
-    def generate_clock(self, sample_rate: units.SampleRate = None): # TODO, njit this? parameters: waveform, amplitude, duty_cycle, waveform_length, samples_per_period
+    def generate_clock(self, sample_rate: units.SampleRate): 
+        # TODO, njit this? parameters: waveform, amplitude, duty_cycle, waveform_length, samples_per_period
         """Returns a digital signal representing the line or frame clock."""
         # TODO, adjustable phase?
         exact_samples_per_period = sample_rate / self.frequency
         rearm_time = 0
         waveform_length = round(exact_samples_per_period - rearm_time * sample_rate)
 
-        num_up = int(exact_samples_per_period * self.duty_cycle) + 1
+        num_up = int(exact_samples_per_period * self.ramp_time_fraction) + 1
 
         clock = np.zeros((waveform_length,), dtype=np.bool)
         clock[:num_up] = True
@@ -344,18 +372,18 @@ class GalvoScannerViaNI(GalvoScanner):
             GalvoScanner.frequency.__set__(self, new_frequency)
 
     @GalvoScanner.waveform.setter
-    def waveform(self, new_waveform: str):
+    def waveform(self, new_waveform: Waveforms):
         if self._active:
             raise RuntimeError("Waveform type is not adjustable while scanner is active.")
         else:
             GalvoScanner.waveform.__set__(self, new_waveform)
 
-    @GalvoScanner.duty_cycle.setter
-    def duty_cycle(self, new_duty_cycle: float):
+    @GalvoScanner.ramp_time_fraction.setter
+    def ramp_time_fraction(self, new_duty_cycle: float):
         if self._active:
             raise RuntimeError("Duty cycle is not adjustable while scanner is active.")
         else:
-            GalvoScanner.duty_cycle.__set__(self, new_duty_cycle)
+            GalvoScanner.ramp_time_fraction.__set__(self, new_duty_cycle)
 
     # Are adjustable: offset, amplitude
         
@@ -722,7 +750,7 @@ class SlowGalvoScannerViaNI(GalvoScannerViaNI, SlowRasterScanner):
 
                 self._fclock_task = nidaqmx.Task("Frame clock")
 
-                high_ticks = round(self.duty_cycle * periods_per_frame)
+                high_ticks = round(self.ramp_time_fraction * periods_per_frame)
                 fclk_ch = self._fclock_task.co_channels.add_co_pulse_chan_ticks(
                     counter         = CounterRegistry.allocate_counter(self._device.name),
                     source_terminal = self._external_line_clock_channel,
