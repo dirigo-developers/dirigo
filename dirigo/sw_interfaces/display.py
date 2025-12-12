@@ -215,7 +215,7 @@ class Display(Worker):
         """
         return 2**(self._monitor_bit_depth + 4)
 
-    # def _init_product_pool(self, n, shape, dtype=np.uint8):
+    # def __init_product_pool(self, n, shape, dtype=np.uint8):
     #     for _ in range(n):
     #         prod = DisplayProduct(
     #             pool=self._product_pool,

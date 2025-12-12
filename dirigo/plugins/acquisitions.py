@@ -480,11 +480,19 @@ class LineAcquisition(SampleAcquisition):
             )
             digi.aux_io.configure_mode(AuxiliaryIOMode.OUT_TRIGGER)
             
-        # Scanner settings implemented, configure digitizer acquisition params
+        # With all scanner settings now implemented, configure digitizer params.
         self.configure_digitizer()
 
         # Capture runtime info
         self.runtime_info = LineAcquisitionRuntimeInfo.from_acquisition(self)
+    
+    @property
+    def buffer_shape(self) -> tuple:
+        return (
+            self._records_per_buffer, 
+            self.hw.digitizer.acquire.record_length,
+            self.hw.digitizer.acquire.n_channels_enabled
+        )
 
     def _work(self):
         digi = self.hw.digitizer # for brevity
@@ -497,13 +505,8 @@ class LineAcquisition(SampleAcquisition):
                 pass
 
         # Set up acquisition buffer pool
-        shape = (
-            self._records_per_buffer, 
-            digi.acquire.record_length,
-            digi.acquire.n_channels_enabled
-        )
         dtype = np.int8 if self.hw.digitizer.bit_depth <= 8 else np.int16
-        self._init_product_pool(n=4, shape=shape, dtype=dtype)
+        self._init_product_pool(n=4, shape=self.buffer_shape, dtype=dtype)
 
         # Start scanner & digitizer
         if isinstance(self.hw.fast_raster_scanner, ResonantScanner):
@@ -783,17 +786,6 @@ class FrameAcquisitionSpec(LineAcquisitionSpec):
         else:
             return round(self.frame_height / self.pixel_height)
 
-    # @property # DEPRECATE
-    # def records_per_buffer(self) -> int:
-    #     """Returns the number of digitizer records per buffer.
-
-    #     Includes records that may be part of the slow raster axis flyback.        
-    #     """
-    #     if self.bidirectional_scanning:
-    #         return (self.lines_per_frame // 2) + self.flyback_periods
-    #     else:
-    #         return self.lines_per_frame + self.flyback_periods
-
 
 class FrameAcquisition(LineAcquisition):
     required_resources = [Digitizer, DetectorSet, FastRasterScanner, SlowRasterScanner]
@@ -861,7 +853,56 @@ class FrameAcquisition(LineAcquisition):
     @classmethod
     def get_specification(cls, spec_name = "default") -> FrameAcquisitionSpec:
         return super().get_specification(spec_name) # type: ignore
+
+
+class TemporalLineAcquisitionSpec(LineAcquisitionSpec):
+    def __init__(self, 
+                 temporal_window: units.Time | str,
+                 pulses_per_pixel: int | None = None,
+                 **kwargs): 
+        # kwargs include: # line_width, pixel_size, Lines_per_buffer, 
+        # bidirectional_scanning, pixel_time, fill_fraction
+        super().__init__(**kwargs)
+
+        temp_win = units.Time(temporal_window)
+        if temp_win < 0:
+            raise ValueError(f"Temporal window must be > 0 s, got {temp_win}")
+        self.temporal_window = temp_win
+
+        if pulses_per_pixel is None:
+            self.pulses_per_pixel = None # codes for non-uniform pixel duration (like in resonant scanning)
+        else:
+            ppp = int(pulses_per_pixel)
+            if ppp < 1:
+                raise ValueError("Pulses per pixel must be > 0")
+            # no upper limit, but we could impose one
+            self.pulses_per_pixel = ppp
+
+
+class TemporalLineAcquisition(LineAcquisition):
+    spec_location = Path(user_config_dir("Dirigo")) / "acquisition/temporal_line"
+    Spec: Type[TemporalLineAcquisitionSpec] = TemporalLineAcquisitionSpec
+
+    def __init__(self):
         
+        pass
+
+    def configure_digitizer(self):
+        pass
+
+    @property
+    def buffer_shape(self) -> tuple:
+        return (
+            self._records_per_buffer, 
+            self.hw.digitizer.acquire.record_length,
+            self.hw.digitizer.acquire.n_channels_enabled
+        )
+    
+    @property
+    def _records_per_buffer(self) -> int:
+        return self.spec.pixels_per_line # + flyback * pulses per period, * lines per buffer
+        # disallow bidi fast axis?
+
 
 # ---------- 3-D acquisitions ----------
 class StackAcquisitionSpec(FrameAcquisitionSpec):
