@@ -174,6 +174,8 @@ class SampleAcquisition(Acquisition):
         acq.records_per_buffer = self._records_per_buffer
         acq.buffers_per_acquisition = self.spec.buffers_per_acquisition
         acq.buffers_allocated = self.spec.buffers_allocated
+
+        acq.timestamps_enabled = True  # Always enable timestamps
     
     def _work(self):
         # TODO, should start and stop digitizer, set `active` event
@@ -388,15 +390,6 @@ class LineAcquisitionSpec(SampleAcquisitionSpec):
 
     # Convenience properties
     @property
-    def extended_scan_width(self) -> units.Position: # TODO remove this b/c this calculation should be done explicitly where its needed for transparency
-        """
-        Returns the desired line width divided by the fill fraction. For sinusoidal
-        scan paths this is the full scan amplitude required to cover the line
-        width given a certain fill fraction.
-        """
-        return units.Position(self.line_width / self.fill_fraction)
-    
-    @property
     def records_per_buffer(self) -> int:
         """
         Returns the number of records (i.e. triggered recordings) per buffer.
@@ -472,8 +465,11 @@ class LineAcquisition(SampleAcquisition):
         elif isinstance(fast_scanner, ResonantScanner):
             # for res scanner most parameters are fixed: frequency, waveform, duty cycle 
             # adjustable: amplitude
+            spatial_fill_fraction = 2 * np.sin(self.spec.line_duty_cycle / 2)
+            extended_scan_width = units.Position(
+                self.spec.line_width / spatial_fill_fraction)
             fast_scanner.amplitude = optics.object_position_to_scan_angle(
-                self.spec.extended_scan_width,
+                extended_scan_width
             )
             digi.aux_io.configure_mode(AuxiliaryIOMode.OUT_TRIGGER)
             
@@ -622,17 +618,24 @@ class LineAcquisition(SampleAcquisition):
             frequency_error = 0.005 # TODO set max frequency error elsewhere
             rearm_samples = 512 # TODO, get actual rearm time
             nominal_period = units.Time(1 / self.hw.fast_raster_scanner.frequency)
-            shortest_period = nominal_period/ (1 + frequency_error) # accounting for frequency error
+            shortest_period = nominal_period / (1 + frequency_error) # accounting for frequency error
 
             if self.spec.bidirectional_scanning:
-                # scanner duty cycle will be 50%, but we know we want almost the whole period
                 record_duration = shortest_period
                 record_length = record_duration * digitizer_rate - rearm_samples
+            
             else:
-                delay = fast_scanner.input_delay \
-                    if hasattr(fast_scanner, 'input_delay') else units.Time(0)
+                if hasattr(fast_scanner, 'input_delay'):
+                    delay = fast_scanner.input_delay
+                else: 
+                    delay = units.Time(0)
+
+                if not hasattr(fast_scanner, "ramp_time_fraction"):
+                    # unidirectional but scanner doesn't support asymmetric scan, so halve the period
+                    nominal_period /= 2.0
+                
                 record_duration = min(
-                    nominal_period * fast_scanner.ramp_time_fraction + delay, 
+                    nominal_period * self.spec.line_duty_cycle + delay, 
                     shortest_period
                 )
                 record_length = record_duration * digitizer_rate
@@ -773,6 +776,8 @@ class FrameAcquisitionSpec(LineAcquisitionSpec):
             lines_per_buffer            = self.lines_per_frame,
             buffers_per_acquisition     = frames_per_acquisition,
             **kwargs)
+        
+        self.frames_per_acquisition = frames_per_acquisition
 
     @property
     def lines_per_frame(self) -> int:

@@ -117,24 +117,6 @@ class RasterScanner(HardwareInterface):
     def waveform(self, new_waveform: Waveforms):
         pass
 
-    @property
-    @abstractmethod
-    def ramp_time_fraction(self) -> float:
-        """
-        The temporal fraction of the waveform with linear slope.
-
-        For the sinusoidal waveform, this is always 0.
-        For linear unidirectional, this is the fraction of the waveform spent
-        ramping. For linear bidirectional, this is the fraction of the 
-        waveform spent ramping (either up or down).
-        """
-        pass
-
-    @ramp_time_fraction.setter
-    @abstractmethod
-    def ramp_time_fraction(self, duty: float):
-        pass
-
     @abstractmethod
     def park(self):
         """Positions the scanner at minimum angle.
@@ -241,16 +223,6 @@ class ResonantScanner(RasterScanner):
     def waveform(self, _):
         raise NotImplementedError("Waveform is sinusoidal for resonant scanners.")
     
-    @property
-    def ramp_time_fraction(self) -> float:
-        return 0.0
-    
-    @ramp_time_fraction.setter
-    def ramp_time_fraction(self, _):
-        raise NotImplementedError(
-            "Waveform duty cycle is not adjustable with resonant scanners."
-        )
-    
     def park(self):
         raise NotImplementedError("Resonant scanners can not be parked.")
     
@@ -291,19 +263,6 @@ class PolygonScanner(RasterScanner):
     @waveform.setter
     def waveform(self, _):
         raise NotImplementedError("Waveform is sawtooth for polygonal scanners.")
-    
-    @property
-    def ramp_time_fraction(self) -> float:
-        # While ramp fraction is 100%, vignetting effectively limits 
-        # collection on edges (not the scanner's concern, it is acquisition's 
-        # responsibility to manage vignetting)
-        return 1.0
-    
-    @ramp_time_fraction.setter
-    def ramp_time_fraction(self, _):
-        raise NotImplementedError(
-            "Waveform duty cycle is not adjustable with polygon scanners."
-        )
     
     def park(self):
         raise NotImplementedError("Polygon scanners can not be parked.")
@@ -467,7 +426,6 @@ class GalvoScanner(RasterScanner):
         
         self._ramp_time_fraction = new_ramp_time_fraction
 
-    
 
 class ObjectiveZScanner(LinearStage):
     """Abstraction for a objective lens motorized Z-axis stage.
