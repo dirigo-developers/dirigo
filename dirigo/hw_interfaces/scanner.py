@@ -1,5 +1,5 @@
 from abc import abstractmethod
-from typing import Literal, Any
+from typing import Any
 from enum import StrEnum
 
 from dirigo.components import units
@@ -13,11 +13,10 @@ Dirigo scanner interface.
 
 
 class Waveforms(StrEnum):
-    SINUSOID        = "sinusoid"
-    TRIANGLE        = "triangle"
-    ASYM_TRIANGLE   = "asymmetric triangle"
-    SAWTOOTH        = "sawtooth"
-
+    SINUSOID                = "sinusoid"
+    LINEAR_UNIDIRECTIONAL   = "linear unidirectional"   # like an asymmetric triangle wave or sawtooth
+    LINEAR_BIDIRECTIONAL    = "linear bidirectional"    # like a triangle wave
+    STEP_UNIDIRECTIONAL     = "step unidirectional"     # To be implemented...
 
 class Axes(StrEnum):
     X   = "x"
@@ -39,7 +38,7 @@ class RasterScanner(HardwareInterface):
 
         Args:
             - axis: (str) The axis label. See `VALID_AXES` for options.
-            - angle_limits: (dict) A dictionary with 'min' and 'max' keys defining the scan angle range.
+            - angle_limits: (dict) Dict with 'min' and 'max' keys defining the scan angle range (optical).
         """
         # Validate axis label and store in private attr
         axis = Axes(axis)
@@ -64,14 +63,14 @@ class RasterScanner(HardwareInterface):
 
     @property
     def angle_limits(self) -> units.AngleRange:
-        """Returns an object describing the scan angle limits."""
+        """Returns an object describing the scan angle limits (optical)."""
         return self._angle_limits
 
     @property
     @abstractmethod
     def amplitude(self) -> units.Angle:
         """
-        The peak-to-peak scan amplitude.
+        The peak-to-peak scan amplitude (optical).
 
         Setting this property updates the scan amplitude. Implementations should
         document whether changes have effect immediately, at the beginning of
@@ -108,9 +107,6 @@ class RasterScanner(HardwareInterface):
         """
         Describes the scan angle waveform.
 
-        Valid options: 'sinusoid', 'sawtooth', 'triangle', 'asymmetric triangle'
-        (see Waveforms enumeration)
-
         If waveform is not adjustable, implementations should raise 
         NotImplementedError in setter.
         """
@@ -119,24 +115,6 @@ class RasterScanner(HardwareInterface):
     @waveform.setter
     @abstractmethod
     def waveform(self, new_waveform: Waveforms):
-        pass
-
-    @property
-    @abstractmethod
-    def duty_cycle(self) -> float:
-        """For asymmetric waveforms, fraction of the scan period spent rising.
-
-        For example, to raster scan with 450 image lines and 50 flyback lines,
-        the duty cycle should be set to 0.9.
-        
-        If asymmetric waveforms are not available, implementations should raise
-        NotImplementedError in setter.
-        """
-        pass
-
-    @duty_cycle.setter
-    @abstractmethod
-    def duty_cycle(self, duty: float):
         pass
 
     @abstractmethod
@@ -245,16 +223,6 @@ class ResonantScanner(RasterScanner):
     def waveform(self, _):
         raise NotImplementedError("Waveform is sinusoidal for resonant scanners.")
     
-    @property
-    def duty_cycle(self) -> float:
-        return 0.5 # just means the waveform is symmetric
-    
-    @duty_cycle.setter
-    def duty_cycle(self, _):
-        raise NotImplementedError(
-            "Waveform duty cycle is not adjustable with resonant scanners."
-        )
-    
     def park(self):
         raise NotImplementedError("Resonant scanners can not be parked.")
     
@@ -290,24 +258,11 @@ class PolygonScanner(RasterScanner):
 
     @property
     def waveform(self):
-        return Waveforms.SAWTOOTH
+        return Waveforms.LINEAR_UNIDIRECTIONAL
     
     @waveform.setter
     def waveform(self, _):
         raise NotImplementedError("Waveform is sawtooth for polygonal scanners.")
-    
-    @property
-    def duty_cycle(self) -> float:
-        # Duty cycle of the scan path is 100%, but vignetting effectively limits 
-        # collection on edges (not the scanner's concern, it is acquisition's 
-        # responsibility to manage vignetting)
-        return 1.0
-    
-    @duty_cycle.setter
-    def duty_cycle(self, _):
-        raise NotImplementedError(
-            "Waveform duty cycle is not adjustable with polygon scanners."
-        )
     
     def park(self):
         raise NotImplementedError("Polygon scanners can not be parked.")
@@ -331,8 +286,8 @@ class GalvoScanner(RasterScanner):
         self._offset = units.Angle(0.0)
         
         self._frequency = units.Frequency(0)
-        self._waveform: Waveforms = Waveforms.ASYM_TRIANGLE
-        self._duty_cycle: float = 0.0
+        self._waveform: Waveforms | None = None # require that uni or bidi be chosen before operation
+        self._ramp_time_fraction: float | None = None
 
         delay = units.Time(input_delay)
         if not self.INPUT_DELAY_RANGE.within_range(delay):
@@ -361,6 +316,8 @@ class GalvoScanner(RasterScanner):
     @amplitude.setter
     def amplitude(self, new_amplitude: units.Angle | float):
         ampl = units.Angle(new_amplitude)
+
+        # TODO check an extended amplitude range to account for some overswing in rounded linear waveforms
         
         # Check that proposed waveform will not exceed scanner limits
         upper = units.Angle(self.offset + ampl/2)
@@ -423,19 +380,21 @@ class GalvoScanner(RasterScanner):
 
     @property
     def waveform(self) -> Waveforms: 
+        if self._waveform is None:
+            raise RuntimeError("Waveform not initialized.")
         return self._waveform
     
     @waveform.setter
     def waveform(self, new_waveform: Waveforms):
         if not isinstance(new_waveform, Waveforms):
             raise ValueError(
-                f"Error setting waveform type. Valid options: "
-                f"{[w.value for w in Waveforms]}. Recieved {new_waveform}"
+                f"Invalid  waveform type {new_waveform}. "
+                f"Valid options: {[w.value for w in Waveforms]}."
             )
         self._waveform = new_waveform
 
     @property
-    def duty_cycle(self) -> float:
+    def ramp_time_fraction(self) -> float:
         """
         Fraction of scan period spent rising.
 
@@ -445,29 +404,28 @@ class GalvoScanner(RasterScanner):
         If the current waveform has a fixed duty cycle, setter will raise a 
         ValueError.
         """
-        if self.waveform in {Waveforms.SINUSOID, Waveforms.TRIANGLE}:
-            return 0.5
-        elif self.waveform in {Waveforms.SAWTOOTH}:
-            return 1.0
+        if self.waveform == Waveforms.SINUSOID:
+            return 0.0
         else:
-            return self._duty_cycle
+            if self._ramp_time_fraction is None:
+                raise RuntimeError("Ramp time fraction not initialized.")
+            return self._ramp_time_fraction
     
-    @duty_cycle.setter
-    def duty_cycle(self, new_duty_cycle: float):
-        if self.waveform in {'sinusoid', 'triangle', 'sawtooth'}:
+    @ramp_time_fraction.setter
+    def ramp_time_fraction(self, new_ramp_time_fraction: float):
+        if self.waveform == Waveforms.SINUSOID:
             raise ValueError(
                 f"Duty cycle for the current waveform ({self.waveform}) is not adjustable."
             )
 
         # Validate
-        if not isinstance(new_duty_cycle, float):
+        if not isinstance(new_ramp_time_fraction, float):
             raise ValueError("`duty_cycle` must be a float value.")
-        if not (0.0 < new_duty_cycle <= 1.0):
+        if not (0.0 < new_ramp_time_fraction <= 1.0):
             raise ValueError("`duty_cycle` must be between 0 and 1 (upper limit inclusive).")
         
-        self._duty_cycle = new_duty_cycle
+        self._ramp_time_fraction = new_ramp_time_fraction
 
-    
 
 class ObjectiveZScanner(LinearStage):
     """Abstraction for a objective lens motorized Z-axis stage.

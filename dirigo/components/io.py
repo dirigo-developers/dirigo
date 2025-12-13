@@ -80,7 +80,7 @@ def load_signal_offset(
         path: Path = config_path() / "digitizer/signal_offset.csv"
 ):
     try:
-        return np.loadtxt(path, delimiter=',', dtype=np.float64, skiprows=1)
+        return np.loadtxt(path, delimiter=',', dtype=np.float64, skiprows=1, ndmin=1)
     except FileNotFoundError:
         return np.array([0])
 
