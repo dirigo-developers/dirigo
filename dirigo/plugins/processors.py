@@ -247,7 +247,7 @@ class RasterFrameProcessor(Processor[Acquisition]):
         except:
             self._gradient = np.ones((self._spec.pixels_per_line,), np.float32)
 
-        self._lags = np.full(shape=(10,), fill_value=np.nan, dtype=np.float32)
+        self._lags = np.full(shape=(10,), fill_value=np.nan, dtype=np.float32) # to track bidi phase alignment
         self._lag_counter = 0
         self._frames_processed = 0
 
@@ -313,13 +313,13 @@ class RasterFrameProcessor(Processor[Acquisition]):
     @cached_property
     def _temporal_edges(self):
         # Set up an array with the SPATIAL edges of pixels--we will bin samples into the pixel edges
-        ff = self._spec.fill_fraction
+        ldc = self._spec.line_duty_cycle
 
         # Create a resampling function based on fast axis waveform type
         if 'resonant' in self._acquisition.system_config.fast_raster_scanner['type'].lower():
             # Fill fraction
             # image line should be taken from center of sinusoid sweep
-            pixel_edges = np.linspace(ff, -ff, self._spec.pixels_per_line + 1) 
+            pixel_edges = np.linspace(ldc, -ldc, self._spec.pixels_per_line + 1) 
 
             # Use distortion polynomial to correct spatial edges
             int_p = self._distortion_polynomial.integ()
@@ -331,22 +331,20 @@ class RasterFrameProcessor(Processor[Acquisition]):
             temporal_edges = np.arccos(modified_pixel_edges) / TWO_PI
 
         else:
-            # Instead of FF, use ramp_time_fraction (rtf)
-            rtf = self._spec.fill_fraction
-            # Fill fraction needs to be slightly adjusted to reflect pixel period rounding 
-            rtf_corrected = self._spec.pixels_per_line / round(self._spec.pixels_per_line / rtf)
+            # Duty cycle needs to be slightly adjusted to reflect pixel period rounding 
+            ldc_corrected = self._spec.pixels_per_line / round(self._spec.pixels_per_line / ldc)
 
             if self._spec.bidirectional_scanning:
                 pixel_edges = np.linspace(
-                    start   = (1 - rtf_corrected) / 4, 
-                    stop    = 0.5 - (1 - rtf_corrected) / 4, 
+                    start   = (1 - ldc_corrected) / 4, 
+                    stop    = 0.5 - (1 - ldc_corrected) / 4, 
                     num     = self._spec.pixels_per_line + 1
                 )
             else:
-                # assume we start at 0 and go to corrected fill fraction
+                # assume we start at 0 and go to corrected LDC
                 pixel_edges = np.linspace(
                     start   = 0, 
-                    stop    = rtf_corrected, 
+                    stop    = ldc_corrected, 
                     num     = self._spec.pixels_per_line + 1
                 )
 
