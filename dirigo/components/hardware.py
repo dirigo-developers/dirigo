@@ -104,6 +104,21 @@ class Hardware:
         return self._load("dirigo_stages", cfg["type"], **cfg)
     
     @cached_property
+    def preferred_z_motor(self):
+        """Returns the objective z scanner or multi-axis stage z axis."""
+        try:
+            return self.objective_z_scanner
+        except NotConfiguredError:
+            pass
+
+        try:
+            return self.stages.z
+        except NotConfiguredError:
+            pass
+
+        raise NotConfiguredError("Z motor")
+    
+    @cached_property
     def encoders(self) -> "MultiAxisLinearEncoder":
         cfg = self._cfg.encoders
         if cfg is None:

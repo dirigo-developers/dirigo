@@ -238,7 +238,7 @@ class MultiAxisStage(HardwareInterface):
 
     @property
     @abstractmethod
-    def z(self) -> None | LinearStage:
+    def z(self) -> LinearStage:
         """If available, returns reference to the Z stage axis"""
         pass
 

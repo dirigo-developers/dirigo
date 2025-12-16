@@ -536,7 +536,7 @@ class LineAcquisition(SampleAcquisition):
                     digi.acquire.get_next_completed_buffer(acq_product)
 
                 try:
-                    if self.hw.stages or self.hw.objective_z_scanner:
+                    if self.hw.stages or self.hw.preferred_z_motor:
                         with timer("read_positions"):
                             acq_product.positions = self.read_positions()
                 except NotConfiguredError:
@@ -581,7 +581,7 @@ class LineAcquisition(SampleAcquisition):
         except (KeyError, AttributeError): pass
 
         try:
-            positions.append(self.hw.objective_z_scanner.position)
+            positions.append(self.hw.preferred_z_motor.position)
         except (KeyError, AttributeError): pass
         
         return tuple(positions) if len(positions) else None
@@ -735,7 +735,7 @@ class LineCameraLineAcquisition(LineCameraAcquisition):
         except (KeyError, AttributeError): pass
 
         try:
-            positions.append(self.hw.objective_z_scanner.position)
+            positions.append(self.hw.preferred_z_motor.position)
         except (KeyError, AttributeError): pass
         
         return tuple(positions) if len(positions) else None
@@ -911,7 +911,7 @@ class StackAcquisition(Acquisition):
         super().__init__(hw, system_config, spec)
         self.spec: StackAcquisitionSpec # to refine type hints
 
-        self._original_z_position = self.hw.objective_z_scanner.position
+        self._original_z_position = self.hw.preferred_z_motor.position
         self._depths = self.spec.depths
 
         # Set up child FrameAcquisition & subscribe to it
@@ -920,8 +920,8 @@ class StackAcquisition(Acquisition):
         self._frame_acquisition.add_subscriber(self)
 
         # Initialize object scanner
-        self.hw.objective_z_scanner.max_velocity = units.Velocity("150 um/s")
-        self.hw.objective_z_scanner.acceleration = units.Acceleration("1 mm/s^2")
+        self.hw.preferred_z_motor.max_velocity = units.Velocity("150 um/s")
+        self.hw.preferred_z_motor.acceleration = units.Acceleration("1 mm/s^2")
 
     def _receive_product(self, 
                          block: bool = True, 
@@ -940,12 +940,12 @@ class StackAcquisition(Acquisition):
         For galvo-galvo scanning, ... TODO
         """
         # Move to lower limit
-        z_scanner = self.hw.objective_z_scanner
-        self.hw.objective_z_scanner.move_to(self._depths[0])
+        z_scanner = self.hw.preferred_z_motor
+        z_scanner.move_to(self._depths[0])
         
         # spin until reach start position
         time.sleep(units.Time('10 ms'))
-        while self.hw.objective_z_scanner.moving:
+        while z_scanner.moving:
             time.sleep(units.Time('10 ms'))
 
         try:
