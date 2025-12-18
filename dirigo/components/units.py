@@ -4,6 +4,7 @@ from typing import TypeVar, Generic, Dict, Optional
 from dataclasses import dataclass
 from collections import Counter
 
+from pydantic_core import core_schema
 import numpy as np
 
 
@@ -241,6 +242,24 @@ class UnitQuantity(float):
             # no matching UnitQuantity – fall back to plain float
             return other / float(self)
         return NotImplemented
+    
+    @classmethod
+    def __get_pydantic_core_schema__(cls, _source_type, _handler):
+        def _validate(v):
+            if isinstance(v, cls):
+                return v
+            try:
+                return cls(v)   # your __new__ handles str/number
+            except Exception as e:
+                raise ValueError(f"Could not parse {v!r} as {cls.__name__}: {e}")
+
+        def _serialize(v):
+            return str(v)
+
+        return core_schema.no_info_plain_validator_function(
+            _validate,
+            serialization=core_schema.plain_serializer_function_ser_schema(_serialize, when_used='always')
+        )
 
 
 # ---------- Concrete unit quantity classes ----------
@@ -539,6 +558,37 @@ class RangeWithUnits(Generic[T_UQ]):
     
     def to_dict(self) -> dict:
         return {"min": self.min, "max": self.max}
+    
+    @classmethod
+    def __get_pydantic_core_schema__(cls, _source_type, _handler):
+        UQ = cls.UNIT_QUANTITY_CLASS
+
+        def _validate(v):
+            if isinstance(v, cls):
+                return v
+            if isinstance(v, str) and v.strip().startswith("±"):
+                return cls(v)
+            if isinstance(v, dict):
+                try:
+                    return cls(UQ(v["min"]), UQ(v["max"]))
+                except KeyError as e:
+                    raise ValueError(f"Cannot parse {v!r}. Range dict missing key: {e}")
+            if isinstance(v, (list, tuple)) and len(v) == 2:
+                mn, mx = v
+                return cls(UQ(mn), UQ(mx))
+
+            raise ValueError(
+                f"Cannot parse {v!r} as {cls.__name__}. Expected '±Xunit', "
+                "{'min':..., 'max':...}, or [min, max]."
+            )
+
+        def _serialize(r):
+            return {"min": str(r.min), "max": str(r.max)}
+
+        return core_schema.no_info_plain_validator_function(
+            _validate,
+            serialization=core_schema.plain_serializer_function_ser_schema(_serialize, when_used='always')
+        )
 
 
 class AngleRange(RangeWithUnits[Angle]):
