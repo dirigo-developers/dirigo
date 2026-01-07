@@ -150,6 +150,8 @@ class ChannelProfile:
         impedance: units.Resistance | ImpedanceMode | None
         if imp_raw is None:
             impedance = None
+        elif isinstance(imp_raw, float):
+            impedance = units.Resistance(imp_raw)
         else:
             s = str(imp_raw).lower()
             impedance = ImpedanceMode(s) if s in (e.value for e in ImpedanceMode) \
@@ -191,7 +193,9 @@ class TriggerProfile:
 
     @classmethod
     def from_dict(cls, d: dict) -> "TriggerProfile":
-        level = units.Voltage(cast(str, d["level"])) if "level" in d else None
+        level = None
+        if ("level" in d) and d["level"]:
+            level = units.Voltage(cast(str, d["level"]))
 
         external_coupling = (
             ExternalTriggerCoupling(str(d["external_coupling"]).lower())
