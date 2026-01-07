@@ -364,6 +364,7 @@ class LineAcquisitionSpec(SampleAcquisitionSpec):
         pixel_time: str | None = None, # e.g. "1 μs"
         **kwargs
     ):
+        kwargs.pop("record_length", None)
         super().__init__(record_length=0, **kwargs)
         
         self.bidirectional_scanning = bidirectional_scanning 
@@ -771,6 +772,10 @@ class FrameAcquisitionSpec(LineAcquisitionSpec):
                 f"To maintain integer number of pixels in frame height, required adjusting " \
                 f"the pixel height by more than pre-specified limit: {100*self.MAX_PIXEL_HEIGHT_ADJUSTMENT}%"
             )
+        
+        # Just in case, remove these entries from kwargs
+        kwargs.pop("lines_per_buffer", None)
+        kwargs.pop("buffers_per_acquisition", None)
         
         super().__init__(
             lines_per_buffer            = self.lines_per_frame,
