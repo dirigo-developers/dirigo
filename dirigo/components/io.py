@@ -1,5 +1,6 @@
 from pathlib import Path
 import tomllib
+import csv
 from typing import Any
 from functools import cached_property
 from types import MappingProxyType
@@ -63,6 +64,59 @@ def load_line_distortion_calibration(
             return Polynomial(coefs[i])
     
     raise RuntimeError("Could not find distortion calibration")
+
+
+def update_distortion_table(
+    scanner_ampl: units.Angle,
+    c0=None,
+    c1=None,
+    c2=None,
+    path: Path = config_path() / "optics/line_distortion_calibration.csv"
+):
+    """
+    Update polynomial coefficients for a given scanner amplitude.
+
+    Parameters
+    ----------
+    scanner_ampl : units.Angle
+        Scanner amplitude (matched in radians).
+    c0, c1, c2 : float | None
+        Polynomial coefficients to update. None leaves value unchanged.
+    path : Path
+        CSV file path.
+    """
+    rows = []
+    updated = False
+
+    with path.open("r", newline="") as f:
+        reader = csv.DictReader(f)
+        fieldnames = reader.fieldnames
+        if fieldnames is None:
+            raise ValueError("CSV has no header")
+
+        for row in reader:
+            row_rad = float(row["# scanner amplitude (rad)"])
+
+            if abs(row_rad - scanner_ampl) <= 1e-3:
+                if c0 is not None:
+                    row["c0"] = f"{float(c0):.16e}"
+                if c1 is not None:
+                    row["c1"] = f"{float(c1):.16e}"
+                if c2 is not None:
+                    row["c2"] = f"{float(c2):.16e}"
+                updated = True
+
+            rows.append(row)
+
+    if not updated:
+        raise ValueError(
+            f"No entry found for scanner amplitude {scanner_ampl}"
+        )
+
+    with path.open("w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(rows)
 
 
 def load_stage_scanner_angle(
