@@ -1,8 +1,11 @@
 from importlib.metadata import version
 from datetime import datetime
+from typing import Any
 
 from pydantic import BaseModel, Field
 
+
+SYSTEM_CONFIG_SCHEMA_VERSION = 1
 
 
 def _get_dirigo_version() -> str:
@@ -13,10 +16,6 @@ class SystemMetadata(BaseModel):
     """System-level metadata"""
 
     # Excluded fields
-    schema_version: int = Field(
-        default = 1, 
-        exclude = True
-    )
     dirigo_version: str = Field(
         default_factory = _get_dirigo_version,
         exclude         = True,
@@ -49,4 +48,31 @@ class SystemMetadata(BaseModel):
         default_factory = datetime.now,
         description     = "Timestamp when system configuration was created"
     )
+
+
+class DeviceDef(BaseModel):
+    name: str = Field(
+        ...,
+        description = "Descriptive name for this device"
+    )
+    kind: str = Field(
+        ..., 
+        description = "Device category, e.g. 'digitizer', 'stage'"
+    )
+    entry_point: str = Field(
+        ..., 
+        description = "Entry point name for this device kind, e.g. 'alazar', 'teledyne'"
+    )
+    config: dict[str, Any] = Field(
+        default_factory = dict, 
+        description     = "Device-specific config"
+    )
+
+
+class SystemConfig(BaseModel):
+    schema_version: int = Field(
+        default = SYSTEM_CONFIG_SCHEMA_VERSION, 
+    )
+    metadata: SystemMetadata
+    devices: list[DeviceDef]
 
