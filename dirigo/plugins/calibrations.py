@@ -231,43 +231,43 @@ class StageTranslationCalibration(Acquisition):
             self._frame_acquisition.stop()
 
 
-class StageScannerAngleCalibrationWriter(LineDistortionCalibrationWriter):
-    UPSAMPLE_X     = 10
-    UPSAMPLE_Y     = 10
+# class StageScannerAngleCalibrationWriter(LineDistortionCalibrationWriter):
+#     UPSAMPLE_X     = 10
+#     UPSAMPLE_Y     = 10
 
-    def __init__(self, upstream: Processor):
-        super().__init__(upstream)
-        self.basename = "stage_scanner_angle"
-        self.filepath = io.config_path() / "optics" / (self.basename + ".csv")
+#     def __init__(self, upstream: Processor):
+#         super().__init__(upstream)
+#         self.basename = "stage_scanner_angle"
+#         self.filepath = io.config_path() / "optics" / (self.basename + ".csv")
 
-    # run() is same as LineDistortionCalibrationWriter
+#     # run() is same as LineDistortionCalibrationWriter
 
-    def save_data(self):
-        """Compare pairs of frames"""
-        ref_frame = self._frames[0]
+#     def save_data(self):
+#         """Compare pairs of frames"""
+#         ref_frame = self._frames[0]
 
-        thetas = []
-        for f_idx, frame in enumerate(self._frames[1:]):
-            i, j = self.x_corr(ref_frame, moving_frame=frame)
+#         thetas = []
+#         for f_idx, frame in enumerate(self._frames[1:]):
+#             i, j = self.x_corr(ref_frame, moving_frame=frame)
 
-            theta = units.Angle(np.arctan(i / j))
-            print(f"Frame pair {f_idx+1} comparison: {theta.with_unit('deg')}")
-            thetas.append(theta)
+#             theta = units.Angle(np.arctan(i / j))
+#             print(f"Frame pair {f_idx+1} comparison: {theta.with_unit('deg')}")
+#             thetas.append(theta)
 
-            ref_frame = frame
+#             ref_frame = frame
 
-        # filter outliers
-        t_med = np.median(thetas)
-        thetas = [t for t in thetas if abs((t-t_med)/t_med) < 0.5]
-        theta_mean = np.mean(thetas, keepdims=True)
-        print(f"Average stage-scanner angle: {units.Angle(theta_mean[0]).with_unit('deg')}")
+#         # filter outliers
+#         t_med = np.median(thetas)
+#         thetas = [t for t in thetas if abs((t-t_med)/t_med) < 0.5]
+#         theta_mean = np.mean(thetas, keepdims=True)
+#         print(f"Average stage-scanner angle: {units.Angle(theta_mean[0]).with_unit('deg')}")
 
-        np.savetxt(
-            self.filepath, 
-            theta_mean, 
-            delimiter=',',
-            header="stage-scanner angle (rad)"
-        )
+#         np.savetxt(
+#             self.filepath, 
+#             theta_mean, 
+#             delimiter=',',
+#             header="stage-scanner angle (rad)"
+#         )
 
 
 class SignalOffsetCalibrationWriter(Writer):
