@@ -317,18 +317,16 @@ class RasterFrameProcessor(Processor[Acquisition]):
 
         # Create a resampling function based on fast axis waveform type
         if 'resonant' in self._acquisition.system_config.fast_raster_scanner['type'].lower():
-            # Fill fraction
+            ff = 2 * np.sin(ldc / 2)
             # image line should be taken from center of sinusoid sweep
-            pixel_edges = np.linspace(ldc, -ldc, self._spec.pixels_per_line + 1) 
+            s = np.linspace(ff, -ff, self._spec.pixels_per_line + 1) 
 
-            # Use distortion polynomial to correct spatial edges
-            int_p = self._distortion_polynomial.integ()
-            x = np.linspace(-1, 1, 1_000_000)
-            y = int_p(x)
-            modified_pixel_edges = np.interp(pixel_edges, y, x)
+            # account for distortion
+            c0, c1, c2 = self._distortion_polynomial.coef
+            s_corrected = s/c0 - (c2/c0**4)*s**3 # Approximate inverse
 
             # arccos inverts the cosinusoidal path, normalize scan period to 0.0 to 1.0
-            temporal_edges = np.arccos(modified_pixel_edges) / TWO_PI
+            temporal_edges = np.arccos(s_corrected) / TWO_PI
 
         else:
             # Duty cycle needs to be slightly adjusted to reflect pixel period rounding 

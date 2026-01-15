@@ -231,163 +231,43 @@ class StageTranslationCalibration(Acquisition):
             self._frame_acquisition.stop()
 
 
-class LineDistortionCalibrationWriter(Writer):
-    """Logs apparent distortion use patches to create a local distortion field."""
-    UPSAMPLE_X     = 20
-    UPSAMPLE_Y     = 1
-    EPS            = 1e-1
-    PATCH          = 64
-    STRIDE         = 8
+# class StageScannerAngleCalibrationWriter(LineDistortionCalibrationWriter):
+#     UPSAMPLE_X     = 10
+#     UPSAMPLE_Y     = 10
 
-    def __init__(self, upstream: Processor):
-        super().__init__(upstream)
-        self._acquisition: StageTranslationCalibration
-        self._processor: RasterFrameProcessor
+#     def __init__(self, upstream: Processor):
+#         super().__init__(upstream)
+#         self.basename = "stage_scanner_angle"
+#         self.filepath = io.config_path() / "optics" / (self.basename + ".csv")
 
-        self.basename = "line_distortion_calibration"
-        self.filepath = io.config_path() / "optics" / (self.basename + ".csv")
-        self.data_filepath = io.data_path() / (self.basename + "_data.csv")
+#     # run() is same as LineDistortionCalibrationWriter
 
-    def _work(self):
-        self._frames, self._positions = [], [] # collect measurement frames/pos
-        try:
-            while True:
-                with self._receive_product() as product:
-                    self._frames.append(product.data[:,:,0].copy())
-                    self._positions.append(product.positions)
+#     def save_data(self):
+#         """Compare pairs of frames"""
+#         ref_frame = self._frames[0]
 
-        except EndOfStream:
-            self._publish(None) # forward sentinel
-            self.save_data()
+#         thetas = []
+#         for f_idx, frame in enumerate(self._frames[1:]):
+#             i, j = self.x_corr(ref_frame, moving_frame=frame)
 
-    def save_data(self):
-        """Process distortion field and save fit results"""
-        spec = self._acquisition.spec
+#             theta = units.Angle(np.arctan(i / j))
+#             print(f"Frame pair {f_idx+1} comparison: {theta.with_unit('deg')}")
+#             thetas.append(theta)
 
-        n_f = len(self._frames)
-        n_comparisons = n_f - 1
-        ref_frame = self._frames[0]
-        n_y, n_x = ref_frame.shape
-        yc = n_y//2
-        yr = n_y//8
+#             ref_frame = frame
 
-        # Create: dx_true/dx_observed
-        dx_true = round(spec.translation / spec.pixel_size)
-        dx_observed = np.zeros(shape=(n_x // self.STRIDE, n_comparisons))
-        field_position = np.zeros(n_x // self.STRIDE)
-        
-        for f_idx, frame in enumerate(self._frames[1:]):
+#         # filter outliers
+#         t_med = np.median(thetas)
+#         thetas = [t for t in thetas if abs((t-t_med)/t_med) < 0.5]
+#         theta_mean = np.mean(thetas, keepdims=True)
+#         print(f"Average stage-scanner angle: {units.Angle(theta_mean[0]).with_unit('deg')}")
 
-            for p_idx in range(n_x // self.STRIDE):
-                p0 = (p_idx * self.STRIDE) # ref patch start pixel index
-                ref_patch = ref_frame[(yc-yr):(yc+yr), p0:(p0 + self.PATCH)]
-
-                m0 = p0 - dx_true # mov patch start pixel index
-                if (m0 < 0) or (p0+self.PATCH >= n_x) or (m0+self.PATCH) >= n_x: 
-                    dx_observed[p_idx, f_idx] = np.nan
-                    field_position[p_idx] = np.nan
-                    continue
-                mov_patch = frame[(yc-yr):(yc+yr), m0:(m0 + self.PATCH)]
-
-                _, j = self.x_corr(ref_patch, mov_patch)
-                print(units.Position(j * spec.pixel_size))
-
-                dx_observed[p_idx, f_idx] = j + dx_true
-                ref_patch_center = p0 + self.PATCH//2
-                mov_patch_center = m0 + self.PATCH//2
-                comp_center = (ref_patch_center + mov_patch_center)/2
-                field_position[p_idx] = -(comp_center - n_x/2) / n_x * 2 * spec.fill_fraction
-
-            ref_frame = frame
-
-        # Fit error
-        field_positions = np.tile(field_position[:,np.newaxis], (1, n_comparisons)) 
-
-        nan_mask = np.isnan(dx_observed)
-        pfit: Polynomial = Polynomial.fit(
-            x=field_positions[~nan_mask].ravel(),
-            y=(dx_true/dx_observed)[~nan_mask].ravel(),
-            deg=2
-        )
-        c0, c1, c2 = pfit.convert().coef
-
-        # Save errors
-        data = np.concatenate(
-            (field_position[:,np.newaxis], dx_true/dx_observed),
-            axis=1
-        )
-        np.savetxt(self.data_filepath, data, delimiter=',',header="field position,dx_true/dx_observed")
-
-        # If not calibrated (would have trivial Polynomial(1)), save distortion polynomial
-        if self._processor._distortion_polynomial == Polynomial([1]):
-            fn = self.filepath
-            calib_data = np.array([[self._acquisition.runtime_info.scanner_amplitude, c0, c1, c2]])
-            if fn.exists(): # add to existing calibration
-                data = np.loadtxt(fn, delimiter=',', dtype=np.float64, skiprows=1, ndmin=2)
-                data = np.concatenate((data, calib_data), axis=0)
-            else:
-                data = calib_data
-
-            np.savetxt(fn, data, delimiter=',',header="scanner amplitude (rad),coefficients (in ascending order)")
-
-    @classmethod
-    def x_corr(cls, ref_frame: np.ndarray, moving_frame: np.ndarray):
-        n_y, n_x = ref_frame.shape
-
-        R = fft.rfft2(ref_frame,    workers=-1)
-        M = fft.rfft2(moving_frame, workers=-1)
-        xps = R * np.conj(M)
-        s = (n_y * cls.UPSAMPLE_Y, n_x * cls.UPSAMPLE_X)
-        corr = fft.irfft2(xps / (np.abs(xps) + cls.EPS), s, workers=-1)
-        arg_max = np.argmax(corr)
-        i = int(arg_max // corr.shape[1])
-        j = int(arg_max %  corr.shape[1])
-
-        if i > (s[0] // 2):  # Handle wrap-around for negative shifts
-            i -= s[0]
-        if j > (s[1] // 2): 
-            j -= s[1]
-
-        return i / cls.UPSAMPLE_Y, j / cls.UPSAMPLE_X
-    
-
-class StageScannerAngleCalibrationWriter(LineDistortionCalibrationWriter):
-    UPSAMPLE_X     = 10
-    UPSAMPLE_Y     = 10
-
-    def __init__(self, upstream: Processor):
-        super().__init__(upstream)
-        self.basename = "stage_scanner_angle"
-        self.filepath = io.config_path() / "optics" / (self.basename + ".csv")
-
-    # run() is same as LineDistortionCalibrationWriter
-
-    def save_data(self):
-        """Compare pairs of frames"""
-        ref_frame = self._frames[0]
-
-        thetas = []
-        for f_idx, frame in enumerate(self._frames[1:]):
-            i, j = self.x_corr(ref_frame, moving_frame=frame)
-
-            theta = units.Angle(np.arctan(i / j))
-            print(f"Frame pair {f_idx+1} comparison: {theta.with_unit('deg')}")
-            thetas.append(theta)
-
-            ref_frame = frame
-
-        # filter outliers
-        t_med = np.median(thetas)
-        thetas = [t for t in thetas if abs((t-t_med)/t_med) < 0.5]
-        theta_mean = np.mean(thetas, keepdims=True)
-        print(f"Average stage-scanner angle: {units.Angle(theta_mean[0]).with_unit('deg')}")
-
-        np.savetxt(
-            self.filepath, 
-            theta_mean, 
-            delimiter=',',
-            header="stage-scanner angle (rad)"
-        )
+#         np.savetxt(
+#             self.filepath, 
+#             theta_mean, 
+#             delimiter=',',
+#             header="stage-scanner angle (rad)"
+#         )
 
 
 class SignalOffsetCalibrationWriter(Writer):
