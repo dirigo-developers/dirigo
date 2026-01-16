@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "dirigo"
-version = "0.3.3"
+version = "0.4.0"
 description = "Dirigo is a collection of interfaces for customizable image data acquisition"
 authors = [
     {name = "T. D. Weber", email = "tweber@mit.edu"}
@@ -61,6 +61,7 @@ stage_scanner_angle_calibration = "dirigo.plugins.calibrations:StageScannerAngle
 signal_offset_calibration = "dirigo.plugins.calibrations:SignalOffsetCalibrationWriter"
 line_gradient_calibration = "dirigo.plugins.calibrations:LineGradientCalibrationWriter"
 
+# deprecated hardware entry points
 [project.entry-points."dirigo_encoders"]
 linear_encoders_via_ni = "dirigo.plugins.encoders:MultiAxisLinearEncodersViaNI"
 
@@ -74,4 +75,20 @@ slow_galvo_scanner_via_ni = "dirigo.plugins.scanners:SlowGalvoScannerViaNI"
 led_via_ni = "dirigo.plugins.illuminators:LEDViaNI"
 
 [project.entry-points."dirigo_detectors"]
+generic = "dirigo.plugins.detectors:GenericDetector"
+
+# new entry points
+[project.entry-points."dirigo.devices.encoder"]
+linear_encoders_via_ni = "dirigo.plugins.encoders:MultiAxisLinearEncodersViaNI"
+
+[project.entry-points."dirigo.devices.scanner"]
+resonant_via_ni = "dirigo.plugins.scanners:ResonantScannerViaNI"
+polygon_via_ni = "dirigo.plugins.scanners:PolygonScannerViaNI"
+fast_galvo_via_ni = "dirigo.plugins.scanners:FastGalvoScannerViaNI"
+slow_galvo_via_ni = "dirigo.plugins.scanners:SlowGalvoScannerViaNI"
+
+[project.entry-points."dirigo.devices.illuminator"]
+led_via_ni = "dirigo.plugins.illuminators:LEDViaNI"
+
+[project.entry-points."dirigo.devices.detector"]
 generic = "dirigo.plugins.detectors:GenericDetector"
