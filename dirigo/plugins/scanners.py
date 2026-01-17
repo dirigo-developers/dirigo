@@ -1,8 +1,10 @@
 import threading
 from functools import cached_property, cache
 from typing import cast
+import re
 
 import numpy as np
+from pydantic import Field, field_validator
 
 import nidaqmx
 import nidaqmx.system
@@ -14,11 +16,36 @@ from nidaqmx.constants import (
 
 from dirigo.components import units
 from dirigo.hw_interfaces.scanner import (Waveforms,
-    GalvoScanner, ResonantScanner, PolygonScanner,
+    GalvoScannerConfig, GalvoScanner, 
+    ResonantScannerConfig, ResonantScanner, PolygonScannerConfig, PolygonScanner,
     FastRasterScanner, SlowRasterScanner,
 )
 from dirigo.hw_interfaces import digitizer as dgtz
 
+
+
+_NI_CH_RE = re.compile(
+    r"""
+    ^
+    (?:/)?                 # optional leading slash
+    [^/\s]+                # device name (Dev1)
+    /
+    .+                     # rest (ao0, PFI4, ao/SampleClock, etc.)
+    $
+    """,
+    re.VERBOSE,
+)
+
+def _validate_ni_channel_format(v: str) -> str:
+    v = (v or "").strip()
+    if not v:
+        raise ValueError("Channel cannot be empty.")
+    if not _NI_CH_RE.match(v) or v.count("/") > 3:
+        raise ValueError(
+            f"Invalid NI channel/terminal format: {v!r}. "
+            "Examples: 'Dev1/ao0', '/Dev1/PFI4', '/Dev1/ao/SampleClock'."
+        )
+    return v
 
 
 def get_device(device_name: str) -> nidaqmx.system.Device:
@@ -49,12 +76,13 @@ def validate_ni_channel(channel_name: str) -> str:
     Confirm if a given channel or terminal exists on a device.
     """
     # Basic format check
-    if '/' not in channel_name or channel_name.count('/') > 3:
-        raise ValueError(
-            f"Invalid channel name format, {channel_name}. "
-            f"Valid formats: [device name]/[channel name] or /[device name]/[terminal name]. "
-            f"Examples: 'Dev1/ao0', '/Dev1/PFI4', '/Dev1/ao/SampleClock'"
-        )
+    _validate_ni_channel_format(channel_name)
+    # if '/' not in channel_name or channel_name.count('/') > 3:
+    #     raise ValueError(
+    #         f"Invalid channel name format, {channel_name}. "
+    #         f"Valid formats: [device name]/[channel name] or /[device name]/[terminal name]. "
+    #         f"Examples: 'Dev1/ao0', '/Dev1/PFI4', '/Dev1/ao/SampleClock'"
+    #     )
 
     parts = channel_name.split('/')
     if channel_name.startswith('/'):
@@ -142,12 +170,31 @@ def get_max_ao_rate(device: nidaqmx.system.Device, n_channels: int = 1) -> units
         return units.SampleRate(device.ao_max_rate)
 
 
+class ResonantScannerViaNIConfig(ResonantScannerConfig):
+    amplitude_control_channel: str = Field(
+        ..., 
+        description = "AO channel used to control resonant amplitude (e.g. Dev1/ao0)"
+    )
+    analog_control_range: units.VoltageRange = Field(
+        ..., 
+        description = "Allowed analog output range (e.g. 0 V to 5 V)")
+
+    @field_validator("amplitude_control_channel")
+    @classmethod
+    def _chan_fmt(cls, v: str) -> str:
+        return _validate_ni_channel_format(v)
+    
 
 class ResonantScannerViaNI(ResonantScanner, FastRasterScanner):
     """
     Resonant scanner operated via an NIDAQ MFIO card.
     """
-    def __init__(self, amplitude_control_channel: str, analog_control_range: dict, **kwargs):
+    config_model = ResonantScannerViaNIConfig
+
+    def __init__(self, 
+                 amplitude_control_channel: str, 
+                 analog_control_range: dict, 
+                 **kwargs):
         super().__init__(**kwargs)
 
         # Validated and set ampltidue control analog channel
@@ -216,14 +263,33 @@ class ResonantScannerViaNI(ResonantScanner, FastRasterScanner):
         return self._analog_control_range
     
     def start(self):
-        pass # TODO, add some sort of enable/disbale channel
+        pass # TODO, add some sort of enable/disable channel
 
     def stop(self):
-        pass # TODO, add some sort of enable/disbale channel
+        pass # TODO, add some sort of enable/disable channel
+
+
+class PolygonScannerViaNIConfig(PolygonScannerConfig):
+    pass
 
 
 class PolygonScannerViaNI(PolygonScanner, FastRasterScanner):
     pass # TODO, write this
+
+
+class GalvoScannerViaNIConfig(GalvoScannerConfig):
+    analog_control_channel: str = Field(
+        ..., 
+        description = "AO channel used to control scanner position (e.g. Dev1/ao0)"
+    )
+    analog_control_range: units.VoltageRange = Field(
+        ..., 
+        description = "Allowed analog output range (e.g. -10 V to 10 V)")
+
+    @field_validator("analog_control_channel")
+    @classmethod
+    def _chan_fmt(cls, v: str) -> str:
+        return _validate_ni_channel_format(v)
 
 
 class GalvoScannerViaNI(GalvoScanner):
@@ -492,8 +558,12 @@ class GalvoWaveformWriter(threading.Thread):
         return round(self._samples_per_period - self._rearm_time * self._sample_rate)
 
 
+class FastGalvoScannerViaNIConfig(GalvoScannerViaNIConfig):
+    pass
 
-class FastGalvoScannerViaNI(GalvoScannerViaNI, FastRasterScanner):    
+
+class FastGalvoScannerViaNI(GalvoScannerViaNI, FastRasterScanner):
+    config_model = FastGalvoScannerViaNIConfig
     def __init__(self, 
                  ao_clock_source: str | None = None,
                  ao_start_trigger: str | None = "internal",
@@ -680,7 +750,12 @@ class FastGalvoScannerViaNI(GalvoScannerViaNI, FastRasterScanner):
         self._active = False
         
 
+class SlowGalvoScannerViaNIConfig(GalvoScannerViaNIConfig):
+    pass
+
+
 class SlowGalvoScannerViaNI(GalvoScannerViaNI, SlowRasterScanner):
+    config_model = SlowGalvoScannerViaNIConfig
     def __init__(self,
                  fast_scanner: FastRasterScanner, 
                  external_line_clock_channel: str | None = None, # to sync to external line clock (e.g. a resonant scanner)

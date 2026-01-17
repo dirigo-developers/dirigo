@@ -570,12 +570,12 @@ class RangeWithUnits(Generic[T_UQ]):
                 return cls(v)
             if isinstance(v, dict):
                 try:
-                    return cls(UQ(v["min"]), UQ(v["max"]))
+                    return cls(v["min"], v["max"])
                 except KeyError as e:
                     raise ValueError(f"Cannot parse {v!r}. Range dict missing key: {e}")
             if isinstance(v, (list, tuple)) and len(v) == 2:
                 mn, mx = v
-                return cls(UQ(mn), UQ(mx))
+                return cls(mn, mx)
 
             raise ValueError(
                 f"Cannot parse {v!r} as {cls.__name__}. Expected '±Xunit', "

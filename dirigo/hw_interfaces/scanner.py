@@ -2,6 +2,8 @@ from abc import abstractmethod
 from typing import Any
 from enum import StrEnum
 
+from pydantic import BaseModel, Field
+
 from dirigo.components import units
 from dirigo.hw_interfaces.stage import LinearStage # for z-scanner
 from dirigo.hw_interfaces.hw_interface import HardwareInterface
@@ -22,6 +24,16 @@ class Axes(StrEnum):
     X   = "x"
     Y   = "y"
     Z   = "z"
+
+
+class RasterScannerConfig(BaseModel):
+    axis: Axes = Field(
+        ..., 
+        description = "Raster scan axis label (e.g. x, y, or z)")
+    angle_limits: units.AngleRange = Field(
+        ..., 
+        description = "Scan angle range"
+    )
 
 
 class RasterScanner(HardwareInterface):
@@ -158,6 +170,22 @@ class SlowRasterScanner(RasterScanner):
     flyback_time: units.Time | None
 
 
+class ResonantScannerConfig(RasterScannerConfig):
+    frequency: units.Frequency = Field(
+        ..., 
+        description = "Nominal scanner frequency (Hz)"
+    )
+    frequency_error: float = Field(
+        ..., 
+        ge=0.0, 
+        description = "Normalized frequency error, e.g. 0.01 = 1%."
+    )
+    response_time: units.Time = Field(
+        units.Time("0 s"), 
+        description = "Settling time for amplitude changes."
+    )
+
+
 class ResonantScanner(RasterScanner):
     """
     Abstraction for resonant scanner.
@@ -231,6 +259,13 @@ class ResonantScanner(RasterScanner):
         self.amplitude = units.Angle(0) # or turn off?
 
 
+class PolygonScannerConfig(RasterScannerConfig):
+    facet_count: int = Field(
+        ..., 
+        description = "Number of mirror facets on polygon"
+    )
+
+
 class PolygonScanner(RasterScanner):
     """
     Abstraction for motor polygon assembly scanner.
@@ -239,7 +274,9 @@ class PolygonScanner(RasterScanner):
     system, however implementations should explicitly inhert FastRasterScanner 
     to 'mark' it as such. 
     """
-    def __init__(self, facet_count: int, **kwargs):
+    def __init__(self, 
+                 facet_count: int, 
+                 **kwargs):
         super().__init__(**kwargs)
         self._facet_count = facet_count
 
@@ -270,6 +307,20 @@ class PolygonScanner(RasterScanner):
     def center(self):
         raise NotImplementedError("Polygon scanners can not be centered.")
 
+
+class GalvoScannerConfig(RasterScannerConfig):
+    ao_sample_rate: units.SampleRate | None = Field(
+        ..., 
+        description = "Analog control update rate"
+    )
+    input_delay: units.Time = Field(
+        ...,
+        description = "Voltage command to scanner movement time (latency)"
+    )
+    flyback_time: units.Time = Field(
+        ...,
+        description = "Time to allow full range flyback"
+    )
 
 class GalvoScanner(RasterScanner):
     """Abstraction for galvanometer mirror servo scanner."""
