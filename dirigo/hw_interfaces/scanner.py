@@ -6,8 +6,7 @@ from pydantic import BaseModel, Field
 
 from dirigo.components import units
 from dirigo.hw_interfaces.stage import LinearStage # for z-scanner
-from dirigo.hw_interfaces.hw_interface import HardwareInterface
-
+from dirigo.hw_interfaces.hw_interface import Device
 
 """
 Dirigo scanner interface.
@@ -19,6 +18,7 @@ class Waveforms(StrEnum):
     LINEAR_UNIDIRECTIONAL   = "linear unidirectional"   # like an asymmetric triangle wave or sawtooth
     LINEAR_BIDIRECTIONAL    = "linear bidirectional"    # like a triangle wave
     STEP_UNIDIRECTIONAL     = "step unidirectional"     # To be implemented...
+
 
 class Axes(StrEnum):
     X   = "x"
@@ -36,8 +36,8 @@ class RasterScannerConfig(BaseModel):
     )
 
 
-class RasterScanner(HardwareInterface):
-    """Abstraction of a single raster scanner axis."""
+class RasterScanner(Device):
+    """Abstraction of a single raster scanner axis. (Not instantiable)"""
     attr_name = "raster_scanner"
     VALID_AXES = {Axes.X, Axes.Y} # not responsible for Z axis
 

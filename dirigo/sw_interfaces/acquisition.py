@@ -6,7 +6,7 @@ import uuid
 import numpy as np
 
 from dirigo.sw_interfaces.worker import Worker, Product
-from dirigo.hw_interfaces.hw_interface import HardwareInterface
+from dirigo.hw_interfaces.hw_interface import Device
 from dirigo.components.io import load_toml, SystemConfig
 from dirigo.components.units import RangeWithUnits
 
@@ -78,8 +78,8 @@ class Acquisition(AcquisitionWorker):
     """
     Dirigo interface for data acquisition worker thread.
     """
-    required_resources: List[Type[HardwareInterface]] = [] # The first object should be the data capture device (digitizer, camera, etc)
-    optional_resources: List[Type[HardwareInterface]] = []
+    required_resources: List[Type[Device]] = [] # The first object should be the data capture device (digitizer, camera, etc)
+    optional_resources: List[Type[Device]] = []
     spec_location: Path
     Spec: Type[AcquisitionSpec] = AcquisitionSpec
     
@@ -119,7 +119,7 @@ class Acquisition(AcquisitionWorker):
                     f"Optional {iface.__name__} failed to initialize: {exc}"
                 ) from exc
             
-    def _instantiate(self, iface: Type[HardwareInterface]):
+    def _instantiate(self, iface: Type[Device]):
         attr = iface.attr()
         try:
             return getattr(self.hw, attr) # triggers lazy instantiation

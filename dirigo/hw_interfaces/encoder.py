@@ -4,10 +4,10 @@ from typing import Literal
 import numpy as np
 
 from dirigo.components import units
-from dirigo.hw_interfaces.hw_interface import HardwareInterface
+from dirigo.hw_interfaces.hw_interface import Device
 
 
-class LinearEncoder(HardwareInterface):
+class LinearEncoder(Device):
     """
     Abstraction of a linear encoder. Linear encoders can be used to either log
     stage axis position at triggered times (for post-hoc motion correction) or 
@@ -68,7 +68,7 @@ class LinearEncoder(HardwareInterface):
         pass
     
 
-class MultiAxisLinearEncoder(HardwareInterface):
+class MultiAxisLinearEncoder(Device):
     """
     Dirigo interface for an X, Y, and/or Z stage position encoders.
     """

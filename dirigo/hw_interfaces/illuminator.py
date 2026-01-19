@@ -1,35 +1,57 @@
-from abc import ABC, abstractmethod
+from abc import abstractmethod
+from typing import ClassVar
+from dataclasses import dataclass
 
-from dirigo.hw_interfaces.hw_interface import HardwareInterface
+from pydantic import Field
+
+from dirigo.hw_interfaces.hw_interface import DeviceConfig, Device
 
 
-class Illuminator(HardwareInterface):
+
+@dataclass(frozen=True, slots=True)
+class IlluminatorCapabilities:
+    adjustable_intensity: bool = False
+
+
+class IlluminatorConfig(DeviceConfig):
+    pass
+
+
+class Illuminator(Device):
     """
     Dirigo illuminator interface
     """
-    attr_name = "illuminator"
-    
-    def __init__(self):
-        pass
+    config_model: ClassVar[type[DeviceConfig]] = IlluminatorConfig
 
-    @abstractmethod
-    def turn_on(self):
-        pass
+    def __init__(self, cfg: IlluminatorConfig, **kwargs):
+        super().__init__(cfg, **kwargs)
 
-    @abstractmethod
-    def turn_off(self):
-        pass
+    @property
+    def capabilities(self) -> IlluminatorCapabilities:
+        return IlluminatorCapabilities()
 
-    @abstractmethod
-    def close(self):
-        pass
-    
     @property
     @abstractmethod
-    def intensity(self):
-        pass
+    def enabled(self) -> bool:
+        ...
+
+    @enabled.setter
+    @abstractmethod
+    def enabled(self, value: bool) -> None:
+        ...
+
+
+class DimmableIlluminator(Illuminator):
+    @property
+    @abstractmethod
+    def intensity(self) -> float: 
+        """Normalized intensity in [0, 1]."""
+        ...
 
     @intensity.setter
     @abstractmethod
-    def intensity(self, new_value): # settable current/intensity
-        pass
+    def intensity(self, new_value: float) -> None: ...
+
+    @property
+    def capabilities(self) -> IlluminatorCapabilities:
+        return IlluminatorCapabilities(adjustable_intensity=True)

@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, cast, ClassVar
 from platformdirs import user_config_dir
 
 from dirigo.components import units
-from dirigo.hw_interfaces.hw_interface import HardwareInterface
+from dirigo.hw_interfaces.hw_interface import Device
 if TYPE_CHECKING:
     from dirigo.sw_interfaces.acquisition import AcquisitionProduct
 
@@ -785,7 +785,7 @@ class AuxiliaryIO(ABC):
         pass
 
 
-class Digitizer(HardwareInterface):
+class Digitizer(Device):
     """Top-level digitizer interface composed of clock, channels, trigger, and I/O."""
     attr_name: ClassVar[str] = "digitizer"
     PROFILE_LOCATION: ClassVar[Path] = Path(user_config_dir("Dirigo")) / "digitizer"

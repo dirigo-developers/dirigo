@@ -3,7 +3,7 @@ from abc import ABC, abstractmethod
 import time
 
 from dirigo.components import units
-from dirigo.hw_interfaces.hw_interface import HardwareInterface
+from dirigo.hw_interfaces.hw_interface import Device
 
 
 @dataclass
@@ -20,7 +20,7 @@ class StageInfo:
     model: str
 
 
-class Stage(HardwareInterface):
+class Stage(Device):
     """
     Abstract interface for a single stage. Can be linear or rotational.
     """
@@ -217,7 +217,7 @@ class LinearStage(Stage):
         pass
 
 
-class MultiAxisStage(HardwareInterface):
+class MultiAxisStage(Device):
     """
     Dirigo interface for an X, Y, and/or Z sample translation stage.
     """

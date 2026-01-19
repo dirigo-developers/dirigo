@@ -4,7 +4,7 @@ from typing import Optional, Any, List
 
 from dirigo.components import units
 from dirigo.sw_interfaces.acquisition import AcquisitionProduct
-from dirigo.hw_interfaces.hw_interface import HardwareInterface
+from dirigo.hw_interfaces.hw_interface import Device
 
 
 class CameraConnectionType(Enum):
@@ -13,7 +13,7 @@ class CameraConnectionType(Enum):
     USB         = 2
 
 
-class FrameGrabber(HardwareInterface):
+class FrameGrabber(Device):
     attr_name = "frame_grabber"
 
     def __init__(self):
@@ -113,7 +113,7 @@ class TriggerModes(Enum):
     EXTERNAL_TRIGGER    = 1
 
 
-class Camera(HardwareInterface):
+class Camera(Device):
     attr_name = "camera"
     def __init__(self, 
                  frame_grabber: Optional[FrameGrabber], 
