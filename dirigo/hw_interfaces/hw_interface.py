@@ -36,10 +36,6 @@ class Device(ABC):
     # human readable title for identification in GUIs
     title: ClassVar[str | None] = None 
 
-    # Lock identity when the implementation is vendor/model specific
-    locked_vendor: ClassVar[str | None] = None
-    locked_model: ClassVar[str | None] = None
-
     def __init__(self, cfg: DeviceConfig, **kwargs):
         if not isinstance(cfg, type(self).config_model):
             raise TypeError(
@@ -120,36 +116,18 @@ class Device(ABC):
         return self._resolve_model()
     
     def _resolve_vendor(self) -> str:
-        locked = type(self).locked_vendor
-        if locked is not None:
-            if self.cfg.vendor is not None and self.cfg.vendor != locked:
-                raise ValueError(
-                    f"{type(self).__name__} is locked to vendor {locked!r}, "
-                    f"but config specified vendor {self.cfg.vendor!r}."
-                )
-            return locked
-
         v = self._introspect_vendor() or self.cfg.vendor
         if v is None:
             raise RuntimeError(f"{type(self).__name__}: vendor unavailable.")
         return v
     
     def _resolve_model(self) -> str:
-        locked = type(self).locked_model
-        if locked is not None:
-            if self.cfg.model is not None and self.cfg.model != locked:
-                raise ValueError(
-                    f"{type(self).__name__} is locked to model {locked!r}, "
-                    f"but config specified model {self.cfg.model!r}."
-                )
-            return locked
-
         m = self._introspect_model() or self.cfg.model
         if m is None:
             raise RuntimeError(f"{type(self).__name__}: no model available (introspection/config).")
         return m
     
-    # Optional hooks for devices that can introspect identity (override in subclasses)
+    # Hooks for devices that can introspect identity (override in subclasses)
     def _introspect_vendor(self) -> str | None:
         # Vendor is almost always locked to the Device class, so this is rarely used
         return None
@@ -159,10 +137,3 @@ class Device(ABC):
         return None
     
     
-
-
-# TODO move this 
-class NoBuffers(Exception):
-    """Raised by HardWareInterface when no buffers are available."""
-    pass
-

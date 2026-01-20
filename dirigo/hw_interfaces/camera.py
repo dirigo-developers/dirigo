@@ -1,138 +1,82 @@
-from enum import Enum
+from enum import StrEnum
 from abc import abstractmethod
-from typing import Optional, Any, List
+from typing import ClassVar
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from dirigo.components import units
-from dirigo.sw_interfaces.acquisition import AcquisitionProduct
-from dirigo.hw_interfaces.hw_interface import Device
+from dirigo.hw_interfaces.geometry import GlobalAxes
+from dirigo.hw_interfaces.hw_interface import DeviceConfig, Device
 
 
-class CameraConnectionType(Enum):
-    CAMERA_LINK = 0
-    GIGE        = 1
-    USB         = 2
 
 
-class FrameGrabber(Device):
-    attr_name = "frame_grabber"
+class ImageOrientation(BaseModel):
+    model_config = ConfigDict(extra="forbid")
 
-    def __init__(self):
-        self._buffers: List[Any] # TODO refine the buffer object typehint
-        self._camera: Optional['Camera'] = None
+    flip_fast: bool = Field(
+        default     = False,
+        description = "Reverse the fast (in-row) image axis."
+    )
+    flip_slow: bool = Field(
+        default     = False,
+        description = "Reverse the slow (row-to-row) image axis."
+    )
+    rotate: units.Angle = Field(
+        default     = units.Angle("0 deg"), 
+        description = "Rotation applied after flips (must be multiple of 90 deg)"
+    )
 
-    @abstractmethod
-    def serial_write(self, message):
-        pass
+    @field_validator("rotate")
+    @classmethod
+    def _validate_right_angle(cls, ang: units.Angle) -> units.Angle:
+        # Allow small numerical noise if user constructed from floats
+        q = float(ang / units.Angle("90 deg"))
+        if abs(q - round(q)) > 1e-6:
+            raise ValueError(
+                f"Image rotation must be a multiple of 90°, got {ang.with_unit('deg')}°"
+            )
 
-    @abstractmethod
-    def serial_read(self, nbytes: Optional[int] = None) -> str:
-        pass
-
-    @property
-    @abstractmethod
-    def pixels_width(self) -> int:
-        """Total number of sensor pixels wide."""
-        pass
-
-    @property
-    @abstractmethod
-    def roi_height(self) -> int:
-        pass
-
-    @property
-    @abstractmethod
-    def roi_width(self) -> int:
-        pass
-
-    @roi_width.setter
-    @abstractmethod
-    def roi_width(self, width: int):
-        pass
-
-    @property
-    @abstractmethod
-    def roi_left(self) -> int:
-        pass
-
-    @roi_left.setter
-    @abstractmethod
-    def roi_left(self, left: int):
-        pass
-    
-    @property
-    @abstractmethod
-    def lines_per_buffer(self) -> int:
-        pass
-
-    @lines_per_buffer.setter
-    @abstractmethod
-    def lines_per_buffer(self, lines: int):
-        pass
-
-    @property
-    @abstractmethod
-    def bytes_per_pixel(self) -> int:
-        pass
-
-    @property
-    def bytes_per_buffer(self):
-        if self.lines_per_buffer is None or self.roi_width is None:
-            raise RuntimeError("Lines per buffer or ROI width not initialized")
-        return self.lines_per_buffer * self.roi_width * self.bytes_per_pixel
-
-    @abstractmethod
-    def prepare_buffers(self, nbuffers: int):
-        pass
-
-    @abstractmethod
-    def start(self):
-        pass
-
-    @abstractmethod
-    def stop(self):
-        pass
-
-    @abstractmethod
-    def get_next_completed_buffer(self, product: AcquisitionProduct) -> None:
-        pass
-
-    @property
-    @abstractmethod
-    def buffers_acquired(self) -> int:
-        pass
-
-    @property
-    @abstractmethod
-    def data_range(self) -> units.IntRange:
-        """ Returns the range of values returned by the frame grabber. """
-        pass
+        return ang
 
 
-class TriggerModes(Enum):
-    FREE_RUN            = 0
-    EXTERNAL_TRIGGER    = 1
+class CameraConfig(DeviceConfig):
+    pixel_size: units.Position = Field(
+        ...,
+        description="Physical pixel size at sensor"
+    )
+    orientation: ImageOrientation = Field(
+        default_factory=ImageOrientation
+    )
+
+
+class TriggerModes(StrEnum):
+    FREE_RUN            = "free_run"
+    EXTERNAL_TRIGGER    = "external_trigger"
 
 
 class Camera(Device):
-    attr_name = "camera"
-    def __init__(self, 
-                 frame_grabber: Optional[FrameGrabber], 
-                 pixel_size: str, 
-                 **kwargs):
-        self._frame_grabber = frame_grabber
-        if self._frame_grabber is not None:
-            self._frame_grabber._camera = self # give the frame grabber reference to camera
-        self._pixel_size = units.Position(pixel_size)
+    config_model: ClassVar[type[DeviceConfig]] = CameraConfig
 
-    # essential parameters
-    # sensor shape (max resolution)
-    # roi shape
-    # frame rate / interval
+    def __init__(self, cfg: CameraConfig, **kwargs):
+        super().__init__(cfg, **kwargs)
+        self.cfg: CameraConfig
 
     @property
     def pixel_size(self) -> units.Position:
-        return self._pixel_size
+        """Physical pixel size at sensor."""
+        return self.cfg.pixel_size
+    
+    # ---- Sensor geometry ----
+    @property
+    @abstractmethod
+    def sensor_width_px(self) -> int: ...
 
+    @property
+    @abstractmethod
+    def sensor_height_px(self) -> int: ...
+
+    # ---- Controls ----
     @property
     @abstractmethod
     def integration_time(self) -> units.Time:
@@ -177,20 +121,12 @@ class Camera(Device):
     # IO
     @property
     @abstractmethod
-    def trigger_mode(self):
+    def trigger_mode(self) -> TriggerModes:
         pass
     
     @trigger_mode.setter
     @abstractmethod
-    def trigger_mode(self, new_value):
-        pass
-
-    @abstractmethod
-    def start(self):
-        pass
-
-    @abstractmethod
-    def stop(self):
+    def trigger_mode(self, mode: TriggerModes):
         pass
 
     @abstractmethod
@@ -198,24 +134,22 @@ class Camera(Device):
         pass
 
 
-class LineCamera(Camera):
-    attr_name = "line_camera"
-    VALID_AXES = {'x', 'y'} # make these enumerations
 
-    def __init__(self, 
-                 axis: str, 
-                 flip_line: bool, # only used by Processor
-                 **kwargs):
-        super().__init__(**kwargs)
-        self.axis = axis
+class LineCameraConfig(CameraConfig):
+    axis: GlobalAxes = Field(
+        ...,
+        description="Global axis aligned with sensor line"
+    )
+
+
+class LineCamera(Camera):
+    config_model: ClassVar[type[DeviceConfig]] = LineCameraConfig
+
+    def __init__(self, cfg: LineCameraConfig, **kwargs):
+        super().__init__(cfg, **kwargs)
+        self.cfg: LineCameraConfig
 
     @property
     def axis(self):
-        return self._axis
+        return self.cfg.axis
     
-    @axis.setter
-    def axis(self, new_axis: str):
-        if new_axis in self.VALID_AXES:
-            self._axis = new_axis
-        else:
-            raise ValueError(f"Error setting encoder axis: Got '{new_axis}'")
