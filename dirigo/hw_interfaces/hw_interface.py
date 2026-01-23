@@ -1,11 +1,17 @@
 from abc import ABC
 from functools import cached_property
-from typing import ClassVar
-from pydantic import BaseModel, ConfigDict, field_validator
+from typing import ClassVar, Any
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 
 class DeviceConfig(BaseModel):
+    """
+    A DeviceConfig declares information required to properly instantiate the Device.
+    
+    Intended to be subclassed to collect device-specific information.
+    """
     # reject any data containing fields not explicitly defined in the model
     model_config = ConfigDict(extra="forbid") 
 
@@ -21,6 +27,67 @@ class DeviceConfig(BaseModel):
         if not v:
             raise ValueError("Must be a non-empty string if provided.")
         return v
+    
+
+class DeviceIdentity(BaseModel):
+    """
+    Optional, cached identity/provenance snapshot for a Device.
+
+    `vendor` and `model` are always required once the Device exists.
+    Other fields are optional and may be unavailable for some devices.
+
+    Not intended to be subclassed.
+    """
+    model_config = ConfigDict(extra="forbid")
+
+    vendor: str
+    model: str
+
+    serial: str | None = None
+    firmware: str | None = None
+    hardware_rev: str | None = None
+
+    driver: str | None = None
+    driver_version: str | None = None
+
+    # Escape hatch for device-specific identity fields.
+    extras: dict[str, str] = Field(default_factory=dict)
+
+    @field_validator(
+        "vendor",
+        "model",
+        "serial",
+        "firmware",
+        "hardware_rev",
+        "driver",
+        "driver_version",
+    )
+    @classmethod
+    def _strip_nonempty_if_provided(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        v = v.strip()
+        if not v:
+            raise ValueError("Must be a non-empty string if provided.")
+        return v
+
+    @field_validator("extras")
+    @classmethod
+    def _validate_extras(cls, d: dict[str, str]) -> dict[str, str]:
+        out: dict[str, str] = {}
+        for k, v in d.items():
+            if not isinstance(k, str):
+                raise TypeError(f"extras keys must be str, got {type(k)}")
+            k2 = k.strip()
+            if not k2:
+                raise ValueError("extras keys must be non-empty strings")
+            if not isinstance(v, str):
+                raise TypeError(f"extras['{k2}'] must be str, got {type(v)}")
+            v2 = v.strip()
+            if not v2:
+                raise ValueError(f"extras['{k2}'] must be a non-empty string")
+            out[k2] = v2
+        return out
 
 
 class Device(ABC):
@@ -43,12 +110,11 @@ class Device(ABC):
                 f"got {type(cfg).__name__}"
             )
         self.cfg = cfg
+        self._identity: DeviceIdentity | None = None
 
         # Lifecycle state
         self._is_connected: bool = False
         self._is_closed: bool = False
-
-        _ = self.vendor  # triggers vendor resolution now; model resolved after connect
 
     @classmethod
     def display_title(cls) -> str:
@@ -78,8 +144,7 @@ class Device(ABC):
         self._connect_impl()
         self._is_connected = True
 
-        # triggers model resolution
-        _ = self.model
+        self._identity = self._resolve_identity()
 
     def close(self) -> None:
         """
@@ -107,33 +172,50 @@ class Device(ABC):
         """Override to release resources. Default is no-op."""
         return None
     
-    @cached_property
-    def vendor(self) -> str:
-        return self._resolve_vendor()
-    
-    @cached_property
-    def model(self) -> str:
-        return self._resolve_model()
-    
-    def _resolve_vendor(self) -> str:
-        v = self._introspect_vendor() or self.cfg.vendor
-        if v is None:
-            raise RuntimeError(f"{type(self).__name__}: vendor unavailable.")
-        return v
-    
-    def _resolve_model(self) -> str:
-        m = self._introspect_model() or self.cfg.model
-        if m is None:
-            raise RuntimeError(f"{type(self).__name__}: no model available (introspection/config).")
-        return m
-    
-    # Hooks for devices that can introspect identity (override in subclasses)
-    def _introspect_vendor(self) -> str | None:
-        # Vendor is almost always locked to the Device class, so this is rarely used
-        return None
+    # ---- Identity ----
+    @property
+    def identity(self) -> DeviceIdentity:
+        if self._identity is None:
+            raise RuntimeError("Device must connect before accessing identity.")
+        return self._identity
 
-    def _introspect_model(self) -> str | None:
-        # Override if model can be obtained by via the vendor API
-        return None
+    def _resolve_identity(self) -> DeviceIdentity:
+        introspected = self._introspect_identity() or {}
+
+        if not isinstance(introspected, dict):
+            raise TypeError(
+                f"{type(self).__name__}._introspect_identity() must return dict[str, Any] or None; "
+                f"got {type(introspected)}"
+            )
+        
+        vendor = self.cfg.vendor or introspected.get("vendor")
+        model = self.cfg.model or introspected.get("model")
+
+        if vendor is None:
+            raise RuntimeError(f"{type(self).__name__}: vendor unavailable (introspection/config).")
+
+        if model is None:
+            raise RuntimeError(f"{type(self).__name__}: model unavailable (introspection/config).")
+
+        return DeviceIdentity(
+            vendor         = vendor,
+            model          = model,
+            serial         = introspected.get("serial"),
+            firmware       = introspected.get("firmware"),
+            hardware_rev   = introspected.get("hardware_rev"),
+            driver         = introspected.get("driver"),
+            driver_version = introspected.get("driver_version"),
+            extras         = introspected.get("extras") or {},
+        )
     
+    def _introspect_identity(self) -> dict[str, Any] | None:
+        """
+        Optional identity fields beyond vendor/model.
+
+        Allowed keys:
+          - vendor, model (optional overrides)
+          - serial, firmware, hardware_rev, driver, driver_version
+          - extras: dict[str, str]
+        """
+        return None
     
