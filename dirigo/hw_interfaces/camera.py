@@ -55,6 +55,7 @@ class TriggerModes(StrEnum):
     EXTERNAL_TRIGGER    = "external_trigger"
 
 
+
 class Camera(Device):
     config_model: ClassVar[type[DeviceConfig]] = CameraConfig
 
@@ -64,17 +65,21 @@ class Camera(Device):
 
     @property
     def pixel_size(self) -> units.Position:
-        """Physical pixel size at sensor."""
+        """Effective pixel sampling pitch. Changes with different binning factors"""
         return self.cfg.pixel_size
     
     # ---- Sensor geometry ----
     @property
     @abstractmethod
-    def sensor_width_px(self) -> int: ...
+    def image_width_px(self) -> int: 
+        """Width of delivered frames in pixels."""
+        ...
 
     @property
     @abstractmethod
-    def sensor_height_px(self) -> int: ...
+    def image_height_px(self) -> int:
+        """Height of delivered frames in pixels."""
+        ...
 
     # ---- Controls ----
     @property
@@ -84,17 +89,19 @@ class Camera(Device):
     
     @integration_time.setter
     @abstractmethod
-    def integration_time(self, new_value: units.Time):
+    def integration_time(self, new_time: units.Time):
         pass
+
+    # TODO should we add an integration time range?
 
     @property
     @abstractmethod
-    def gain(self):
+    def gain(self): # TODO add units
         pass
     
     @gain.setter
     @abstractmethod
-    def gain(self, new_value):
+    def gain(self, new_gain):
         pass
 
     @property
@@ -140,6 +147,7 @@ class LineCameraConfig(CameraConfig):
         ...,
         description="Global axis aligned with sensor line"
     )
+    # modify orientation to remove height and rotation
 
 
 class LineCamera(Camera):
@@ -152,4 +160,9 @@ class LineCamera(Camera):
     @property
     def axis(self):
         return self.cfg.axis
+    
+    # ---- Sensor geometry ----
+    @property
+    def image_height_px(self) -> int:
+        return 1 # Line sensor
     
