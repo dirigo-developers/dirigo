@@ -226,13 +226,13 @@ class LineCamera(Camera):
     
     @property
     @abstractmethod
-    def line_direction(self) -> ScanDirection:
+    def scan_direction(self) -> ScanDirection:
         """Direction convention used by the sensor/readout for line acquisition."""
         ...
 
-    @line_direction.setter
+    @scan_direction.setter
     @abstractmethod
-    def line_direction(self, d: ScanDirection) -> None:
+    def scan_direction(self, d: ScanDirection) -> None:
         """Raise SettingNotSettableError if fixed."""
         ...
     
