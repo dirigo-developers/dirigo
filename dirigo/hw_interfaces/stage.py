@@ -1,23 +1,14 @@
-from dataclasses import dataclass
-from abc import ABC, abstractmethod
+from abc import abstractmethod
 import time
 
 from dirigo.components import units
-from dirigo.hw_interfaces.hw_interface import Device
+from dirigo.hw_interfaces.hw_interface import DeviceConfig, Device
 
 
-@dataclass
-class StageInfo:
-    """
-    Object describing permanent information (manufacturer, model, etc.).
-    
-    Does not describe characteristics that could potentially be customized by 
-    the user (velocity, position limits, axis orientation, etc).
 
-    Subclass this base class to include more information fields.
-    """
-    manufacturer: str
-    model: str
+
+class StageConfig(DeviceConfig):
+    pass
 
 
 class Stage(Device):
@@ -46,12 +37,6 @@ class Stage(Device):
         if axis not in self.VALID_AXES:
             raise ValueError(f"axis must be one of {self.VALID_AXES}")
         self._axis = axis
-
-    @property
-    @abstractmethod
-    def device_info(self) -> StageInfo:
-        """Returns an object describing permanent properties of the stage."""
-        pass
 
     @property
     def axis(self) -> str:

@@ -1,9 +1,16 @@
 from abc import ABC
-from functools import cached_property
 from typing import ClassVar, Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+
+
+class DeviceSettingError(RuntimeError):
+    """Base class for errors applying device settings."""
+
+
+class SettingNotSettableError(DeviceSettingError):
+    """Raised when attempting to set a read-only / fixed device setting."""
 
 
 class DeviceConfig(BaseModel):
@@ -31,7 +38,7 @@ class DeviceConfig(BaseModel):
 
 class DeviceIdentity(BaseModel):
     """
-    Optional, cached identity/provenance snapshot for a Device.
+    Optional, cached identity snapshot for a Device.
 
     `vendor` and `model` are always required once the Device exists.
     Other fields are optional and may be unavailable for some devices.
@@ -90,6 +97,17 @@ class DeviceIdentity(BaseModel):
         return out
 
 
+class DeviceSettings(BaseModel):
+    """
+    Persistable snapshot of a Device's adjustable state. Should capture subset
+    of device properties that affect data generation or interpretation.
+    
+    Implementations should subclass this model per device-kind (CameraSettings,
+    DigitizerSettings, StageSettings...) and/or per concrete device, as needed.
+    """
+    model_config = ConfigDict(extra="forbid")
+
+
 class Device(ABC):
     """
     Base-class for Devices in Dirigo.
@@ -99,17 +117,21 @@ class Device(ABC):
     """
 
     config_model: ClassVar[type[DeviceConfig]] = DeviceConfig
+    settings_model: ClassVar[type[DeviceSettings]] = DeviceSettings
 
     # human readable title for identification in GUIs
     title: ClassVar[str | None] = None 
 
     def __init__(self, cfg: DeviceConfig, **kwargs):
+        self._check_settings()
+
         if not isinstance(cfg, type(self).config_model):
             raise TypeError(
-                f"{type(self).__name__} expected cfg of type {type(self).config_model.__name__}, "
-                f"got {type(cfg).__name__}"
+                f"{type(self).__name__} expected cfg of type "
+                f"{type(self).config_model.__name__}, got {type(cfg).__name__}"
             )
         self.cfg = cfg
+
         self._identity: DeviceIdentity | None = None
 
         # Lifecycle state
@@ -118,7 +140,7 @@ class Device(ABC):
 
     @classmethod
     def display_title(cls) -> str:
-        # back-up in case title metadata not specified
+        # back-up in case title not specified
         return cls.title or cls.__name__
     
     @property
@@ -219,3 +241,82 @@ class Device(ABC):
         """
         return None
     
+    # ---- Settings (snapshot + restore) ----
+    @classmethod
+    def _check_settings(cls):
+        """
+        Validate that all DeviceSettings fields correspond to readable and
+        settable live attributes on this Device.
+
+        This enforces the convention: DeviceSettings.foo  <->  Device.foo (getter + setter)
+        """
+        settings_model = cls.settings_model
+
+        errors: list[str] = []
+
+        for name in settings_model.model_fields:
+            # Attribute must exist on the instance or class
+            if not hasattr(cls, name):
+                errors.append(
+                    f"- missing property '{name}' required by {settings_model.__name__}"
+                )
+                continue
+
+            cls_attr = getattr(cls, name, None)
+            if not isinstance(cls_attr, property):
+                errors.append(
+                    f"- missing property '{name}' required by {settings_model.__name__}"
+                )
+                continue
+
+            if cls_attr.fget is None:
+                errors.append(
+                    f"- property '{name}' has no getter (required for snapshot)"
+                )
+            if cls_attr.fset is None:
+                errors.append(
+                    f"- property '{name}' has no setter (required for apply)"
+                )
+                
+        if errors:
+            msg = (
+                f"{cls.__name__}: settings_model {settings_model.__name__} "
+                f"is incompatible with device properties:\n"
+                + "\n".join(errors)
+            )
+            raise TypeError(msg)
+
+    def snapshot_settings(self) -> DeviceSettings:
+        """
+        Capture a validated settings snapshot.
+        """
+        if not self._is_connected:
+            raise RuntimeError("Device must connect before snapshotting settings.")
+        
+        data: dict[str, Any] = {}
+
+        for name in type(self).settings_model.model_fields:
+            data[name] = getattr(self, name)
+
+        return type(self).settings_model(**data)
+
+    def apply_settings(self, settings: DeviceSettings) -> None:
+        """
+        Apply settings to hardware.
+        """
+        if not self._is_connected:
+            raise RuntimeError("Device must connect before applying settings.")
+
+        if not isinstance(settings, type(self).settings_model):
+            raise TypeError(
+                f"{type(self).__name__} expected settings of type "
+                f"{type(self).settings_model.__name__}, got {type(settings).__name__}"
+            )
+
+        for name in type(settings).model_fields:
+            field_value = getattr(settings, name)
+
+            # skip any fields that are None
+            if field_value is not None:
+                setattr(self, name, field_value)
+

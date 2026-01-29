@@ -6,9 +6,33 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from dirigo.components import units
 from dirigo.hw_interfaces.geometry import GlobalAxes
-from dirigo.hw_interfaces.hw_interface import DeviceConfig, Device
+from dirigo.hw_interfaces.hw_interface import DeviceConfig, DeviceSettings, Device
 
 
+
+# ---- Camera Enumerations ----
+class TriggerMode(StrEnum):
+    FREE_RUN            = "free_run"
+    EXTERNAL_TRIGGER    = "external_trigger"
+    # TODO, add trigger+integration time, but this would invalidate integration_time property
+
+
+class PixelFormat(StrEnum):
+    MONO8   = "mono8"
+    MONO10  = "mono10"
+    MONO12  = "mono12"
+    MONO16  = "mono16"
+    RGB24   = "rgb24"
+    # TODO: should we also defined packed formats? More relevant for ImageTransport
+
+
+_BIT_DEPTH_MAPPING = {
+    PixelFormat.MONO8: 8,
+    PixelFormat.MONO10: 10,
+    PixelFormat.MONO12: 12,
+    PixelFormat.MONO16: 16,
+    PixelFormat.RGB24: 8
+}
 
 
 class ImageOrientation(BaseModel):
@@ -50,14 +74,19 @@ class CameraConfig(DeviceConfig):
     )
 
 
-class TriggerModes(StrEnum):
-    FREE_RUN            = "free_run"
-    EXTERNAL_TRIGGER    = "external_trigger"
-
+class CameraSettings(DeviceSettings):
+    """
+    Adjustable camera settings
+    """
+    integration_time: units.Time | None = None
+    gain: float | None = None
+    trigger_mode: TriggerMode | None = None
+    pixel_format: PixelFormat | None = None
 
 
 class Camera(Device):
     config_model: ClassVar[type[DeviceConfig]] = CameraConfig
+    settings_model: ClassVar[type[DeviceSettings]] = CameraSettings
 
     def __init__(self, cfg: CameraConfig, **kwargs):
         super().__init__(cfg, **kwargs)
@@ -65,10 +94,14 @@ class Camera(Device):
 
     @property
     def pixel_size(self) -> units.Position:
-        """Effective pixel sampling pitch. Changes with different binning factors"""
+        """
+        Effective pixel sampling pitch. 
+
+        Override if introspectable and/or pixel size changes with binning.
+        """
         return self.cfg.pixel_size
     
-    # ---- Sensor geometry ----
+    # ---- Sensor characteristics ----
     @property
     @abstractmethod
     def image_width_px(self) -> int: 
@@ -84,61 +117,81 @@ class Camera(Device):
     # ---- Controls ----
     @property
     @abstractmethod
+    def pixel_format(self) -> PixelFormat:
+        ...
+
+    @pixel_format.setter
+    @abstractmethod
+    def pixel_format(self, f: PixelFormat) -> None:
+        """Should raise SettingNotSettableError if this is not settable."""
+        ...
+
+    @property
+    @abstractmethod
+    def supported_pixel_formats(self) -> tuple[PixelFormat, ...]:
+        ...
+
+    @property
+    @abstractmethod
     def integration_time(self) -> units.Time:
-        pass
+        ...
     
     @integration_time.setter
     @abstractmethod
-    def integration_time(self, new_time: units.Time):
-        pass
-
-    # TODO should we add an integration time range?
+    def integration_time(self, t: units.Time):
+        ...
 
     @property
     @abstractmethod
-    def gain(self): # TODO add units
-        pass
+    def integration_time_range(self) -> units.TimeRange:
+        ...
+
+    @property
+    @abstractmethod
+    def gain(self) -> float:
+        ...
     
     @gain.setter
     @abstractmethod
-    def gain(self, new_gain):
-        pass
+    def gain(self, g: float):
+        ...
 
     @property
     @abstractmethod
-    def bit_depth(self) -> int:
-        pass
-    
-    @bit_depth.setter
-    @abstractmethod
-    def bit_depth(self, new_value: int):
-        pass
-
-    @property
-    @abstractmethod
-    def data_range(self) -> units.IntRange:
+    def supported_gains(self) -> units.FloatRange | tuple[float, ...]:
         """
-        Returns the range of values returned by the camera. 
-        
-        The returned data range may exceed the bit depth, which can be useful
-        for in-place averaging.
+        Returns either a FloatRange for quasi-continuously adjustable gain or
+        a tuple of floats for discrete supported gain values.
         """
-        pass
 
-    # IO
     @property
     @abstractmethod
-    def trigger_mode(self) -> TriggerModes:
-        pass
+    def trigger_mode(self) -> TriggerMode:
+        ...
     
     @trigger_mode.setter
     @abstractmethod
-    def trigger_mode(self, mode: TriggerModes):
-        pass
+    def trigger_mode(self, mode: TriggerMode):
+        ...
 
+    @property
     @abstractmethod
-    def load_profile(self):
-        pass
+    def supported_trigger_modes(self) -> tuple[TriggerMode, ...]:
+        ...
+
+    # ---- Helpers ----
+    @property
+    def bit_depth(self) -> int:
+        """The binary bits per pixel, per channel"""
+        return _BIT_DEPTH_MAPPING[self.pixel_format]
+    
+    @property
+    def is_color(self) -> bool:
+        """Whether or not the camera outputs color pixels"""
+        if self.pixel_format in (PixelFormat.RGB24,):
+            return True
+        else:
+            return False
 
 
 
@@ -151,6 +204,7 @@ class LineCameraConfig(CameraConfig):
 
 
 class LineCamera(Camera):
+    """Adds line axis semantics and hardcodes image height to 1 pixel."""
     config_model: ClassVar[type[DeviceConfig]] = LineCameraConfig
 
     def __init__(self, cfg: LineCameraConfig, **kwargs):
@@ -158,7 +212,7 @@ class LineCamera(Camera):
         self.cfg: LineCameraConfig
 
     @property
-    def axis(self):
+    def axis(self) -> GlobalAxes:
         return self.cfg.axis
     
     # ---- Sensor geometry ----
