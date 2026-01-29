@@ -194,18 +194,27 @@ class Camera(Device):
             return False
 
 
+class ScanDirection(StrEnum):
+    FORWARD = "forward"
+    REVERSE = "reverse"
+
 
 class LineCameraConfig(CameraConfig):
     axis: GlobalAxes = Field(
         ...,
         description="Global axis aligned with sensor line"
     )
-    # modify orientation to remove height and rotation
+    # TODO, modify orientation to remove height and rotation
+
+
+class LineCameraSettings(CameraSettings):
+    scan_direction: ScanDirection | None = None
 
 
 class LineCamera(Camera):
     """Adds line axis semantics and hardcodes image height to 1 pixel."""
     config_model: ClassVar[type[DeviceConfig]] = LineCameraConfig
+    settings_model: ClassVar[type[DeviceSettings]] = LineCameraSettings
 
     def __init__(self, cfg: LineCameraConfig, **kwargs):
         super().__init__(cfg, **kwargs)
@@ -214,6 +223,18 @@ class LineCamera(Camera):
     @property
     def axis(self) -> GlobalAxes:
         return self.cfg.axis
+    
+    @property
+    @abstractmethod
+    def line_direction(self) -> ScanDirection:
+        """Direction convention used by the sensor/readout for line acquisition."""
+        ...
+
+    @line_direction.setter
+    @abstractmethod
+    def line_direction(self, d: ScanDirection) -> None:
+        """Raise SettingNotSettableError if fixed."""
+        ...
     
     # ---- Sensor geometry ----
     @property
