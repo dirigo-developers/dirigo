@@ -56,8 +56,8 @@ frame = "dirigo.plugins.displays:FrameDisplay"
 tiff = "dirigo.plugins.writers:TiffWriter"
 # special calibration writers
 trigger_delay_calibration = "dirigo.plugins.calibrations:TriggerDelayCalibrationWriter"
-line_distortion_calibration = "dirigo.plugins.calibrations:LineDistortionCalibrationWriter"
-stage_scanner_angle_calibration = "dirigo.plugins.calibrations:StageScannerAngleCalibrationWriter"
+#line_distortion_calibration = "dirigo.plugins.calibrations:LineDistortionCalibrationWriter"
+#stage_scanner_angle_calibration = "dirigo.plugins.calibrations:StageScannerAngleCalibrationWriter"
 signal_offset_calibration = "dirigo.plugins.calibrations:SignalOffsetCalibrationWriter"
 line_gradient_calibration = "dirigo.plugins.calibrations:LineGradientCalibrationWriter"
 
