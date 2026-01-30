@@ -123,7 +123,6 @@ class Device(ABC):
     title: ClassVar[str | None] = None 
 
     def __init__(self, cfg: DeviceConfig, **kwargs):
-        self._check_settings()
 
         if not isinstance(cfg, type(self).config_model):
             raise TypeError(
@@ -241,82 +240,121 @@ class Device(ABC):
         """
         return None
     
-    # ---- Settings (snapshot + restore) ----
-    @classmethod
-    def _check_settings(cls):
-        """
-        Validate that all DeviceSettings fields correspond to readable and
-        settable live attributes on this Device.
-
-        This enforces the convention: DeviceSettings.foo  <->  Device.foo (getter + setter)
-        """
-        settings_model = cls.settings_model
-
-        errors: list[str] = []
-
-        for name in settings_model.model_fields:
-            # Attribute must exist on the instance or class
-            if not hasattr(cls, name):
-                errors.append(
-                    f"- missing property '{name}' required by {settings_model.__name__}"
-                )
-                continue
-
-            cls_attr = getattr(cls, name, None)
-            if not isinstance(cls_attr, property):
-                errors.append(
-                    f"- missing property '{name}' required by {settings_model.__name__}"
-                )
-                continue
-
-            if cls_attr.fget is None:
-                errors.append(
-                    f"- property '{name}' has no getter (required for snapshot)"
-                )
-            if cls_attr.fset is None:
-                errors.append(
-                    f"- property '{name}' has no setter (required for apply)"
-                )
-                
-        if errors:
-            msg = (
-                f"{cls.__name__}: settings_model {settings_model.__name__} "
-                f"is incompatible with device properties:\n"
-                + "\n".join(errors)
-            )
-            raise TypeError(msg)
-
+    # --- Settings (snapshot + restore) ---
+    @staticmethod
+    def _is_nested_settings_type(tp: Any) -> bool:
+        """Return True if tp is a DeviceSettings subclass (nested settings)."""
+        return isinstance(tp, type) and issubclass(tp, DeviceSettings)
+    
     def snapshot_settings(self) -> DeviceSettings:
         """
         Capture a validated settings snapshot.
+
+        Behavior:
+          - Leaf field: reads self.<name>
+          - Nested DeviceSettings field: reads child = self.<name> (must be a Device),
+            then calls child.snapshot_settings()
+
+        Any mismatch raises a DeviceSettingError with a helpful message.
         """
         if not self._is_connected:
             raise RuntimeError("Device must connect before snapshotting settings.")
         
-        data: dict[str, Any] = {}
+        settings_cls = type(self).settings_model
+        out: dict[str, Any] = {}
+        
+        for name, field_info in settings_cls.model_fields.items():
+            ann = field_info.annotation
+            if ann is None:
+                raise DeviceSettingError(
+                    f"{type(self).__name__}: Missing annotation for {field_info}"
+                )
 
-        for name in type(self).settings_model.model_fields:
-            data[name] = getattr(self, name)
+            # Ensure attribute exists / is readable
+            try:
+                attr = getattr(self, name)
+            except AttributeError as e:
+                raise DeviceSettingError(
+                    f"{type(self).__name__}: cannot snapshot '{name}': missing attribute/property"
+                ) from e
+            
+            if self._is_nested_settings_type(ann):
+                # Nested: attr must be a child Device
+                if not isinstance(attr, Device):
+                    raise DeviceSettingError(
+                        f"{type(self).__name__}: cannot snapshot '{name}': expected a child Device "
+                        f"(because settings field is {ann.__name__}), got {type(attr).__name__}"
+                    )
+                out[name] = attr.snapshot_settings()
+            else:
+                out[name] = attr
 
-        return type(self).settings_model(**data)
+        # Pydantic validation happens here
+        return settings_cls(**out)
 
     def apply_settings(self, settings: DeviceSettings) -> None:
         """
         Apply settings to hardware.
+
+        Behavior:
+          - Leaf field: sets self.<name> = value
+          - Nested DeviceSettings field: delegates to child.apply_settings(value)
+
+        Raises:
+          - TypeError if wrong settings model
+          - SettingNotSettableError if a leaf field has no setter
+          - DeviceSettingError for other mismatches (missing attribute, wrong child type, etc.)
         """
         if not self._is_connected:
             raise RuntimeError("Device must connect before applying settings.")
 
-        if not isinstance(settings, type(self).settings_model):
+        expected = type(self).settings_model
+        if not isinstance(settings, expected):
             raise TypeError(
                 f"{type(self).__name__} expected settings of type "
-                f"{type(self).settings_model.__name__}, got {type(settings).__name__}"
+                f"{expected.__name__}, got {type(settings).__name__}"
             )
 
-        for name in type(settings).model_fields:
-            field_value = getattr(settings, name)
+        for name, field_info in type(settings).model_fields.items():
+            ann = field_info.annotation
+            value = getattr(settings, name)
 
-            # skip any fields that are None
-            if field_value is not None:
-                setattr(self, name, field_value)
+            if value is None:
+                continue
 
+            if self._is_nested_settings_type(ann):
+                # Nested: value must be a DeviceSettings, and self.<name> must be a child Device
+                child = getattr(self, name, None)
+                if not isinstance(child, Device):
+                    raise DeviceSettingError(
+                        f"{type(self).__name__}: cannot apply nested settings '{name}': expected child Device, "
+                        f"got {type(child).__name__ if child is not None else 'None'}"
+                    )
+                if not isinstance(value, DeviceSettings):
+                    raise DeviceSettingError(
+                        f"{type(self).__name__}: cannot apply nested settings '{name}': expected DeviceSettings value, "
+                        f"got {type(value).__name__}"
+                    )
+                child.apply_settings(value)
+                continue
+
+            # Leaf: set attribute (must be settable property)
+            # Prefer a clearer error than raw AttributeError.
+            prop = getattr(type(self), name, None)
+            if isinstance(prop, property) and prop.fset is None:
+                raise SettingNotSettableError(
+                    f"{type(self).__name__}: setting '{name}' is not settable (read-only property)"
+                )
+
+            try:
+                setattr(self, name, value)
+            except AttributeError as e:
+                # e.g. no such attribute, or read-only descriptor
+                raise SettingNotSettableError(
+                    f"{type(self).__name__}: failed to set '{name}' (is it a read-only property?)"
+                ) from e
+            except Exception as e:
+                # underlying hardware call threw
+                raise DeviceSettingError(
+                    f"{type(self).__name__}: error while applying setting '{name}': {e}"
+                ) from e

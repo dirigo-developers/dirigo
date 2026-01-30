@@ -426,7 +426,7 @@ class Acceleration(UnitQuantity):
 
 class AngularAcceleration(UnitQuantity):
     """
-    Represents an angular velocity value with units (e.g. rad/s, deg/s)
+    Represents an angular acceleration value with units (e.g. rad/s^2, deg/s^2)
     """
     DIMENSIONAL_QUANTITY = ('Θ', 'TT')
     ALLOWED_UNITS_AND_MULTIPLIERS = {
@@ -620,6 +620,34 @@ class PositionRange(RangeWithUnits[Position]):
     Represents a position range with units (e.g. m, mm, μm, nm, km)
     """
     UNIT_QUANTITY_CLASS = Position
+
+
+class VelocityRange(RangeWithUnits[Velocity]):
+    """
+    Represents a velocity range with units (e.g. m/s, cm/s, mm/s, μm/s)
+    """
+    UNIT_QUANTITY_CLASS = Velocity
+
+
+class AngularVelocityRange(RangeWithUnits[AngularVelocity]):
+    """
+    Represents an angular velocity range with units (e.g. rad/s, deg/s)
+    """
+    UNIT_QUANTITY_CLASS = AngularVelocity
+
+
+class AccelerationRange(RangeWithUnits[Acceleration]):
+    """
+    Represents an acceleration range with units (e.g. m/s^2, mm/s^2, μm/s^2)
+    """
+    UNIT_QUANTITY_CLASS = Acceleration
+
+
+class AngularAccelerationRange(RangeWithUnits[AngularAcceleration]):
+    """
+    Represents an angular acceleration range with units (e.g. rad/s^2, deg/s^2)
+    """
+    UNIT_QUANTITY_CLASS = AngularAcceleration
 
 
 class TimeRange(RangeWithUnits[Time]):

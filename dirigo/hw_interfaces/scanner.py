@@ -5,7 +5,7 @@ from enum import StrEnum
 from pydantic import BaseModel, Field
 
 from dirigo.components import units
-from dirigo.hw_interfaces.stage import LinearStage # for z-scanner
+from dirigo.hw_interfaces.stage import LinearStageAxis # for z-scanner
 from dirigo.hw_interfaces.hw_interface import Device
 
 """
@@ -478,7 +478,7 @@ class GalvoScanner(RasterScanner):
         self._ramp_time_fraction = new_ramp_time_fraction
 
 
-class ObjectiveZScanner(LinearStage):
+class ObjectiveZScanner(LinearStageAxis):
     """Abstraction for a objective lens motorized Z-axis stage.
     
     Despite inheriting functionality from LinearStage, the function of an 
