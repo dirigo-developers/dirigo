@@ -322,8 +322,11 @@ class RasterFrameProcessor(Processor[Acquisition]):
             s = np.linspace(ff, -ff, self._spec.pixels_per_line + 1) 
 
             # account for distortion
-            c0, c1, c2 = self._distortion_polynomial.coef
-            s_corrected = s/c0 - (c2/c0**4)*s**3 # Approximate inverse
+            if self._distortion_polynomial.coef == Polynomial([1]):
+                s_corrected = s
+            else:
+                c0, c1, c2 = self._distortion_polynomial.coef
+                s_corrected = s/c0 - (c2/c0**4)*s**3 # Approximate inverse
 
             # arccos inverts the cosinusoidal path, normalize scan period to 0.0 to 1.0
             temporal_edges = np.arccos(s_corrected) / TWO_PI
