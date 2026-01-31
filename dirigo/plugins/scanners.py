@@ -200,15 +200,24 @@ class ResonantScannerViaNI(ResonantScanner, FastRasterScanner):
                 f"Range: {self.analog_control_range.min} to {self.analog_control_range.max} V"
             )
         
+        # Store the validated amplitude
+        self._amplitude = new_ampl
+
+        # Apply now if running
+        if self.running:
+            self._apply_amplitude(new_ampl)
+    
+    def _apply_amplitude(self, new_ampl: units.Angle):
+        ampl_fraction = new_ampl / self.angle_limits.range
+        analog_value =  ampl_fraction * self.analog_control_range.max
+
         # Set the analog value using nidaqmx
         try:
             with nidaqmx.Task() as task: 
                 task.ao_channels.add_ao_voltage_chan(self._amplitude_control_channel)
                 task.write(analog_value)
         except nidaqmx.DaqError as e:
-            raise RuntimeError(f"Failed to set analog output: {e}") from e
-
-        self._amplitude = new_ampl
+            raise RuntimeError(f"Failed to set analog output: {e}") from e  
 
     @property
     def analog_control_range(self) -> units.VoltageRange:
@@ -216,11 +225,13 @@ class ResonantScannerViaNI(ResonantScanner, FastRasterScanner):
         return self._analog_control_range
     
     def start(self):
-        pass # TODO, add some sort of enable/disbale channel
-
+        super().start()
+        self._apply_amplitude(self._amplitude)
+             
     def stop(self):
-        pass # TODO, add some sort of enable/disbale channel
-
+        self._apply_amplitude(units.Angle("0 deg"))
+        super().stop()
+        
 
 class PolygonScannerViaNI(PolygonScanner, FastRasterScanner):
     pass # TODO, write this
