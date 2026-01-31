@@ -46,6 +46,8 @@ class RasterScanner(HardwareInterface):
             raise ValueError(f"axis must be one of {', '.join(self.VALID_AXES)}.")
         self._axis = axis
 
+        self._running: bool = False
+
         # validate angle limits and store in private attr
         if not isinstance(angle_limits, dict):
             raise ValueError("`angle_limits` must be a dictionary.")
@@ -65,6 +67,11 @@ class RasterScanner(HardwareInterface):
     def angle_limits(self) -> units.AngleRange:
         """Returns an object describing the scan angle limits (optical)."""
         return self._angle_limits
+    
+    @property
+    def running(self) -> bool:
+        """True if the scanner has been started and not yet stopped."""
+        return self._running
 
     @property
     @abstractmethod
@@ -136,11 +143,15 @@ class RasterScanner(HardwareInterface):
 
     @abstractmethod
     def start(self, **kw: Any):
-        pass
+        if self._running:
+            raise RuntimeError("Scanner already running")
+        self._running = True
 
     @abstractmethod
     def stop(self):
-        pass
+        if not self._running:
+            return
+        self._running = False
 
 
 class FastRasterScanner(RasterScanner):
