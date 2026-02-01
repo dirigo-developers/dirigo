@@ -190,23 +190,13 @@ class ResonantScannerViaNI(ResonantScanner, FastRasterScanner):
                 f"Got: {new_ampl}"
             )
         
-        # Calculate the required analog voltage value, validate within range
-        ampl_fraction = new_ampl / self.angle_limits.range
-        analog_value =  ampl_fraction * self.analog_control_range.max
-        if not self.analog_control_range.within_range(units.Voltage(analog_value)):
-            raise ValueError(
-                f"Voltage to achieve amplitude={new_ampl} is outside range. "
-                f"Attempted to set {analog_value} V. "
-                f"Range: {self.analog_control_range.min} to {self.analog_control_range.max} V"
-            )
-        
         # Store the validated amplitude
         self._amplitude = new_ampl
 
         # Apply now if running
         if self.running:
             self._apply_amplitude(new_ampl)
-    
+  
     def _apply_amplitude(self, new_ampl: units.Angle):
         ampl_fraction = new_ampl / self.angle_limits.range
         analog_value =  ampl_fraction * self.analog_control_range.max
