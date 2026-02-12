@@ -322,7 +322,7 @@ class RasterFrameProcessor(Processor[Acquisition]):
             s = np.linspace(ff, -ff, self._spec.pixels_per_line + 1) 
 
             # account for distortion
-            if self._distortion_polynomial.coef == Polynomial([1]):
+            if self._distortion_polynomial == Polynomial([1]):
                 s_corrected = s
             else:
                 c0, c1, c2 = self._distortion_polynomial.coef
