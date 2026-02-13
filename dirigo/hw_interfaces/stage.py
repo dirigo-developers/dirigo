@@ -51,7 +51,7 @@ class RotationStageAxisConfig(_StageAxisConfig):
 
 # ---- Settings models ----
 
-class _StageAxisSettings(DeviceSettings):
+class _StageAxisSettings(DeviceSettings): # TODO, not sure this 'base' setting is really useful
     """
     Persistable adjustable state for a generic stage axis.
 
@@ -59,19 +59,20 @@ class _StageAxisSettings(DeviceSettings):
       StageAxisSettings.max_velocity <-> StageAxis.max_velocity property
       etc.
     """
-    model_config = ConfigDict(extra="forbid")
-
     # Keep these Optional so they can be partially applied.
+    position: units.UnitQuantity | None = None
     max_velocity: units.UnitQuantity | None = None
     acceleration: units.UnitQuantity | None = None
 
 
 class LinearStageAxisSettings(_StageAxisSettings):
+    position: units.Position | None = None
     max_velocity: units.Velocity | None = None
     acceleration: units.Acceleration | None = None
 
 
 class RotationStageAxisSettings(_StageAxisSettings):
+    position: units.Angle | None = None
     max_velocity: units.AngularVelocity | None = None
     acceleration: units.AngularAcceleration | None = None
 
@@ -109,9 +110,9 @@ class _StageAxis(Device):
         """
         if self.cfg.limits is not None:
             return self.cfg.limits
-        return self._introspect_limits()
+        return self._introspect_position_limits()
     
-    def _introspect_limits(self) -> units.PositionRange | units.AngleRange | None:
+    def _introspect_position_limits(self) -> units.PositionRange | units.AngleRange | None:
         """Override if hardware can report limits."""
         return None
     
@@ -201,6 +202,7 @@ class LinearStageAxis(_StageAxis):
     def position(self) -> units.Position:
         ...
 
+    # Should this be in _StageAxis?
     @abstractmethod
     def move_to(self, position: units.Position, blocking: bool = False) -> None:
         ...
@@ -292,70 +294,94 @@ class RotationStageAxis(_StageAxis):
 
 
 # ---- Multi-axis composition ----
-# (currently limited to linear axes composition)
 
-class MultiAxisStageConfig(DeviceConfig):
-    x: LinearStageAxisConfig | None = None
-    y: LinearStageAxisConfig | None = None
-    z: LinearStageAxisConfig | None = None
+class XYStageConfig(DeviceConfig):
+    x: LinearStageAxisConfig
+    y: LinearStageAxisConfig
 
 
-class MultiAxisStageSettings(DeviceSettings):
-    x: LinearStageAxisSettings | None = None
-    y: LinearStageAxisSettings | None = None
-    z: LinearStageAxisSettings | None = None
+class XYZStageConfig(XYStageConfig):
+    z: LinearStageAxisConfig
 
 
-class MultiAxisStage(Device):
-    config_model: ClassVar[type[DeviceConfig]] = MultiAxisStageConfig
-    settings_model: ClassVar[type[DeviceSettings]] = MultiAxisStageSettings
+class XYStageSettings(DeviceSettings):
+    x: LinearStageAxisSettings
+    y: LinearStageAxisSettings
+
+
+class XYZStageSettings(XYStageSettings):
+    z: LinearStageAxisSettings
+
+
+class XYStage(Device):
+    """
+    An XY stage composed of LinearStageAxis objects.
+    """
+    config_model: ClassVar[type[DeviceConfig]] = XYStageConfig
+    settings_model: ClassVar[type[DeviceSettings]] = XYStageSettings
 
     def __init__(self, cfg: DeviceConfig, **kwargs):
         super().__init__(cfg, **kwargs)
 
-        self.x: LinearStageAxis | None = None
-        self.y: LinearStageAxis | None = None
-        self.z: LinearStageAxis | None = None
+        self._x: LinearStageAxis
+        self._y: LinearStageAxis
 
-        # Concrete subclasses should instantiate the axes x, y, and/or z
-
-    # --- Vector helpers ---
+    # --- Axes getters ---
     @property
-    def position(self) -> tuple[units.Position | None, ...]:
-        """
-        Return a vector of current positions (x,y,z).
+    def x(self) -> LinearStageAxis:
+        return self._x
+    
+    @property
+    def y(self) -> LinearStageAxis:
+        return self._y
 
-        If an axis does not exist, the corresponding element will be None. For
-        instance, an XY-stage would return (<X>, <Y>, None)
+    # --- Vector convenience helpers ---
+    @property
+    def position(self) -> tuple[units.Position, units.Position]:
         """
-        p_x, p_y, p_z = None, None, None
-        if self.x:
-            p_x = self.x.position
-        if self.y:
-            p_y = self.y.position
-        if self.z:
-            p_z = self.z.position
-        return (p_x, p_y, p_z)
+        Return a vector of current positions (x,y).
+        """
+        return (self._x.position, self._y.position)
 
-    def move_to(self, vect_pos: tuple[units.Position, ...]) -> None:
+    def move_to(self, vect_pos: tuple[units.Position, units.Position]) -> None:
         """
-        Move to vector position (x,y,z)
-        
-        If an axis does not exist, the corresponding element should be None. For
-        instance, an XY-stage would take (<X>, <Y>, None).
+        Move to vector position (x,y).
         """
-        if vect_pos[0]:
-            if self.x:
-                self.x.move_to(vect_pos[0])
-            else:
-                raise ValueError("Tried to move 'x' stage axis, but axis does not exist.")
-        if vect_pos[1]:
-            if self.y:
-                self.y.move_to(vect_pos[1])
-            else:
-                raise ValueError("Tried to move 'y' stage axis, but axis does not exist.")
-        if vect_pos[2]:
-            if self.z:
-                self.z.move_to(vect_pos[2])
-            else:
-                raise ValueError("Tried to move 'z' stage axis, but axis does not exist.")
+        self._x.move_to(vect_pos[0])
+        self._y.move_to(vect_pos[1])
+
+
+class XYZStage(XYStage):
+    """
+    An XYZ stage composed of LinearStageAxis objects.
+    """
+    config_model: ClassVar[type[DeviceConfig]] = XYZStageConfig
+    settings_model: ClassVar[type[DeviceSettings]] = XYZStageSettings
+
+    def __init__(self, cfg: DeviceConfig, **kwargs):
+        super().__init__(cfg, **kwargs)
+
+        self._z: LinearStageAxis
+
+    # --- Axes getters ---
+    # (add to the existing XY getters)
+    @property
+    def z(self) -> LinearStageAxis:
+        return self._z
+
+    # --- Vector convenience helpers ---
+    # (override existing XY helpers)
+    @property
+    def position(self) -> tuple[units.Position, units.Position, units.Position]:
+        """
+        Return a vector of current positions (x,y).
+        """
+        return (self._x.position, self._y.position, self._z.position)
+
+    def move_to(self, vect_pos: tuple[units.Position, units.Position, units.Position]) -> None:
+        """
+        Move to vector position (x,y).
+        """
+        self._x.move_to(vect_pos[0])
+        self._y.move_to(vect_pos[1])
+        self._z.move_to(vect_pos[2])

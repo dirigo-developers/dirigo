@@ -8,7 +8,7 @@ from dirigo.hw_interfaces.detector import DetectorSet, Detector
 if TYPE_CHECKING:
     from dirigo.components.io import SystemConfig
     from dirigo.hw_interfaces.digitizer import Digitizer
-    from dirigo.hw_interfaces.stage import MultiAxisStage
+    from dirigo.hw_interfaces.stage import XYStage
     from dirigo.hw_interfaces.encoder import MultiAxisLinearEncoder
     from dirigo.hw_interfaces.scanner import FastRasterScanner, SlowRasterScanner, ObjectiveZScanner
     from dirigo.hw_interfaces.camera import FrameGrabber, LineCamera
@@ -97,7 +97,7 @@ class Hardware:
         return self._load("dirigo_scanners", cfg["type"], **cfg)
 
     @cached_property
-    def stages(self) -> "MultiAxisStage":
+    def stages(self) -> "XYStage":
         cfg = self._cfg.stages
         if cfg is None:
             raise NotConfiguredError("stages")
