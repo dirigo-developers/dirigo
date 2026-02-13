@@ -1,10 +1,26 @@
+from enum import StrEnum
 from abc import abstractmethod
 from typing import ClassVar, Protocol
 from typing import Protocol, runtime_checkable
 
-from dirigo.hw_interfaces.hw_interface import DeviceConfig, Device
+from pydantic import ConfigDict, Field
+
+from dirigo import units
+from dirigo.hw_interfaces.hw_interface import Device, DeviceConfig, DeviceSettings
 from dirigo.sw_interfaces.acquisition import AcquisitionProduct
 
+
+
+class DropPolicy(StrEnum):
+    BLOCK       = "block"          # backpressure
+    DROP_OLDEST = "drop_oldest"
+    DROP_NEWEST = "drop_newest"
+    ERROR       = "error"
+
+
+class DeliveryMode(StrEnum):
+    COPY      = "copy"
+    ZERO_COPY = "zero_copy"  # attach/view into transport-owned buffer when possible
 
 
 class ImageTransportConfig(DeviceConfig):
@@ -15,6 +31,36 @@ class ImageTransportConfig(DeviceConfig):
     (e.g. NI-IMAQ device name, network interface/IP for GigE, USB serial, etc.).
     """
     pass
+
+
+class ImageTransportSettings(DeviceSettings):
+    nbuffers: int = Field(
+        default     = 8,
+        ge          = 1,
+        description = "Number of host-side buffers in the streaming pool/ring."
+    )
+
+    frames_per_buffer: int = Field(
+        default     = 1,
+        ge          = 1,
+        description = "How many frames constitute one Dirigo AcquisitionProduct."
+    )
+
+    get_timeout: units.Time = Field(
+        default     = units.Time("2 s"),
+        description = "Timeout for waiting on the next completed Dirigo buffer."
+    )
+
+    drop_policy: DropPolicy = Field(
+        default     = DropPolicy.BLOCK,
+        description = "Behavior when acquisition outpaces consumption."
+    )
+
+    delivery_mode: DeliveryMode = Field(
+        default     = DeliveryMode.COPY,
+        description = "Whether to copy into product or attach/view transport memory when supported."
+    )
+
 
 
 class ImageTransport(Device):
@@ -35,50 +81,70 @@ class ImageTransport(Device):
     """
 
     config_model: ClassVar[type[DeviceConfig]] = ImageTransportConfig
+    settings_model: ClassVar[type[DeviceSettings]] = ImageTransportSettings
 
-    # ---- Transport properties ----
+    # --- Transport settings ---
 
+    @property
+    @abstractmethod
+    def nbuffers(self):
+        ...
+
+    @nbuffers.setter
+    @abstractmethod
+    def nbuffers(self, n: int):
+        ...
+
+    # --- Read-only transport properties ---
+    
     @property
     @abstractmethod
     def bytes_per_pixel(self) -> int:
-        """Number of bytes per pixel delivered in the stream (e.g. 1, 2, 3, 4)."""
+        """
+        Bytes per pixel delivered by the transport.
+
+        Derived from upstream pixel format / packing.
+        """
         ...
 
     @property
     @abstractmethod
-    def acq_width(self) -> int:
-        """Width of the acquisition window (upstream stream entering the transport)."""
+    def input_width(self) -> int:
+        """Width (px) of the incoming image stream."""
         ...
 
     @property
     @abstractmethod
-    def acq_height(self) -> int:
-        """Height of the acquisition window (upstream stream entering the transport)."""
+    def input_height(self) -> int:
+        """Height (px) of the incoming image stream."""
         ...
-    
-    @property
-    def frame_width(self) -> int:
-        """Width (px) of frames delivered into host buffers."""
-        return self.acq_width
 
     @property
-    def frame_height(self) -> int:
-        """Height (px) of frames delivered into host buffers."""
-        return self.acq_height
+    def output_width(self) -> int:
+        """Width (px) of frames delivered into Dirigo buffers."""
+        return self.input_width
+
+    @property
+    def output_height(self) -> int:
+        """Height (px) of frames delivered into Dirigo buffers."""
+        return self.input_height
     
+    # --- Convenience ---
     @property
     def bytes_per_frame(self) -> int:
-        return self.frame_width * self.frame_height * self.bytes_per_pixel
+        """Total bytes in the delivered frame."""
+        return self.output_width * self.output_height * self.bytes_per_pixel
 
     # ---- Buffer lifecycle ----
 
     @abstractmethod
-    def prepare_buffers(self, nbuffers: int) -> None:
+    def prepare_buffers(self) -> None:
         """
         Allocate/register host-side buffers for acquisition.
 
         Must be called after connect() and before start_stream().
         """
+        # use self.nbuffers (from settings)
         ...
 
     @abstractmethod
@@ -104,7 +170,7 @@ class ImageTransport(Device):
     @property
     @abstractmethod
     def buffers_acquired(self) -> int:
-        """Number of *Dirigo buffers* acquired so far (not necessarily raw frames)."""
+        """Number of Dirigo buffers acquired so far (not necessarily raw frames)."""
         ...
 
 
