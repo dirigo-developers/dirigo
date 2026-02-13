@@ -189,9 +189,9 @@ class StageTranslationCalibration(Acquisition):
         assert self.system_config.fast_raster_scanner is not None
         fast_axis = self.system_config.fast_raster_scanner['axis']
         if fast_axis == "x":
-            self._fast_stage = self.hw.stages.x
+            self._fast_stage = self.hw.stages._x
         else:
-            self._fast_stage = self.hw.stages.y
+            self._fast_stage = self.hw.stages._y
         self._original_position = self._fast_stage.position
 
     def _work(self):

@@ -24,7 +24,7 @@ from dirigo.hw_interfaces.scanner import (Waveforms,
 from dirigo.hw_interfaces.camera import LineCamera, TriggerModes
 from dirigo.hw_interfaces.illuminator import Illuminator
 from dirigo.hw_interfaces.encoder import MultiAxisLinearEncoder
-from dirigo.hw_interfaces.stage import MultiAxisStage
+from dirigo.hw_interfaces.stage import XYStage
 
 
 TWO_PI = 2 * math.pi 
@@ -416,7 +416,7 @@ class LineAcquisitionSpec(SampleAcquisitionSpec):
 
 class LineAcquisition(SampleAcquisition):
     required_resources = [Digitizer, DetectorSet, FastRasterScanner]
-    optional_resources = [MultiAxisStage, ObjectiveZScanner]
+    optional_resources = [XYStage, ObjectiveZScanner]
     spec_location = Path(user_config_dir("Dirigo")) / "acquisition/line"
     Spec: Type[LineAcquisitionSpec] = LineAcquisitionSpec
     
@@ -577,8 +577,8 @@ class LineAcquisition(SampleAcquisition):
         stages or linear position encoders."""
         positions = []
         try:
-            positions.append(self.hw.stages.x.position)
-            positions.append(self.hw.stages.y.position)
+            positions.append(self.hw.stages._x.position)
+            positions.append(self.hw.stages._y.position)
         except (KeyError, AttributeError): pass
 
         try:
@@ -731,8 +731,8 @@ class LineCameraLineAcquisition(LineCameraAcquisition):
         """ Read positions, if stage/z scanner available. """
         positions = []
         try:
-            positions.append(self.hw.stages.x.position)
-            positions.append(self.hw.stages.y.position)
+            positions.append(self.hw.stages._x.position)
+            positions.append(self.hw.stages._y.position)
         except (KeyError, AttributeError): pass
 
         try:
@@ -798,7 +798,7 @@ class FrameAcquisitionSpec(LineAcquisitionSpec):
 
 class FrameAcquisition(LineAcquisition):
     required_resources = [Digitizer, DetectorSet, FastRasterScanner, SlowRasterScanner]
-    optional_resources = [MultiAxisStage, ObjectiveZScanner]
+    optional_resources = [XYStage, ObjectiveZScanner]
     spec_location = Path(user_config_dir("Dirigo")) / "acquisition/frame"
     Spec: Type[FrameAcquisitionSpec] = FrameAcquisitionSpec
 
@@ -908,7 +908,7 @@ class StackAcquisitionSpec(FrameAcquisitionSpec):
 
 class StackAcquisition(Acquisition):
     required_resources = [Digitizer, FastRasterScanner, SlowRasterScanner, ObjectiveZScanner]
-    optional_resources = [MultiAxisStage,]
+    optional_resources = [XYStage,]
     spec_location = Path(user_config_dir("Dirigo")) / "acquisition/stack"
     Spec: Type[StackAcquisitionSpec] = StackAcquisitionSpec
 
