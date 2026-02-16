@@ -466,7 +466,7 @@ class LineAcquisition(SampleAcquisition):
         elif isinstance(fast_scanner, ResonantScanner):
             # for res scanner most parameters are fixed: frequency, waveform, duty cycle 
             # adjustable: amplitude
-            spatial_fill_fraction = 2 * np.sin(self.spec.line_duty_cycle / 2)
+            spatial_fill_fraction = np.sin(self.spec.line_duty_cycle * np.pi/2)
             extended_scan_width = units.Position(
                 self.spec.line_width / spatial_fill_fraction)
             fast_scanner.amplitude = optics.object_position_to_scan_angle(
