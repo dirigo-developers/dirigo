@@ -3,24 +3,12 @@ from abc import abstractmethod
 from typing import ClassVar, Protocol
 from typing import Protocol, runtime_checkable
 
-from pydantic import ConfigDict, Field
+from pydantic import Field
 
 from dirigo import units
 from dirigo.hw_interfaces.hw_interface import Device, DeviceConfig, DeviceSettings
 from dirigo.sw_interfaces.acquisition import AcquisitionProduct
 
-
-
-class DropPolicy(StrEnum):
-    BLOCK       = "block"          # backpressure
-    DROP_OLDEST = "drop_oldest"
-    DROP_NEWEST = "drop_newest"
-    ERROR       = "error"
-
-
-class DeliveryMode(StrEnum):
-    COPY      = "copy"
-    ZERO_COPY = "zero_copy"  # attach/view into transport-owned buffer when possible
 
 
 class ImageTransportConfig(DeviceConfig):
@@ -50,17 +38,6 @@ class ImageTransportSettings(DeviceSettings):
         default     = units.Time("2 s"),
         description = "Timeout for waiting on the next completed Dirigo buffer."
     )
-
-    drop_policy: DropPolicy = Field(
-        default     = DropPolicy.BLOCK,
-        description = "Behavior when acquisition outpaces consumption."
-    )
-
-    delivery_mode: DeliveryMode = Field(
-        default     = DeliveryMode.COPY,
-        description = "Whether to copy into product or attach/view transport memory when supported."
-    )
-
 
 
 class ImageTransport(Device):
@@ -254,102 +231,3 @@ class FrameGrabber(ImageTransport):
         ...
 
 
-
-# class CameraConnectionType(Enum):
-#     CAMERA_LINK = 0
-#     GIGE        = 1
-#     USB         = 2
-
-# class FrameGrabber(Device):
-#     attr_name = "frame_grabber"
-
-#     def __init__(self):
-#         self._buffers: List[Any] # TODO refine the buffer object typehint
-#         self._camera: Optional['Camera'] = None
-
-#     @abstractmethod
-#     def serial_write(self, message):
-#         pass
-
-#     @abstractmethod
-#     def serial_read(self, nbytes: Optional[int] = None) -> str:
-#         pass
-
-#     @property
-#     @abstractmethod
-#     def pixels_width(self) -> int:
-#         """Total number of sensor pixels wide."""
-#         pass
-
-#     @property
-#     @abstractmethod
-#     def roi_height(self) -> int:
-#         pass
-
-#     @property
-#     @abstractmethod
-#     def roi_width(self) -> int:
-#         pass
-
-#     @roi_width.setter
-#     @abstractmethod
-#     def roi_width(self, width: int):
-#         pass
-
-#     @property
-#     @abstractmethod
-#     def roi_left(self) -> int:
-#         pass
-
-#     @roi_left.setter
-#     @abstractmethod
-#     def roi_left(self, left: int):
-#         pass
-    
-#     @property
-#     @abstractmethod
-#     def lines_per_buffer(self) -> int:
-#         pass
-
-#     @lines_per_buffer.setter
-#     @abstractmethod
-#     def lines_per_buffer(self, lines: int):
-#         pass
-
-#     @property
-#     @abstractmethod
-#     def bytes_per_pixel(self) -> int:
-#         pass
-
-#     @property
-#     def bytes_per_buffer(self):
-#         if self.lines_per_buffer is None or self.roi_width is None:
-#             raise RuntimeError("Lines per buffer or ROI width not initialized")
-#         return self.lines_per_buffer * self.roi_width * self.bytes_per_pixel
-
-#     @abstractmethod
-#     def prepare_buffers(self, nbuffers: int):
-#         pass
-
-#     @abstractmethod
-#     def start(self):
-#         pass
-
-#     @abstractmethod
-#     def stop(self):
-#         pass
-
-#     @abstractmethod
-#     def get_next_completed_buffer(self, product: AcquisitionProduct) -> None:
-#         pass
-
-#     @property
-#     @abstractmethod
-#     def buffers_acquired(self) -> int:
-#         pass
-
-#     @property
-#     @abstractmethod
-#     def data_range(self) -> units.IntRange:
-#         """ Returns the range of values returned by the frame grabber. """
-#         pass
