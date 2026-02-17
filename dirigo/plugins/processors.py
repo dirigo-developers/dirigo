@@ -317,7 +317,7 @@ class RasterFrameProcessor(Processor[Acquisition]):
 
         # Create a resampling function based on fast axis waveform type
         if 'resonant' in self._acquisition.system_config.fast_raster_scanner['type'].lower():
-            ff = 2 * np.sin(ldc / 2)
+            ff = np.sin(np.pi/2 * ldc)
             # image line should be taken from center of sinusoid sweep
             s = np.linspace(ff, -ff, self._spec.pixels_per_line + 1) 
 
