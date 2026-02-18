@@ -147,7 +147,10 @@ class ResonantScannerViaNI(ResonantScanner, FastRasterScanner):
     """
     Resonant scanner operated via an NIDAQ MFIO card.
     """
-    def __init__(self, amplitude_control_channel: str, analog_control_range: dict, **kwargs):
+    def __init__(self, 
+                 amplitude_control_channel: str, 
+                 analog_control_range: dict, 
+                 **kwargs):
         super().__init__(**kwargs)
 
         # Validated and set ampltidue control analog channel
@@ -166,8 +169,10 @@ class ResonantScannerViaNI(ResonantScanner, FastRasterScanner):
             )
         self._analog_control_range = units.VoltageRange(**analog_control_range)
 
-        # Default: set amplitude to 0 upon startup
-        self.amplitude = units.Angle(0.0)
+        # Default: cycle start/stop to idle at 'off' amplitude
+        self._amplitude = units.Angle("0 deg")
+        self.start()
+        self.stop()
 
     @property
     def amplitude(self) -> units.Angle:
@@ -215,13 +220,13 @@ class ResonantScannerViaNI(ResonantScanner, FastRasterScanner):
         return self._analog_control_range
     
     def start(self):
-        super().start()
+        super().start() # checks whether already running, flip running flag
         self._apply_amplitude(self._amplitude)
-             
-    def stop(self):
-        self._apply_amplitude(units.Angle("0 deg"))
-        super().stop()
         
+    def stop(self):
+        self._apply_amplitude(self.off_amplitude)
+        super().stop()
+
 
 class PolygonScannerViaNI(PolygonScanner, FastRasterScanner):
     pass # TODO, write this

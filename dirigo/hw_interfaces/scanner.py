@@ -18,6 +18,7 @@ class Waveforms(StrEnum):
     LINEAR_BIDIRECTIONAL    = "linear bidirectional"    # like a triangle wave
     STEP_UNIDIRECTIONAL     = "step unidirectional"     # To be implemented...
 
+
 class Axes(StrEnum):
     X   = "x"
     Y   = "y"
@@ -212,6 +213,9 @@ class ResonantScanner(RasterScanner):
                 "Response time outside of valid range 0-1 seconds, got {r_time}."
             )
         self.response_time = r_time
+
+        # Allow a special 'off' amplitude used to idle the scanner amplitude (for stabilization)
+        self.off_amplitude = units.Angle(units.Angle("0 deg")) # TODO make this a property
     
     @property
     def frequency(self) -> units.Frequency:
