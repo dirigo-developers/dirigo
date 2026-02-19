@@ -169,7 +169,7 @@ class ResonantScannerViaNI(ResonantScanner, FastRasterScanner):
             )
         self._analog_control_range = units.VoltageRange(**analog_control_range)
 
-        # Default: cycle start/stop to idle at 'off' amplitude
+        # Default: cycle start/stop to idle at idle amplitude
         self._amplitude = units.Angle("0 deg")
         self.start()
         self.stop()
@@ -224,7 +224,7 @@ class ResonantScannerViaNI(ResonantScanner, FastRasterScanner):
         self._apply_amplitude(self._amplitude)
         
     def stop(self):
-        self._apply_amplitude(self.off_amplitude)
+        self._apply_amplitude(self.idle_amplitude)
         super().stop()
 
 

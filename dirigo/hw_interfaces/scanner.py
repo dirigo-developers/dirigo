@@ -215,7 +215,7 @@ class ResonantScanner(RasterScanner):
         self.response_time = r_time
 
         # Allow a special 'off' amplitude used to idle the scanner amplitude (for stabilization)
-        self.off_amplitude = units.Angle(units.Angle("0 deg")) # TODO make this a property
+        self.idle_amplitude = units.Angle(units.Angle("0 deg")) # TODO make this a property
     
     @property
     def frequency(self) -> units.Frequency:
