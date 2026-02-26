@@ -113,10 +113,10 @@ class Hardware:
 
         try:
             return self.stages.z
-        except NotConfiguredError:
+        except (NotConfiguredError, NotImplementedError):
             pass
 
-        raise NotConfiguredError("Z motor")
+        raise NotConfiguredError("No Z motor")
     
     @cached_property
     def encoders(self) -> "MultiAxisLinearEncoder":
