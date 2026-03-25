@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "dirigo"
-version = "0.3.7"
+version = "0.3.8"
 description = "Dirigo is an extensible backend for scientific image acquisition"
 authors = [
     {name = "T. D. Weber", email = "tweber@mit.edu"}
