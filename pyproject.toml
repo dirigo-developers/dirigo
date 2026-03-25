@@ -4,12 +4,23 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "dirigo"
-version = "0.3.6"
-description = "Dirigo is a collection of interfaces for customizable image data acquisition"
+version = "0.3.7"
+description = "Dirigo is an extensible backend for scientific image acquisition"
 authors = [
     {name = "T. D. Weber", email = "tweber@mit.edu"}
 ]
 license = {text = "MIT"}
+readme = "README.md"
+requires-python = ">=3.11"
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: Microsoft :: Windows",
+  "Topic :: System :: Hardware"
+]
 dependencies = [
     "numba",
     "scipy",
@@ -18,6 +29,7 @@ dependencies = [
     "tifffile",
     "nidaqmx"
 ]
+urls = {"Homepage" = "https://github.com/dirigo-developers/dirigo"}
 
 [project.entry-points."dirigo_acquisitions"]
 raster_line  = "dirigo.plugins.acquisitions:LineAcquisition"
