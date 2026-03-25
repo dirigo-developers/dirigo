@@ -36,3 +36,10 @@ Dirigo is in *very* early development. While the API and architecture are functi
 \* Multichannel acquisition subject to aggregate AI sample rate (e.g 2 channels: 500 kS/s, 4 channels 250 kS/s).  
 † AI sample rate typically insufficient for resonant/polygon rates.  
 § Borderline: Max sample rate may limit pixels per line, dependent on scanner frequency. Not yet validated.  
+
+
+## Funding
+
+Development of Dirigo has been supported in part by the National Cancer Institute of the National Institutes of Health under award number R01CA249151.
+
+The content of this repository is solely the responsibility of the authors and does not necessarily represent the official views of the National Institutes of Health.
