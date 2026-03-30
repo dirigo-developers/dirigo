@@ -173,8 +173,9 @@ def load_line_gradient_calibration(
         
 _CONFIG_KEYS = (
     "laser_scanning_optics", "camera_optics", "digitizer", "detectors",
-    "objective_z_scanner", "stages", "line_camera", "illuminator",
+    "objective_z_scanner", "stages", "line_camera", "illuminator", "rotation_stage",
     "frame_grabber", "encoders", "fast_raster_scanner", "slow_raster_scanner",
+    "beam_attenuator",
 )
 
 class SystemConfig:
