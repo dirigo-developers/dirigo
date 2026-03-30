@@ -192,8 +192,10 @@ class SystemConfig:
     detectors:              dict[str, Any] | None
     objective_z_scanner:    dict[str, Any] | None
     stages:                 dict[str, Any] | None
+    rotation_stage:         dict[str, Any] | None
     line_camera:            dict[str, Any] | None
     illuminator:            dict[str, Any] | None
+    beam_attenuator:        dict[str, Any] | None
     frame_grabber:          dict[str, Any] | None
     encoders:               dict[str, Any] | None
     fast_raster_scanner:    dict[str, Any] | None

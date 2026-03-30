@@ -646,3 +646,6 @@ class FloatRange:
     @property
     def range(self) -> float:
         return self.max - self.min
+    
+    def within_range(self, value: float) -> bool:
+        return self.min <= value <= self.max

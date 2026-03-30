@@ -259,6 +259,11 @@ class RotationStage(Stage):
         # these stages may have no limits, how to handle this?
         return self._limits
     
+    @property
+    @abstractmethod
+    def position(self) -> units.Angle:
+        ...
+    
     @abstractmethod 
     def move_to(self, angle: units.Angle, blocking: bool = False):
         """

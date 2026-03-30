@@ -8,11 +8,12 @@ from dirigo.hw_interfaces.detector import DetectorSet, Detector
 if TYPE_CHECKING:
     from dirigo.components.io import SystemConfig
     from dirigo.hw_interfaces.digitizer import Digitizer
-    from dirigo.hw_interfaces.stage import MultiAxisStage
+    from dirigo.hw_interfaces.stage import MultiAxisStage, RotationStage
     from dirigo.hw_interfaces.encoder import MultiAxisLinearEncoder
     from dirigo.hw_interfaces.scanner import FastRasterScanner, SlowRasterScanner, ObjectiveZScanner
     from dirigo.hw_interfaces.camera import FrameGrabber, LineCamera
     from dirigo.hw_interfaces.illuminator import Illuminator
+    from dirigo.hw_interfaces.beam_attenuator import BeamAttenuator
 
 
 
@@ -104,6 +105,13 @@ class Hardware:
         return self._load("dirigo_stages", cfg["type"], **cfg)
     
     @cached_property
+    def rotation_stage(self) -> "RotationStage":
+        cfg = self._cfg.rotation_stage
+        if cfg is None:
+            raise NotConfiguredError("rotation stage")
+        return self._load("dirigo_stages", cfg["type"], **cfg)
+    
+    @cached_property
     def preferred_z_motor(self):
         """Returns the objective z scanner or multi-axis stage z axis."""
         try:
@@ -160,6 +168,14 @@ class Hardware:
         if cfg is None:
             raise NotConfiguredError("illuminator")
         return self._load("dirigo_illuminators", cfg["type"], **cfg)
+    
+    @cached_property
+    def beam_attenuator(self) -> "BeamAttenuator":
+        cfg = self._cfg.beam_attenuator
+        if cfg is None:
+            raise NotConfiguredError("beam attenuator")
+        return self._load("dirigo_beam_attenuators", cfg["type"], 
+            rotation_stage=self.rotation_stage, **cfg)
 
     @cached_property
     def laser_scanning_optics(self) -> LaserScanningOptics:
