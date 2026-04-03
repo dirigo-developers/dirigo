@@ -1,0 +1,66 @@
+# Example Dirigo system config file. 
+# 
+#
+# Notes
+# - In TOML, you're free to use comments as you would in Python.
+# - When a quantity requires units, use a string with the standard SI unit 
+#     abbreviation, e.g "20 mm".
+# - The device ordering makes no difference.
+# - "built-in" denotes that the device is bundled with the main Dirigo package,
+#     otherwise the package name is listed.
+
+
+[laser_scanning_optics] # (built-in)
+relay_magnification = 5 # e.g. 200 mm tube lens paired with 50 mm scan lens
+objective_focal_length = "10 mm" # a 20X objective, assuming a 200 mm tube lens (Nikon, Thorlabs, etc.)
+
+
+[digitizer] 
+# Digitizers have detailed APIs, so very little info is required from the user.
+type = "Alazar" # (dirigo-alazar)
+
+
+[fast_raster_scanner]
+# Conversely, analog scanners report no information to the computer, some information needs to be provided.
+type = "resonant_scanner_via_ni" # (built-in)
+axis = "x"
+angle_limits = {min = "-13.0 deg", max = "13.0 deg"}
+frequency = "7910 Hz"
+frequency_error = 0.003
+analog_control_range = {min = "0 V", max = "5 V"}
+amplitude_control_channel = "Dev1/ao2"
+response_time = "100 ms"
+
+
+[slow_raster_scanner]
+type = "slow_galvo_scanner_via_ni" # (built-in)
+axis = "y"
+ao_sample_rate = "500 kS/s"
+external_line_clock_channel = "/Dev1/PFI0" # fast axis sync signal (in)
+frame_clock_channel = "/Dev1/PFI1" # generated frame clock (out)
+analog_control_channel = "Dev1/ao3" # axis waveform analog out
+angle_limits = {min = "-13.0 deg", max = "13.0 deg"} # Optical angle
+analog_control_range = {min = "-10 V", max = "10 V"}
+flyback_time = "2 ms"
+
+
+# Sets of devices are organized in a nested fashion
+[detectors]
+
+[detectors.0]
+type = "generic" # (built-in)
+model = "PDA42" # only used to store the name of the detector
+
+[detectors.1]
+type = "generic" # (built-in)
+model = "PDA42"
+
+
+[stages]
+type = "BBD102" # (dirigo-thorlabs-stage)
+
+[stages.x_config]
+axis = "x"
+
+[stages.y_config]
+axis = "y"

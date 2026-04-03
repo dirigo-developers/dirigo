@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "dirigo"
-version = "0.3.9"
+version = "0.3.10"
 description = "Dirigo is an extensible backend for scientific image acquisition"
 authors = [
     {name = "T. D. Weber", email = "tweber@mit.edu"}
@@ -30,6 +30,9 @@ dependencies = [
     "nidaqmx"
 ]
 urls = {"Homepage" = "https://github.com/dirigo-developers/dirigo"}
+
+[project.scripts]
+dirigo-init = "dirigo.init:main"
 
 [project.entry-points."dirigo_acquisitions"]
 raster_line  = "dirigo.plugins.acquisitions:LineAcquisition"

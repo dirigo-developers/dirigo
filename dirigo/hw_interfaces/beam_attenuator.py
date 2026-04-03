@@ -29,7 +29,6 @@ class BeamAttenuator(HardwareInterface, ABC):
                  limits: dict | None = None, 
                  **kwargs
                  ):
-        super().__init__(**kwargs)
 
         if limits is None:
             limits = self.DEFAULT_LIMITS

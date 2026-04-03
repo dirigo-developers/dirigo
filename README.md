@@ -39,6 +39,22 @@ Dirigo is in *very* early development. While the API and architecture are functi
 § Borderline: Max sample rate may limit pixels per line, dependent on scanner frequency. Not yet validated.  
 
 
+## Installation
+Dirigo should be installed in a virtual environment. We recommend [miniconda](https://docs.conda.io/en/latest/). Install Dirigo from PyPI with `pip install dirigo`. To enable additional hardware and acquisition modes, also install Dirigo plugins. A list can be found here: https://github.com/orgs/dirigo-developers/repositories
+ 
+## Initialization
+Verify installations (with miniconda, `conda list`) and run the initialization script by running `dirigo-init`. This script will set up Dirigo settings folders and files. It will not overwrite existing files.
+
+### System configuration
+The `system_config.toml` file contains a list of the available hardware, the associated Python entry point, and information required to configure each device. An example can be found here: [system_config.toml](examples/system_config.toml)
+
+### Frame specification
+Acquisition sequence variables (e.g. frame size) are described with a specification file. The initialization script will generate a `FrameAcquisition` specification file at `Dirigo/acquisitions/frame/default.toml` which should be updated before starting Dirigo.
+
+### Digitizer profile
+Groups of settable parameters for devices are group into profiles. The initialization script will generate a blank digitizer profile at `Dirigo/acquisitions/frame/default.toml` which will need to be updated. An example from the `dirigo-alazar` plugin can be found here: [default_ats9440.toml](https://github.com/dirigo-developers/dirigo-alazar/blob/main/examples/default_ats9440.toml)
+
+
 ## Funding
 
 Development of Dirigo has been supported in part by the National Cancer Institute of the National Institutes of Health under award number R01CA249151.
