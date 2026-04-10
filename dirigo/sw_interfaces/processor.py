@@ -45,9 +45,9 @@ class Processor(Generic[U_co], Worker):
     """
     Product = ProcessorProduct
 
-    def __init__(self, upstream: U_co):
+    def __init__(self, upstream: U_co, name: str = "Processor"):
         """Stores the acquisition and spec in private attributes"""
-        super().__init__(name="Processor")
+        super().__init__(name=name)
         if isinstance(upstream, (Acquisition, Loader)):
             self._acquisition = upstream
             self._spec = upstream.spec
