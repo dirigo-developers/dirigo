@@ -275,7 +275,7 @@ class LineCameraAcquisition(Acquisition):
         self.hw.line_camera.load_profile()
 
         self.runtime_info = CameraAcquisitionRuntimeInfo.from_acquisition(self)
-        self.camera_profile = [] # TODO need to fix this
+        self.camera_profile = [] # TODO need to fix this, is it needed?
 
         self.active = threading.Event()  # to indicate data acquisition occuring
 
@@ -706,9 +706,9 @@ class LineCameraLineAcquisition(LineCameraAcquisition):
         super().__init__(hw, system_config, spec, thread_name) # sets up thread, inbox, stores hw, checks resources
         self.spec: LineCameraLineAcquisitionSpec
 
-    def configure_camera(self, trigger_mode: str = "external trigger"):
+    def configure_camera(self):
         """Configure camera and framegrabber."""
-        super().configure_camera(trigger_mode) # sets integration time, trigger mode, lines per buffer, etc.
+        super().configure_camera() # sets integration time, trigger mode, lines per buffer, etc.
 
         # set ROI size based on line spec, assumed ROI centered in array
         obj_pixel_size = self.hw.line_camera.pixel_size / self.hw.camera_optics.magnification # TODO, switch if object pixel size already set

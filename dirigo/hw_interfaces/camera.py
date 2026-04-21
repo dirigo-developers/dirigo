@@ -1,6 +1,6 @@
 from enum import Enum
 from abc import abstractmethod
-from typing import Optional, Any, List
+from typing import Optional, Any, List, Literal
 
 from dirigo.components import units
 from dirigo.sw_interfaces.acquisition import AcquisitionProduct
@@ -219,3 +219,13 @@ class LineCamera(Camera):
             self._axis = new_axis
         else:
             raise ValueError(f"Error setting encoder axis: Got '{new_axis}'")
+        
+    @property
+    @abstractmethod
+    def scan_direction(self) -> Literal['forward', 'reverse']:
+        pass
+
+    @scan_direction.setter
+    @abstractmethod
+    def scan_direction(self, directions: Literal['forward', 'reverse']):
+        pass
