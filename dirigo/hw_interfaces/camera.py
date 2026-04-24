@@ -132,6 +132,12 @@ class Camera(HardwareInterface):
     @property
     def pixel_size(self) -> units.Position:
         return self._pixel_size
+    
+    @property
+    @abstractmethod
+    def sensor_shape(self) -> tuple[int, int]:
+        """Returns number of pixels in Y, X (slow, fast) sensor dimensions."""
+        pass
 
     @property
     @abstractmethod
