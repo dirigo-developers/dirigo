@@ -461,7 +461,7 @@ class LineCameraLineProcessor(Processor[LineCameraLineAcquisition]):
         self._spec: LineCameraLineAcquisitionSpec
         self._acquisition: LineCameraLineAcquisition
         
-        camera_profile = self._acquisition.camera_profile # TODO, do we need this?
+        #camera_profile = self._acquisition.camera_profile # TODO, do we need this?
         system_config = self._acquisition.system_config
         self._flip_line: bool = system_config.line_camera['flip_line']
         runtime_info = self._acquisition.runtime_info
@@ -542,21 +542,32 @@ class LineCameraLineProcessor(Processor[LineCameraLineAcquisition]):
     @cached_property # these won't change over the course of the acquisition
     def start_indices(self) -> np.ndarray:
         """Returns array of the pixel start indexes for resampling (dewarping)"""
-        N_x = self._spec.pixels_per_line
+        eps = 1e-9
 
+        wobj = self._spec.line_width
+        wsns = self._acquisition.hw.line_camera.sensor_shape[1]
+        psns = units.Position(self._acquisition.system_config.line_camera['pixel_size'])
+        m = float(self._acquisition.system_config.camera_optics['magnification'])
+        
+        edges = np.linspace(-1, 1, self._spec.pixels_per_line + 1) # normalized pixel edges
         if self._flip_line:
-            x_sensor = np.arange(N_x, -1, -1)
+            edges = np.flip(edges)
+
+        # account for distortion
+        c0 = self._distortion_polynomial.coef[0]
+        if len(self._distortion_polynomial.coef) > 1:
+            c2 = self._distortion_polynomial.coef[2]
         else:
-            x_sensor = np.arange(N_x + 1) # sensor's coordinates (distorted relative to true spatial coordinates)
+            c2 = 0.0
+        corrected_edges = edges/c0 - (c2/c0**4)*edges**3
+        
+        obj_pix_edges = corrected_edges * (wobj/2)
+        sns_pix_edges = obj_pix_edges * m
+        sns_indices = sns_pix_edges/psns + wsns/2
 
-        # Use distortion polynomial to correct spatial edges
-        int_p = self._distortion_polynomial.integ()
-        x = np.linspace(0, N_x, 1_000_000)
-        y = int_p(x)
-        x_space = np.interp(x_sensor, y, x)
-        x_space = x_space[np.newaxis, :]
+        sns_indices = sns_indices[np.newaxis, :] # conform to expected shape
 
-        return np.ceil(x_space).astype(np.int32)
+        return np.ceil(sns_indices - eps).astype(np.int32)
     
     @cached_property
     def nsamples_to_sum(self):
