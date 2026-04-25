@@ -30,7 +30,7 @@ def load_toml(file_name: Path | str) -> dict[str, Any]:
 
 
 try: 
-    d = load_toml(config_path() / "logging.toml")           # 1st choice: user-specified path
+    d = load_toml(config_path() / "writing.toml")           # 1st choice: user-specified path
     _data_path = Path(d['data_path'])
 except:
     _data_path = pd.user_documents_path() / "Dirigo"        # Backup path
