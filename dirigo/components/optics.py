@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Optional, Literal
 
 from dirigo.components import units, io
 
@@ -13,12 +13,16 @@ Any corrections are applied at Optics class level.
 class LaserScanningOptics: 
     def __init__(self, 
                  objective_focal_length: str, 
-                 relay_magnification: float) -> None:
+                 relay_magnification: float,
+                 orientation: Literal['upright', 'inverted']) -> None:
         """
         fast_axis_correction (float): extends scan by factor to correct mag error
         """
         self._objective_focal_length = units.Position(objective_focal_length)
         self._relay_magnification = float(relay_magnification)
+        if orientation not in ['upright', 'inverted']:
+            raise ValueError(f"Unsupported optics orientation, {orientation}")
+        self._orientation = orientation
 
         # load line width calibration, TODO
 
@@ -37,6 +41,11 @@ class LaserScanningOptics:
         lateral magnification.
         """
         return self._relay_magnification
+    
+    @property
+    def orientation(self) -> Literal['upright', 'inverted']:
+        """Returns the orientation of the optical path in relation to the stage."""
+        return self._orientation # type: ignore
 
     def scan_angle_to_object_position(self, 
                                       angle: units.Angle, 
@@ -68,15 +77,26 @@ class CameraOptics:
     """
     Optics to use with a parallel array of detectors, usually an image sensor.
     """
-    def __init__(self, magnification: float | int, **kwargs):
+    def __init__(self, 
+                 magnification: float | int, 
+                 orientation: Literal['upright', 'inverted'],
+                 **kwargs):
         if not (isinstance(magnification, float) or isinstance(magnification, int) ):
             raise ValueError("Magnification must be a float or an integer")
         self._magnification = float(magnification)
-
+        if orientation not in ['upright', 'inverted']:
+            raise ValueError(f"Unsupported optics orientation, {orientation}")
+        self._orientation = orientation
+        
         self.stage_camera_angle = units.Angle(0) # TODO load this from calibration
 
     @property
     def magnification(self) -> float:
         return self._magnification
+    
+    @property
+    def orientation(self) -> Literal['upright', 'inverted']:
+        """Returns the orientation of the optical path in relation to the stage."""
+        return self._orientation # type: ignore
 
 

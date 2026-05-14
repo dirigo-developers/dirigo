@@ -49,3 +49,7 @@ class HalfWavePlateAttenuator(BeamAttenuator):
         
         angle = units.Angle( asin(sqrt(fraction)) / 2 )
         self._stage.move_to(self._min_position + angle, blocking)
+
+    @property
+    def busy(self) -> bool:
+        return self._stage.moving

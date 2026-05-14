@@ -545,7 +545,7 @@ class LineCameraLineProcessor(Processor[LineCameraLineAcquisition]):
         eps = 1e-9
 
         wobj = self._spec.line_width
-        wsns = self._acquisition.hw.line_camera.sensor_shape[1]
+        wroi = self._acquisition.hw.frame_grabber.roi_width
         psns = units.Position(self._acquisition.system_config.line_camera['pixel_size'])
         m = float(self._acquisition.system_config.camera_optics['magnification'])
         
@@ -563,7 +563,7 @@ class LineCameraLineProcessor(Processor[LineCameraLineAcquisition]):
         
         obj_pix_edges = corrected_edges * (wobj/2)
         sns_pix_edges = obj_pix_edges * m
-        sns_indices = sns_pix_edges/psns + wsns/2
+        sns_indices = sns_pix_edges/psns + wroi/2
 
         sns_indices = sns_indices[np.newaxis, :] # conform to expected shape
 

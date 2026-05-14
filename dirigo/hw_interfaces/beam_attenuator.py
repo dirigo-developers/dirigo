@@ -72,3 +72,11 @@ class BeamAttenuator(HardwareInterface, ABC):
             Whether to wait for the new setting to be reached.
         """
         ...
+
+    @property
+    @abstractmethod
+    def busy(self) -> bool:
+        """
+        Whether the attenuator is currently busy
+        """
+        ...

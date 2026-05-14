@@ -38,6 +38,7 @@ except:
 def data_path() -> Path:
     return _data_path
 
+
 def load_scanner_calibration(
         path: Path = config_path() / "scanner/calibration.csv"
         ) -> tuple:
