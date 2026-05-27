@@ -53,15 +53,17 @@ def load_scanner_calibration(
 
 
 def load_line_distortion_calibration(
-        amplitude: units.Angle,
-        path: Path = config_path() / "optics/line_distortion_calibration.csv"
+        line_width: units.Position,
+        name: str = "raster"
     ):
-    data = np.loadtxt(path, delimiter=',', dtype=np.float64, skiprows=1, ndmin=2)
+
+    file_path = config_path() / "optics" / f"{name}_distortion_calibration.csv"
+    data = np.loadtxt(file_path, delimiter=',', dtype=np.float64, skiprows=1, ndmin=2)
     amplitudes = data[:,0]
     coefs = data[:,1:]
 
     for i,a in enumerate(amplitudes):
-        if abs(a - amplitude)/amplitude < 0.001:
+        if abs(a - line_width)/line_width < 0.001:
             return Polynomial(coefs[i])
     
     raise RuntimeError("Could not find distortion calibration")

@@ -483,8 +483,10 @@ class LineCameraLineProcessor(Processor[LineCameraLineAcquisition]):
 
         # Load distortion calibration
         try:
-            raise Exception # temporary
-            self._distortion_polynomial = io.load_line_distortion_calibration()
+            self._distortion_polynomial = io.load_line_distortion_calibration(
+                line_width = self._spec.line_width,
+                name       = "camera"
+            )
         except:
             self._distortion_polynomial = Polynomial([1])
 
