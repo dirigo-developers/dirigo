@@ -38,7 +38,7 @@ dirigo-init = "dirigo.init:main"
 raster_line      = "dirigo.plugins.acquisitions:LineAcquisition"
 raster_frame     = "dirigo.plugins.acquisitions:FrameAcquisition"
 raster_stack     = "dirigo.plugins.acquisitions:StackAcquisition"
-line_camera_line = "dirigo.plugins.acquisitions.LineCameraLineAcquisition"
+line_camera_line = "dirigo.plugins.acquisitions:LineCameraLineAcquisition"
 # calibrations (create data for calibrations)
 trigger_delay_calibration = "dirigo.plugins.calibrations:TriggerDelayCalibration"
 stage_translation_calibration = "dirigo.plugins.calibrations:StageTranslationCalibration"
