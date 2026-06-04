@@ -320,8 +320,8 @@ class LineCameraAcquisition(Acquisition):
 
         try:
             acq_product = self._get_free_product()
-
             bpa = self.spec.buffers_per_acquisition
+
             while not self._stop_event.is_set():
                 # for finite acquisition, stop when recorded set number of buffers
                 if bpa != -1 and self.hw.frame_grabber.buffers_acquired >= bpa: # bpa != -1 codes for finite
@@ -330,7 +330,9 @@ class LineCameraAcquisition(Acquisition):
                 try:               
                     self._get_buffer_data(acq_product=acq_product)
                     self._publish(acq_product)
-                    print("Published a buffer")
+
+                    if self._stop_after_next.is_set():
+                        break
 
                     acq_product = self._get_free_product() # Get a fresh buffer
 

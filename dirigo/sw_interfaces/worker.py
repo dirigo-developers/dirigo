@@ -68,7 +68,8 @@ class Worker(threading.Thread, ABC):
         Sets up a worker Thread object with internal publisher-subscriber model.
         """
         super().__init__(name=name) # Sets up Thread
-        self._stop_event = threading.Event()  # Event to signal thread termination
+        self._stop_event = threading.Event()        # hard stop (immediate)
+        self._stop_after_next = threading.Event()   # soft stop
 
         # Publisher-subscriber objects
         self._inbox: "queue.Queue[Product | None]" = queue.Queue()
@@ -127,25 +128,20 @@ class Worker(threading.Thread, ABC):
             raise RuntimeError("Product pool is not initialized")
         return self._product_dtype
 
-    def stop(self, blocking: bool = False, propagate: bool = True):
+    def stop(self, drain: bool = False):
         """
-        Signal the thread to stop. Wakes the inbox and (optionally) fans out 
-        sentinel None to subscribers.
+        Signal the thread to stop. Stop immediately with drain=False (default), or wait 
+        until next product is complete with drain=True.
         """
-        self._stop_event.set()
+        if drain:
+            self._stop_after_next.set()
 
-        # Wake ourselves if blocked in _inbox.get()
-        try:
-            self._inbox.put_nowait(None)
-        except queue.Full:
-            pass
-
-        # Optionally propagate sentinel None to downstream
-        if propagate:
-            self._publish(None)
-
-        if blocking:
-            self.join() # does not return until thread completes
+        else:
+            self._stop_event.set()
+            try:
+                self._inbox.put_nowait(None) # wake if blocked in _inbox.get()
+            except queue.Full:
+                pass
 
     # Publisher-Subscriber model
     def add_subscriber(self, subscriber: 'Worker'):
