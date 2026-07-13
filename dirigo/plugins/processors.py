@@ -546,10 +546,11 @@ class LineCameraLineProcessor(Processor[LineCameraLineAcquisition]):
         """Returns array of the pixel start indexes for resampling (dewarping)"""
         eps = 1e-9
 
-        wobj = self._spec.line_width
         wroi = self._acquisition.hw.frame_grabber.roi_width
         psns = units.Position(self._acquisition.system_config.line_camera['pixel_size'])
         m = float(self._acquisition.system_config.camera_optics['magnification'])
+
+        line_width = wroi * psns / m
         
         edges = np.linspace(-1, 1, self._spec.pixels_per_line + 1) # normalized pixel edges
         if self._flip_line:
@@ -563,7 +564,7 @@ class LineCameraLineProcessor(Processor[LineCameraLineAcquisition]):
             c2 = 0.0
         corrected_edges = edges/c0 - (c2/c0**4)*edges**3
         
-        obj_pix_edges = corrected_edges * (wobj/2)
+        obj_pix_edges = corrected_edges * (line_width/2)
         sns_pix_edges = obj_pix_edges * m
         sns_indices = sns_pix_edges/psns + wroi/2
 
