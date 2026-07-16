@@ -88,7 +88,7 @@ class CameraOptics:
             raise ValueError(f"Unsupported optics orientation, {orientation}")
         self._orientation = orientation
         
-        self.stage_camera_angle = units.Angle(0) # TODO load this from calibration
+        self.stage_camera_angle = io.load_stage_camera_angle()
 
     @property
     def magnification(self) -> float:

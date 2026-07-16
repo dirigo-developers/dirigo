@@ -73,6 +73,7 @@ class CameraAcquisitionRuntimeInfo:
     camera_bit_depth: int
     n_channels: int
     frame_grabber_bytes_per_pixel: int | None = None
+    stage_camera_angle: units.Angle | None = None
 
     @classmethod
     def from_acquisition(cls, acq: "LineCameraAcquisition"):
@@ -85,7 +86,8 @@ class CameraAcquisitionRuntimeInfo:
         return cls(
             camera_bit_depth                = acq.hw.line_camera.bit_depth,
             n_channels                      = 3 if fg_bpp > 2 else 1, # either RGB or 8-16 bit mono
-            frame_grabber_bytes_per_pixel   = fg_bpp
+            frame_grabber_bytes_per_pixel   = fg_bpp,
+            stage_camera_angle              = acq.hw.camera_optics.stage_camera_angle
         )
 
     @classmethod
