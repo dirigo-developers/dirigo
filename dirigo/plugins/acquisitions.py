@@ -431,6 +431,7 @@ class LineAcquisition(SampleAcquisition):
         # that will return fast, prepend slower tasks to run method
         super().__init__(hw, system_config, spec, thread_name) # sets up thread, inbox, stores hw, checks resources
         self.spec: LineAcquisitionSpec # to refine type hints  
+        self._turn_off_scanner_on_finish: bool = True
 
         # for brevity
         fast_scanner = self.hw.fast_raster_scanner
@@ -505,7 +506,11 @@ class LineAcquisition(SampleAcquisition):
 
         # Start scanner & digitizer
         if isinstance(self.hw.fast_raster_scanner, ResonantScanner):
-            self.hw.fast_raster_scanner.start()
+            try:
+                self.hw.fast_raster_scanner.start()
+            except RuntimeError:
+                pass
+
             # pause for a little while to allow res scanner to reach steady state
             if hasattr(self.hw.fast_raster_scanner, 'response_time'):
                 time.sleep(self.hw.fast_raster_scanner.response_time)
@@ -579,12 +584,16 @@ class LineAcquisition(SampleAcquisition):
         except:
             pass  # TODO, remove these try except blocks
         try:
-            self.hw.fast_raster_scanner.stop()
+            if self._turn_off_scanner_on_finish: self.hw.fast_raster_scanner.stop()
         except:
             pass
 
         # Put None into queue to signal to subscribers that we are finished
         self._publish(None)
+
+    def stop(self, turn_off_scanner: bool = True):
+        self._turn_off_scanner_on_finish = turn_off_scanner
+        super().stop()
 
     def read_positions(self):
         """Subclasses can override this method to provide position readout from
