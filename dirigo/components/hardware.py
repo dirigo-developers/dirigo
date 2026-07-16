@@ -14,6 +14,7 @@ if TYPE_CHECKING:
     from dirigo.hw_interfaces.camera import FrameGrabber, LineCamera
     from dirigo.hw_interfaces.illuminator import Illuminator
     from dirigo.hw_interfaces.beam_attenuator import BeamAttenuator
+    from dirigo.hw_interfaces.shutter import Shutter
 
 
 
@@ -176,6 +177,13 @@ class Hardware:
             raise NotConfiguredError("beam attenuator")
         return self._load("dirigo_beam_attenuators", cfg["type"], 
             rotation_stage=self.rotation_stage, **cfg)
+    
+    @cached_property
+    def shutter(self) -> "Shutter":
+        cfg = self._cfg.shutter
+        if cfg is None:
+            raise NotConfiguredError("shutter")
+        return self._load("dirigo_shutters", cfg["type"], **cfg)
 
     @cached_property
     def laser_scanning_optics(self) -> LaserScanningOptics:

@@ -19,3 +19,8 @@ class Shutter(HardwareInterface):
     @abstractmethod
     def close(self):
         pass
+
+    @property
+    @abstractmethod
+    def is_open(self) -> bool:
+        ...

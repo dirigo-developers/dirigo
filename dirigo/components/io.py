@@ -189,7 +189,7 @@ _CONFIG_KEYS = (
     "laser_scanning_optics", "camera_optics", "digitizer", "detectors",
     "objective_z_scanner", "stages", "line_camera", "illuminator", "rotation_stage",
     "frame_grabber", "encoders", "fast_raster_scanner", "slow_raster_scanner",
-    "beam_attenuator",
+    "beam_attenuator", "shutter"
 )
 
 class SystemConfig:
@@ -211,6 +211,7 @@ class SystemConfig:
     line_camera:            dict[str, Any] | None
     illuminator:            dict[str, Any] | None
     beam_attenuator:        dict[str, Any] | None
+    shutter:                dict[str, Any] | None
     frame_grabber:          dict[str, Any] | None
     encoders:               dict[str, Any] | None
     fast_raster_scanner:    dict[str, Any] | None
