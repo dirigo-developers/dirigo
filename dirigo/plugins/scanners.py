@@ -280,7 +280,9 @@ class GalvoScannerViaNI(GalvoScanner):
     @cached_property
     def _volts_per_radian(self) -> float:
         """Scaling factor between analog control voltge and optical scan angle."""
-        return float(self._analog_control_range.range / self.angle_limits.range)
+        s = -1 if self._invert else 1
+
+        return s*float(self._analog_control_range.range / self.angle_limits.range)
     
     def generate_waveform(self, 
                           sample_rate: units.SampleRate,

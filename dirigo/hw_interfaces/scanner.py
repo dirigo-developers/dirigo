@@ -294,6 +294,7 @@ class GalvoScanner(RasterScanner):
                  ao_sample_rate: str | None = None, # This implies analog output (chance some users might want digital galvo control)
                  input_delay: str = "0 s",
                  flyback_time: str | None = None, # intended for Y axis flyback time, leave none for X axis
+                 invert: bool = False,
                  **kwargs):
         super().__init__(**kwargs)
 
@@ -313,6 +314,10 @@ class GalvoScanner(RasterScanner):
             self.flyback_time = units.Time(flyback_time)
         else:
             self.flyback_time = None
+        
+        if not isinstance(invert, bool):
+            raise ValueError(f"GalvoScanner invert argument must be boolean")
+        self._invert = invert
 
         # Validate sample rate
         if ao_sample_rate is not None:
