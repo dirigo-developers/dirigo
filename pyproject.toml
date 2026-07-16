@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "dirigo"
-version = "0.3.13"
+version = "0.3.14"
 description = "Dirigo is an extensible backend for scientific image acquisition"
 authors = [
     {name = "T. D. Weber", email = "tweber@mit.edu"}
@@ -14,7 +14,6 @@ readme = "README.md"
 requires-python = ">=3.11"
 classifiers = [
   "Programming Language :: Python :: 3",
-  "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
   "Programming Language :: Python :: 3.13",
   "License :: OSI Approved :: MIT License",
@@ -88,6 +87,9 @@ slow_galvo_scanner_via_ni = "dirigo.plugins.scanners:SlowGalvoScannerViaNI"
 
 [project.entry-points."dirigo_beam_attenuators"]
 half_wave_plate = "dirigo.plugins.beam_attenuators:HalfWavePlateAttenuator"
+
+[project.entry-points."dirigo_shutters"]
+shutter_via_ni = "dirigo.plugins.shutters:ShutterViaNI"
 
 [project.entry-points."dirigo_illuminators"]
 led_via_ni = "dirigo.plugins.illuminators:LEDViaNI"
