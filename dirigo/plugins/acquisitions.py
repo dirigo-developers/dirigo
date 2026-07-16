@@ -511,7 +511,6 @@ class LineAcquisition(SampleAcquisition):
                 time.sleep(self.hw.fast_raster_scanner.response_time)
 
             digi.acquire.start() # This includes the buffer allocation
-            self.active.set()
 
         elif isinstance(self.hw.fast_raster_scanner, GalvoScanner):
             # The start order of Digitizer and Galvo are dependent on the configuration:
@@ -526,7 +525,12 @@ class LineAcquisition(SampleAcquisition):
                 periods_per_write   = self._records_per_buffer
             )
 
-            self.active.set()
+        try:
+            self.hw.shutter.open()
+        except NotConfiguredError:
+            pass
+
+        self.active.set()
 
         try:
             bpa = self.spec.buffers_per_acquisition
@@ -555,6 +559,12 @@ class LineAcquisition(SampleAcquisition):
 
     def cleanup(self):
         """Closes resources started during the acquisition."""
+        # Close shutter
+        try:
+            self.hw.shutter.close()
+        except NotConfiguredError:
+            pass
+
         # Disable detectors
         for detector in self.hw.detectors:
             detector: Detector
