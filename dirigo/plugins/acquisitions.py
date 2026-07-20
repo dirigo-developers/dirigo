@@ -896,6 +896,7 @@ class StackAcquisitionSpec(FrameAcquisitionSpec):
                  saved_frames_per_step: int = 2, 
                  sacrificial_frames_per_step: int = 2,
                  **kwargs):
+        kwargs['frames_per_acquisition'] = -1   # allow unlimited frames
         super().__init__(**kwargs)
 
         self.lower_limit = units.Position(lower_limit)
@@ -969,7 +970,7 @@ class StackAcquisition(Acquisition):
         """
         # Move to lower limit
         z_scanner = self.hw.preferred_z_motor
-        z_scanner.move_to(self._depths[0])
+        z_scanner.move_to(units.Position(self._depths[0])) # here is where it might be nice to have Dirigo.Unit arrays
         
         # spin until reach start position
         time.sleep(units.Time('10 ms'))
@@ -994,7 +995,7 @@ class StackAcquisition(Acquisition):
 
                 if i < self.spec.depths_per_acquisition:
                     # Move Z scanner to next depth
-                    z_scanner.move_to(self._depths[i])
+                    z_scanner.move_to(units.Position(self._depths[i]))
 
                     # Wait for sacrificial frames
                     for _ in range(self.spec._sacrificial_frames_per_step):
