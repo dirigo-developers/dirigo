@@ -158,7 +158,7 @@ class TiffWriter(Writer):
             self._close_and_write_metadata()
 
     def _store_z_plane(self, frame: AcquisitionProduct | ProcessorProduct):
-        self._stack_data.append(frame.data)
+        self._stack_data.append(frame.data.copy())
         print(f"stored z plane {len(self._stack_data)}")
 
     def _close_and_write_metadata(self):
