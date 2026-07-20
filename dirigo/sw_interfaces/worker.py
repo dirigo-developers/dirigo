@@ -75,6 +75,7 @@ class Worker(threading.Thread, ABC):
         self._inbox: "queue.Queue[Product | None]" = queue.Queue()
         self._subscribers: list['Worker'] = []
         self._subs_lock = threading.RLock()  # protect subscriber list & publishing snapshot
+        self._n_published: int = 0
 
         # Pool for re-usable product objects
         self._product_pool: "queue.Queue[Product]" = queue.Queue()
@@ -179,8 +180,9 @@ class Worker(threading.Thread, ABC):
             pass  # non-ndarray payloads could be supported later
             
         obj._add_consumers(len(subs_snapshot))
-        for subscriber in subs_snapshot:
-            subscriber._inbox.put(obj) # "Thrilled to share ..."
+        for s in subs_snapshot:
+            s._inbox.put(obj) # "Thrilled to share ..."
+        self._n_published += 1
 
     def _get_free_product(self) -> Product:
         p = self._product_pool.get()

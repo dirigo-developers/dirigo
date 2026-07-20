@@ -1,4 +1,5 @@
 import copy
+import threading
 from dataclasses import dataclass
 from typing import ClassVar, Tuple, Callable, Optional
 
@@ -7,14 +8,11 @@ from numba import njit, prange, types, uint8, int16, uint16, int64, float32
 
 from dirigo.components.units import IntRange
 from dirigo.sw_interfaces.worker import EndOfStream
-from dirigo.sw_interfaces.processor import Processor, ProcessorProduct
-from dirigo.sw_interfaces.acquisition import Acquisition, AcquisitionProduct
+from dirigo.sw_interfaces.processor import Processor
 from dirigo.sw_interfaces.display import (
     Display, ColorVector, TransferFunction, DisplayPixelFormat,
     load_color_vector, load_transfer_function
 )
-from dirigo.plugins.acquisitions import FrameAcquisition, LineAcquisition
-
 
 
 
@@ -155,9 +153,9 @@ class DisplayChannel():
                  lut_slice: np.ndarray, 
                  color_vector_name: str, 
                  display_range: IntRange, 
-                 update_method: Callable[[], None],
                  pixel_format: DisplayPixelFormat, 
-                 lut_max: int):
+                 lut_max: int,
+                 lut_lock: threading.Lock):
         """
         Sets up the display channel with required parameters and computes a LUT.
         """
@@ -168,8 +166,8 @@ class DisplayChannel():
 
         self._lut = lut_slice # reference to this channel's 'slice' of multichannel LUT
         self._pixel_format = pixel_format
-        self._update_display_method = update_method
         self._lut_max = lut_max
+        self._lut_lock = lut_lock
 
         # Adjustable parameters (see getter/setters)
         self._enabled = True
@@ -177,12 +175,11 @@ class DisplayChannel():
         self._display_range = copy.copy(display_range)
 
         self._input_values = np.arange(
-            start=display_range.min, 
+            start=display_range.min,
             stop=display_range.max + 1, 
             dtype=display_range.recommended_dtype
         )
-
-        self._update_lut()
+        self.recompute_lut() 
 
     @property
     def enabled(self) -> bool:
@@ -193,7 +190,6 @@ class DisplayChannel():
         if not isinstance(new_state, bool):
             raise ValueError("``enabled`` must be set with a boolean.")
         self._enabled = new_state
-        self._update_lut()
 
     @property
     def color_vector_name(self) -> str:
@@ -202,7 +198,6 @@ class DisplayChannel():
     @color_vector_name.setter
     def color_vector_name(self, new_color_vector_name: str):
         self._color_vector = load_color_vector(new_color_vector_name)
-        self._update_lut()
 
     @property
     def display_min(self) -> int:
@@ -211,7 +206,6 @@ class DisplayChannel():
     @display_min.setter
     def display_min(self, value: int):
         self._display_range.min = int(value)
-        self._update_lut()
 
     @property
     def display_max(self) -> int:
@@ -220,16 +214,16 @@ class DisplayChannel():
     @display_max.setter
     def display_max(self, value: int):
         self._display_range.max = int(value)
-        self._update_lut()
 
-    def _update_lut(self):
-        # get the RGB triplet or BGRX quadruplet
-        
+    def recompute_lut(self):
+        """Recompute this channel's LUT slice from current parameters"""
         if self.enabled:
             if self._pixel_format == DisplayPixelFormat.RGB24:
                 color_vector = self._color_vector.rgb 
             elif self._pixel_format == DisplayPixelFormat.BGRX32:
                 color_vector = tuple(reversed(self._color_vector.rgb))
+            else:
+                raise ValueError(f"Unsupported pixel format: {self._pixel_format}")
         else:
             color_vector = (0.0, 0.0, 0.0)
         
@@ -241,7 +235,6 @@ class DisplayChannel():
             lut             = self._lut,
             lut_max         = self._lut_max
         )
-        self._update_display_method()
 
 
 # ---------- Colormapped Channel API (single-channel) ----------
@@ -304,6 +297,7 @@ class FrameDisplay(Display):
                  **kwargs): # pixel_format, monitor_bit_depth
         super().__init__(upstream, **kwargs)
         self._prev_data = None # stores last input for on-depand reprocessing adjustments
+        self._lut_lock = threading.Lock()
 
         nchannels = upstream.product_shape[2]
         if color_vector_names is None: # use some preset defaults
@@ -325,8 +319,8 @@ class FrameDisplay(Display):
                 color_vector_name   = colormap_name,
                 display_range       = self.data_range,
                 pixel_format        = self._pixel_format,
-                update_method       = self.update_display,
-                lut_max             = self.tf_lut_length # TODO rename gamma
+                lut_max             = self.tf_lut_length,
+                lut_lock            = self._lut_lock,
             )
             self.display_channels.append(dc)
 
@@ -372,20 +366,30 @@ class FrameDisplay(Display):
                 with self._receive_product() as product:
                     display_product = self._get_free_product()
                     
-                    _additive_blend_channels_kernel(
-                        data    = product.data, 
-                        luts    = self._luts,   # LUT for each channel
-                        tf_lut  = self._tf_lut, # final output transfer function LUT
-                        image   = display_product.data
-                    )
-                   
+                    with self._lut_lock: # channel LUTs read under lock to prevent color tearing
+                        _additive_blend_channels_kernel(
+                            data    = product.data, 
+                            luts    = self._luts,   # LUT for each channel
+                            tf_lut  = self._tf_lut, # final output transfer function LUT
+                            image   = display_product.data
+                        )
                     self._publish(display_product)
                     self._prev_data = product.data.copy()
 
         except EndOfStream:
             self._publish(None) # forward sentinel None
 
-    def update_display(self, skip_when_acquisition_in_progress: bool = True):
+    def apply_settings(self):
+        """Recompute all channel LUTs atomically and redraw once.
+        Call after changing any DisplayChannel parameters
+        (display_min/max, color_vector_name, enabled).
+        """
+        with self._lut_lock:
+            for dc in self.display_channels:
+                dc.recompute_lut()
+        self.redraw()
+
+    def redraw(self, skip_when_acquisition_in_progress: bool = True):
         """
         On demand reprocessing of the last acquired frame for display.
         
@@ -402,12 +406,13 @@ class FrameDisplay(Display):
         
         display_product = self._get_free_product()
         
-        _additive_blend_channels_kernel(
-            data    = self._prev_data, 
-            luts    = self._luts,   # LUT for each channel
-            tf_lut  = self._tf_lut, # final output transfer function LUT
-            image   = display_product.data
-        )
+        with self._lut_lock: # see above
+            _additive_blend_channels_kernel(
+                data    = self._prev_data, 
+                luts    = self._luts,   # LUT for each channel
+                tf_lut  = self._tf_lut, # final output transfer function LUT
+                image   = display_product.data
+            )
         self._publish(display_product)
 
             

@@ -230,6 +230,6 @@ class Display(Worker):
     #     return super()._receive_product(block, timeout)
 
     @abstractmethod
-    def update_display(self, skip_when_acquisition_in_progress: bool = True):
+    def redraw(self, skip_when_acquisition_in_progress: bool = True):
         """On demand reprocessing of the last acquired frame for display."""
         pass
