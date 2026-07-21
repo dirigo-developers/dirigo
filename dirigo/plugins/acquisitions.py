@@ -35,8 +35,8 @@ TWO_PI = 2 * math.pi
 class LineAcquisitionRuntimeInfo:
     """
     Makes runtime LineAcquisition info and parameters available.
-    (Experimental) 
     """
+    line_rate: units.Frequency
     scanner_amplitude: units.Angle
     digitizer_bit_depth: int
     digitizer_trigger_offset: int
@@ -46,6 +46,7 @@ class LineAcquisitionRuntimeInfo:
     @classmethod
     def from_acquisition(cls, acquisition: "LineAcquisition"):
         return cls(
+            line_rate                = acquisition.hw.fast_raster_scanner.frequency,
             scanner_amplitude        = acquisition.hw.fast_raster_scanner.amplitude,
             digitizer_bit_depth      = acquisition.hw.digitizer.bit_depth,
             digitizer_trigger_offset = acquisition.hw.digitizer.acquire.trigger_delay,
@@ -56,6 +57,7 @@ class LineAcquisitionRuntimeInfo:
     @classmethod
     def from_dict(cls, d: dict):
         return cls(
+            line_rate                = units.Frequency(d['line_rate']),
             scanner_amplitude        = units.Angle(d['scanner_amplitude']),
             digitizer_bit_depth      = int(d['digitizer_bit_depth']),
             digitizer_trigger_offset = int(d['digitizer_trigger_offset']),
@@ -450,6 +452,10 @@ class LineAcquisition(SampleAcquisition):
             fast_scanner.amplitude = optics.object_position_to_scan_angle(
                 self.spec.line_width
             )
+            # if using res scanner, immediately turn on, since it requires some time to settle
+            if isinstance(self.hw.fast_raster_scanner, ResonantScanner):
+                self.hw.fast_raster_scanner.start()
+                # note the turn on time
 
             # if fast scanner AO sample rate not specified, assume clocked from digitizer AI clock
             if (fast_scanner._ao_sample_rate is None) or (fast_scanner._co_task): # TODO, this is a little hacky:
@@ -511,7 +517,7 @@ class LineAcquisition(SampleAcquisition):
             except RuntimeError:
                 pass
 
-            # pause for a little while to allow res scanner to reach steady state
+            # pause for a little while to allow resonant scanner to reach steady state
             if hasattr(self.hw.fast_raster_scanner, 'response_time'):
                 time.sleep(self.hw.fast_raster_scanner.response_time)
 
@@ -547,7 +553,10 @@ class LineAcquisition(SampleAcquisition):
                     acq_product = self._get_free_product()
 
                 with timer("get_next_completed_buffer"):
-                    digi.acquire.get_next_completed_buffer(acq_product)
+                    digi.acquire.get_next_completed_buffer(
+                        acq_buffer  = acq_product,
+                        timeout     = 3 / self.buffer_rate      # timeout in 3 x expected frame/buffer rate
+                    )
 
                 try:
                     if self.hw.stages or self.hw.preferred_z_motor:
@@ -684,6 +693,11 @@ class LineAcquisition(SampleAcquisition):
             )
         
         return record_length
+    
+    @cached_property
+    def buffer_rate(self) -> units.Frequency:
+        return self.runtime_info.line_rate / self._records_per_buffer
+
     
     @classmethod
     def get_specification(cls, spec_name = "default") -> LineAcquisitionSpec:
