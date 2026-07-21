@@ -189,7 +189,8 @@ class ResonantScanner(RasterScanner):
     def __init__(self, 
                  frequency: str, 
                  frequency_error: float,
-                 response_time: str = "0 s",
+                 response_time: str = "1 s",
+                 idle_amplitude: str = "0 deg",
                  **kwargs):
         """
         Args:
@@ -208,14 +209,19 @@ class ResonantScanner(RasterScanner):
         self.frequency_error = frequency_error
 
         r_time = units.Time(response_time)
-        if not (0 <= r_time < units.Time('1 s')):
+        if not (0 <= r_time <= units.Time('2 s')):
             raise ValueError(
-                "Response time outside of valid range 0-1 seconds, got {r_time}."
+                f"Response time outside of valid range 0-2 seconds, got {r_time}."
             )
         self.response_time = r_time
 
         # Allow a special 'off' amplitude used to idle the scanner amplitude (for stabilization)
-        self.idle_amplitude = units.Angle(units.Angle("0 deg")) # TODO make this a property
+        i_amp = units.Angle(idle_amplitude)
+        if i_amp < 0:
+            raise ValueError(f"Idle amplitude cannot be less than 0 degrees, got {i_amp}")
+        if i_amp > self.angle_limits.max:
+            raise ValueError(f"Idle amplitude cannot be greater than max limit, got {i_amp}")
+        self.idle_amplitude = i_amp
     
     @property
     def frequency(self) -> units.Frequency:
