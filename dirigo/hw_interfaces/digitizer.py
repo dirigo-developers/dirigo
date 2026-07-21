@@ -735,12 +735,13 @@ class Acquire(ABC):
         pass
 
     @abstractmethod
-    def get_next_completed_buffer(self, acq_buffer: "AcquisitionProduct"):
+    def get_next_completed_buffer(self, acq_buffer: "AcquisitionProduct", timeout: units.Time | None):
         """Retrieve the next completed data buffer.
 
         Args:
             acq_buffer (AcquisitionProduct): Pre-allocated acquisition buffer to 
             copy completed digitizer buffer
+            timeout (units.Time or None): Time to wait for complete buffer before raising an error
         """
         pass
 
