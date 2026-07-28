@@ -173,18 +173,27 @@ class UnitQuantity(float):
         
     def __mul__(self, other):
         """
-        Multiply this quantity by a dimensionless scalar (int or float),
-        returning a new instance of the same subclass with the same unit.
+        Multiply by a dimensionless scalar (returns same subclass), or by
+        another UnitQuantity (returns the subclass whose dimensional
+        signature matches the product, or a plain float if dimensionless).
         """
         if isinstance(other, UnitQuantity):
-            if self.DIMENSIONAL_QUANTITY == tuple(reversed(other.DIMENSIONAL_QUANTITY)):
-                # if the two UnitQuantity classes dimensions cancel, then allow it
+            # Multiplication: numerators combine, denominators combine
+            n0, d0 = Counter(self.DIMENSIONAL_QUANTITY[0]), Counter(self.DIMENSIONAL_QUANTITY[1])
+            n1, d1 = Counter(other.DIMENSIONAL_QUANTITY[0]), Counter(other.DIMENSIONAL_QUANTITY[1])
+            new_dim = self._normalize_dim(n0 + n1, d0 + d1)
+
+            if new_dim == ('1', '1'):
                 return float(self) * float(other)
-            else:
-                return NotImplemented # Don't allow mixed unit multiplication (yet)
+
+            target_cls = UnitQuantity._dimension_registry.get(new_dim)
+            if target_cls is not None:
+                return target_cls(float(self) * float(other))
+            return NotImplemented  # no matching UnitQuantity registered
+
         if isinstance(other, (int, float)):
             return type(self)(float(self) * other)
-        return NotImplemented  # For any other type, we can't handle it
+        return NotImplemented
 
     def __rmul__(self, other):
         """
@@ -194,53 +203,66 @@ class UnitQuantity(float):
         return self.__mul__(other)
     
     def __truediv__(self, other):
-        """
-        Divide this quantity by a dimensionless scalar (int or float),
-        returning a new instance of the same subclass with the same unit.
-        """
         if isinstance(other, UnitQuantity):
+            # Division: cross-multiply the signatures
+            n0, d0 = Counter(self.DIMENSIONAL_QUANTITY[0]), Counter(self.DIMENSIONAL_QUANTITY[1])
+            n1, d1 = Counter(other.DIMENSIONAL_QUANTITY[0]), Counter(other.DIMENSIONAL_QUANTITY[1])
+            new_dim = self._normalize_dim(n0 + d1, d0 + n1)
 
-            if self.DIMENSIONAL_QUANTITY == other.DIMENSIONAL_QUANTITY:
-                # division by same units results in unitless quantity
-                return float(self) / float(other) 
-            else:
-                # division by different unit quantities requires some unit algebra
-                n0, d0 = Counter(self.DIMENSIONAL_QUANTITY[0]), Counter(self.DIMENSIONAL_QUANTITY[1])
-                n1, d1 = Counter(other.DIMENSIONAL_QUANTITY[0]), Counter(other.DIMENSIONAL_QUANTITY[1])
-                num, den = n0 + d1, d0 + n1
-                common = num & den
-                num, den = num - common, den - common
+            if new_dim == ('1', '1'):
+                return float(self) / float(other)
 
-                new_dim = (
-                    "".join(letter * n for letter, n in sorted(num.items())),
-                    "".join(letter * n for letter, n in sorted(den.items()))
-                )
-                target_cls = UnitQuantity._dimension_registry.get(new_dim)
-                if target_cls is not None:
-                    return target_cls(float(self )/ float(other))
-                else:
-                    # no appropriate UnitQuantity available
-                    return NotImplemented 
-                
+            target_cls = UnitQuantity._dimension_registry.get(new_dim)
+            if target_cls is not None:
+                return target_cls(float(self) / float(other))
+            return NotImplemented
+
         if isinstance(other, (int, float)):
             return type(self)(float(self) / other)
-        return NotImplemented  # For any other type, we can't handle it
+        return NotImplemented
     
     def __rtruediv__(self, other):
         """
         Allow expressions like 1 / <UnitQuantity>.
-        If `other` is a dimension-less scalar, return the UnitQuantity whose
-        dimensional signature is the reciprocal of `self`.
+        If `other` is a dimensionless scalar, return the UnitQuantity whose
+        dimensional signature is the reciprocal of `self` (num/den swapped).
         """
-        if isinstance(other, (int, float)):               # dimension-less left operand
-            reciprocal_dim = (self.DIMENSIONAL_QUANTITY[1],
-                              self.DIMENSIONAL_QUANTITY[0])  # swap num/den
-            target_cls = UnitQuantity._dimension_registry.get(reciprocal_dim)
+        if isinstance(other, (int, float)):
+            # Reciprocal: swap numerator and denominator, then normalize
+            num = Counter(self.DIMENSIONAL_QUANTITY[1])
+            den = Counter(self.DIMENSIONAL_QUANTITY[0])
+            new_dim = self._normalize_dim(num, den)
+
+            if new_dim == ('1', '1'):
+                return other / float(self)
+
+            target_cls = UnitQuantity._dimension_registry.get(new_dim)
             if target_cls is not None:
                 return target_cls(other / float(self))
-            # no matching UnitQuantity – fall back to plain float
-            return other / float(self)
+            return NotImplemented
         return NotImplemented
+
+    @staticmethod
+    def _normalize_dim(num: Counter, den: Counter) -> tuple[str, str]:
+        """
+        Given numerator/denominator Counters of base-dimension letters,
+        cancel common factors and return a normalized (num, den) signature.
+
+        The literal '1' is treated as the dimensionless identity: it is
+        dropped before cancellation and re-inserted only if a side is empty.
+        """
+        # Drop dimensionless placeholders so they don't accumulate
+        num.pop('1', None)
+        den.pop('1', None)
+
+        # Cancel common base dimensions
+        common = num & den
+        num, den = num - common, den - common
+
+        return (
+            "".join(letter * n for letter, n in sorted(num.items())) or '1',
+            "".join(letter * n for letter, n in sorted(den.items())) or '1',
+        )
 
 
 # ---------- Concrete unit quantity classes ----------
