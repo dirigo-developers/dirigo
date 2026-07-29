@@ -41,7 +41,7 @@ class Stage(HardwareInterface):
             )
         # if no error raised, then limits_dict is OK
 
-    def __init__(self, axis: str, **kwargs):
+    def __init__(self, axis: str,  **kwargs):
         # Validate axis label
         if axis not in self.VALID_AXES:
             raise ValueError(f"axis must be one of {self.VALID_AXES}")
@@ -61,6 +61,16 @@ class Stage(HardwareInterface):
         VALID_AXES class attribute should contain a set of valid axes labels. 
         """
         return self._axis
+
+    @property
+    @abstractmethod
+    def backlash(self) -> units.UnitQuantity:
+        """
+        Amount of backlash for this axis.
+        
+        Acquisition Workers can use this to take up backlash when required.
+        """
+        pass
 
     @property
     @abstractmethod
@@ -160,6 +170,19 @@ class Stage(HardwareInterface):
 
 class LinearStage(Stage):
     VALID_AXES = {'x', 'y', 'z'}
+
+    def __init__(self, axis, backlash: str = "0 um", **kwargs):
+        super().__init__(axis, **kwargs)
+
+        # validate backlash
+        backlash = units.Position(backlash)
+        if backlash < 0:
+            raise ValueError(f"Backlash cannot be less than 0, got {backlash}")
+        self._backlash = backlash
+
+    @property
+    def backlash(self) -> units.Position:
+        return self._backlash
     
     @property
     @abstractmethod
@@ -246,12 +269,22 @@ class MultiAxisStage(HardwareInterface):
 class RotationStage(Stage):
     VALID_AXES = {'theta'} # other global angles?
 
-    def __init__(self, limits: dict, **kwargs):
+    def __init__(self, limits: dict, backlash: str = "0 deg", **kwargs):
         super().__init__(**kwargs)
 
         # Validate limits
         self._validate_limits_dict(limits)
         self._limits = units.AngleRange(**limits)
+
+        # validate backlash
+        backlash = units.Angle(backlash)
+        if backlash < 0:
+            raise ValueError(f"Backlash cannot be less than 0, got {backlash}")
+        self._backlash = backlash
+    
+    @property
+    def backlash(self) -> units.Angle:
+        return self._backlash
 
     @property
     def position_limits(self) -> units.AngleRange:
@@ -303,19 +336,5 @@ class RotationStage(Stage):
     def acceleration(self, value: units.AngularAcceleration):
         pass
 
-
-# Not sure whether this distinction is necessary
-class LinearMotorStageAxis(LinearStage):
-    """
-    Represents ...
-    """
-    pass
-
-
-class StepperMotorStageAxis(Stage):
-    """
-    Represents ...
-    """
-    pass
 
 
