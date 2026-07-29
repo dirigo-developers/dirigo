@@ -1,9 +1,11 @@
 from dataclasses import dataclass
-from abc import ABC, abstractmethod
+from functools import cached_property
+from abc import abstractmethod
 import time
 
 from dirigo.components import units
 from dirigo.hw_interfaces.hw_interface import HardwareInterface
+
 
 
 @dataclass
@@ -169,75 +171,110 @@ class Stage(HardwareInterface):
 
 
 class LinearStage(Stage):
+    """
+    Abstract linear stage with a configurable Dirigo coordinate frame.
+    """
     VALID_AXES = {'x', 'y', 'z'}
 
-    def __init__(self, axis, backlash: str = "0 um", **kwargs):
+    def __init__(
+        self,
+        axis,
+        backlash: str = "0 um",
+        invert_direction: bool = False,   # does +stage == away from sample?
+        position_offset: str = "0 mm",
+        **kwargs
+    ):
         super().__init__(axis, **kwargs)
 
-        # validate backlash
         backlash = units.Position(backlash)
         if backlash < 0:
             raise ValueError(f"Backlash cannot be less than 0, got {backlash}")
         self._backlash = backlash
 
+        self._sign = -1 if invert_direction else 1
+        self._position_offset = units.Position(position_offset)
+
+    # --- Coordinate transforms ---
+    def _device_to_dirigo(self, device_pos: units.Position) -> units.Position:
+        return self._sign * device_pos + self._position_offset
+
+    def _dirigo_to_device(self, dirigo_pos: units.Position) -> units.Position:
+        return self._sign * (dirigo_pos - self._position_offset)
+
+    # --- Public API ---
     @property
     def backlash(self) -> units.Position:
+        """Amount of backlash declared in the system configuration, or zero."""
         return self._backlash
     
     @property
-    @abstractmethod
     def position(self) -> units.Position:
-        ...
+        """Current position in Dirigo coordinates."""
+        return self._device_to_dirigo(self._get_device_position())
+
+    @cached_property
+    def position_limits(self) -> units.PositionRange:
+        """Movement limits in Dirigo coordinates."""
+        dev_lims = self._get_device_position_limits()
+        lo = self._device_to_dirigo(dev_lims.min)
+        hi = self._device_to_dirigo(dev_lims.max)
+        lo, hi = sorted((lo, hi))
+        return units.PositionRange(min=lo, max=hi)
     
-    @abstractmethod 
     def move_to(self, position: units.Position, blocking: bool = False):
         """
-        Initiate move to specified spatial position.
+        Initiate move to a position.
 
         Choose whether to return immediately (blocking=False, default) or to
         wait until finished moving (blocking=True).
         """
-        pass
+        self._move_to_device(self._dirigo_to_device(position), blocking)
 
-    # @abstractmethod 
-    # def move_relative(self, distance: units.Position, blocking: bool = False):
-    #     """
-    #     Initiate from current position some distance. 
+    def move_velocity(self, velocity: units.Velocity):
+        """Initiate movement at velocity until stopped."""
+        self._move_velocity_device(self._sign * velocity)
 
-    #     Choose whether to return immediately (blocking=False, default) or to
-    #     wait until finished moving (blocking=True).
-    #     """
-    #     pass
+    # --- Device-space abstract methods (plugins must implement) ----------------------
+    @abstractmethod
+    def _get_device_position_limits(self) -> units.PositionRange: 
+        ...
+
+    @abstractmethod
+    def _get_device_position(self) -> units.Position: 
+        ...
+
+    @abstractmethod
+    def _move_to_device(self, position: units.Position, blocking: bool = False): 
+        ...
+
+    @abstractmethod
+    def _move_velocity_device(self, velocity: units.Velocity): 
+        ...
     
     @property
     @abstractmethod
     def max_velocity(self) -> units.Velocity:
         """
-        Return the maximum velocity used in move operations.
+        Maximum velocity used in move operations.
 
         Note that this is the imposed velocity limit for moves. It is not
         necessarily the maximum attainable velocity for this stage.
         """
-        pass
 
     @max_velocity.setter
     @abstractmethod
     def max_velocity(self, value:units.Velocity):
-        """Sets the maximum velocity."""
-        pass
+        ...
 
     @property
     @abstractmethod
     def acceleration(self) -> units.Acceleration:
-        """
-        Return the acceleration used during ramp up/down phase of move.
-        """
-        pass
+        """Acceleration used during ramp up/down phase of move."""
 
     @acceleration.setter
     @abstractmethod
     def acceleration(self, value: units.Acceleration):
-        pass
+        ...
 
 
 class MultiAxisStage(HardwareInterface):
