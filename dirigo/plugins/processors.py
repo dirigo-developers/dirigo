@@ -376,7 +376,6 @@ class RasterFrameProcessor(Processor[Acquisition]):
         Estimate fast-axis trigger timing error (samples) using bidirectional 
         lines.
         """
-        UPSAMPLE = 1
         PHASE_MAX = 100
         THRESH = 20
 
