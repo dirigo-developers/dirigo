@@ -154,7 +154,7 @@ class Dirigo:
                                upstream: "Acquisition | Processor",
                                pixel_format: DisplayPixelFormat = DisplayPixelFormat.RGB24,
                                color_vector_names: Optional[list[str]] = None,
-                               transfer_function_name: Optional[str] = None
+                               transfer_function_name: Optional[str] = "gamma"
                                ) -> "FrameDisplay": ...
         
     def make_display_processor(self, name: str, *, upstream, **kw: Any) -> "Display":
