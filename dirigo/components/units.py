@@ -1,11 +1,10 @@
 import math
 import re
-from typing import TypeVar, Generic, Dict, Optional
-from dataclasses import dataclass
 from collections import Counter
+from dataclasses import dataclass
+from typing import Generic, TypeVar
 
 import numpy as np
-
 
 T_UQ = TypeVar("T_UQ", bound="UnitQuantity")
 
@@ -36,7 +35,7 @@ class UnitQuantity(float):
     __slots__ = ("unit",)
 
     DIMENSIONAL_QUANTITY: tuple[str, str] = ('1', '1') # Interpret as unity over unity (ie dimensionless)
-    ALLOWED_UNITS_AND_MULTIPLIERS: Dict[str, float] = {"": 1.0}  # Define allowed units and their factors in subclasses
+    ALLOWED_UNITS_AND_MULTIPLIERS: dict[str, float] = {"": 1.0}  # Define allowed units and their factors in subclasses
 
     # Global dimension registry
     _dimension_registry: dict[tuple[str, str], type["UnitQuantity"]] = {}
@@ -449,7 +448,7 @@ class RangeWithUnits(Generic[T_UQ]):
     """
     UNIT_QUANTITY_CLASS: type[T_UQ] 
 
-    def __init__(self, min: str | float, max: Optional[str | float] = None):
+    def __init__(self, min: str | float, max: str | float | None = None):
         """
         Initialize the range.
 
