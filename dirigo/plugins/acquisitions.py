@@ -1,6 +1,6 @@
 from pathlib import Path
 import threading, math, time
-from typing import Type
+from typing import Type, Literal
 from functools import cached_property
 from dataclasses import dataclass, asdict
 
@@ -433,7 +433,7 @@ class LineAcquisition(SampleAcquisition):
         # that will return fast, prepend slower tasks to run method
         super().__init__(hw, system_config, spec, thread_name) # sets up thread, inbox, stores hw, checks resources
         self.spec: LineAcquisitionSpec # to refine type hints  
-        self._turn_off_scanner_on_finish: bool = True
+        self._turn_off_scanner_on_finish: bool = True # flag can be flipped to leave scanner on after finishing (helps w/ res scanner stability)
 
         # for brevity
         fast_scanner = self.hw.fast_raster_scanner
@@ -452,10 +452,6 @@ class LineAcquisition(SampleAcquisition):
             fast_scanner.amplitude = optics.object_position_to_scan_angle(
                 self.spec.line_width
             )
-            # if using res scanner, immediately turn on, since it requires some time to settle
-            if isinstance(self.hw.fast_raster_scanner, ResonantScanner):
-                self.hw.fast_raster_scanner.start()
-                # note the turn on time
 
             # if fast scanner AO sample rate not specified, assume clocked from digitizer AI clock
             if (fast_scanner._ao_sample_rate is None) or (fast_scanner._co_task): # TODO, this is a little hacky:
@@ -483,6 +479,10 @@ class LineAcquisition(SampleAcquisition):
             fast_scanner.amplitude = optics.object_position_to_scan_angle(
                 extended_scan_width
             )
+            # immediately start scanner, since it requires some time to settle
+            if not fast_scanner.running:
+                fast_scanner.start() 
+
             digi.aux_io.configure_mode(AuxiliaryIOMode.OUT_TRIGGER)
             
         # Scanner settings implemented, configure digitizer acquisition params
@@ -512,14 +512,11 @@ class LineAcquisition(SampleAcquisition):
 
         # Start scanner & digitizer
         if isinstance(self.hw.fast_raster_scanner, ResonantScanner):
-            try:
-                self.hw.fast_raster_scanner.start()
-            except RuntimeError:
-                pass
+            # fast_scanner.start() # NOTE moved up to __init__
 
-            # pause for a little while to allow resonant scanner to reach steady state
-            if hasattr(self.hw.fast_raster_scanner, 'response_time'):
-                time.sleep(self.hw.fast_raster_scanner.response_time)
+            # pause for a while to allow scanner to reach steady state NOTE this might be redundant now that start occurs in __init__
+            # if hasattr(self.hw.fast_raster_scanner, 'response_time'):
+            #     time.sleep(self.hw.fast_raster_scanner.response_time)
 
             digi.acquire.start() # This includes the buffer allocation
 
@@ -531,7 +528,7 @@ class LineAcquisition(SampleAcquisition):
 
             digi.acquire.start()
             self.hw.fast_raster_scanner.start(
-                digitizer           = digi, 
+                digitizer           = digi,
                 pixels_per_period   = self.spec.pixels_per_line,
                 periods_per_write   = self._records_per_buffer
             )
@@ -568,6 +565,10 @@ class LineAcquisition(SampleAcquisition):
                 self._publish(acq_product)
 
                 print(f"Acquired {digi.acquire.buffers_acquired} {"" if bpa==-1 else f"of {bpa}"} ")
+
+                if self._stop_after_next.is_set():
+                    break
+
         finally:
             self.cleanup()
 
@@ -600,9 +601,9 @@ class LineAcquisition(SampleAcquisition):
         # Put None into queue to signal to subscribers that we are finished
         self._publish(None)
 
-    def stop(self, turn_off_scanner: bool = True):
+    def stop(self, drain: bool = False, turn_off_scanner: bool = True):
         self._turn_off_scanner_on_finish = turn_off_scanner
-        super().stop()
+        super().stop(drain)
 
     def read_positions(self):
         """Subclasses can override this method to provide position readout from
@@ -625,19 +626,19 @@ class LineAcquisition(SampleAcquisition):
         Acquisition start delay, in sample periods. Rounds to the nearest
         digitizer-compatible increment.
         """
+        # if self.spec.bidirectional_scanning:
+        #     delay_duration = 0  
+        # else:
+        #     nominal_period = 1 / self.hw.fast_raster_scanner.frequency
+        #     delay_duration = nominal_period * (1 - self.spec.line_duty_cycle) / 2
 
-        if self.spec.bidirectional_scanning:
-            start_index = min(self.hw.digitizer.acquire.trigger_delay_range.max,
-                              256) # should be half the trigger re-arm time TODO, get actual rearm time
-        else:
-            start_index = 0  
+        # delay_length = delay_duration * self.digitizer_profile.sample_clock.rate
 
-        # Round 
-        step = self.hw.digitizer.acquire.post_trigger_delay_step
-        start_index = step * round(start_index / step)
-
-        return start_index
-
+        # # Round 
+        # step = self.hw.digitizer.acquire.post_trigger_delay_step
+        # return step * round(delay_length / step)
+        return 0
+    
     @property
     def record_length(self) -> int:
         """
@@ -646,16 +647,17 @@ class LineAcquisition(SampleAcquisition):
         """
         fast_scanner = self.hw.fast_raster_scanner
         digitizer_rate = self.digitizer_profile.sample_clock.rate
+        rlr = self.hw.digitizer.acquire.record_length_step
 
         if self.hw.digitizer.streaming_mode == StreamingMode.TRIGGERED:
-            frequency_error = 0.005 # TODO set max frequency error elsewhere
-            rearm_samples = 512 # TODO, get actual rearm time
-            nominal_period = units.Time(1 / self.hw.fast_raster_scanner.frequency)
-            shortest_period = nominal_period / (1 + frequency_error) # accounting for frequency error
+            nominal_period = 1 / fast_scanner.frequency
 
             if self.spec.bidirectional_scanning:
-                record_duration = shortest_period
-                record_length = record_duration * digitizer_rate - rearm_samples
+                rearm_length = 128 # TODO specify this programmatically
+                record_duration = nominal_period * (1 + self.spec.line_duty_cycle) / 2
+
+                shortest_period = nominal_period / (1 + fast_scanner.frequency_error) # e.g. fastest scanner frequency, given the estimated error
+                record_length = shortest_period * digitizer_rate - rearm_length - self.trigger_delay
             
             else:
                 if hasattr(fast_scanner, 'input_delay'):
@@ -664,13 +666,11 @@ class LineAcquisition(SampleAcquisition):
                     delay = units.Time(0)
 
                 if not hasattr(fast_scanner, "ramp_time_fraction"):
-                    # unidirectional but scanner doesn't support asymmetric scan, so halve the period
-                    nominal_period /= 2.0
-                
-                record_duration = min(
-                    nominal_period * self.spec.line_duty_cycle + delay, 
-                    shortest_period
-                )
+                    # unidirectional but scanner doesn't support arbitrary asymmetric waveform, so halve the period
+                    record_duration = nominal_period / 2.0
+                else:
+                    record_duration = nominal_period * self.spec.line_duty_cycle + delay
+
                 record_length = record_duration * digitizer_rate
                 
         elif self.hw.digitizer.streaming_mode == StreamingMode.CONTINUOUS:
@@ -679,11 +679,10 @@ class LineAcquisition(SampleAcquisition):
             record_length = nominal_period * digitizer_rate
 
         else:
-            raise RuntimeError("Unsupported fast axis scanner.")
+            raise RuntimeError(f"Unsupported digitizer streaming mode: {self.hw.digitizer.streaming_mode}.")
         
-        # Round record length up to the nearest allowable size (or the min)
-        rlr = self.hw.digitizer.acquire.record_length_step
-        record_length = rlr * round(record_length / rlr) 
+        # Round record length up to the nearest allowable size
+        record_length = rlr * math.ceil(record_length / rlr) 
 
         if record_length < self.hw.digitizer.acquire.record_length_minimum:
             rlm = self.hw.digitizer.acquire.record_length_minimum
@@ -697,7 +696,6 @@ class LineAcquisition(SampleAcquisition):
     @cached_property
     def buffer_rate(self) -> units.Frequency:
         return self.runtime_info.line_rate / self._records_per_buffer
-
     
     @classmethod
     def get_specification(cls, spec_name = "default") -> LineAcquisitionSpec:
@@ -839,8 +837,9 @@ class FrameAcquisition(LineAcquisition):
     spec_location = Path(user_config_dir("Dirigo")) / "acquisition/frame"
     Spec: Type[FrameAcquisitionSpec] = FrameAcquisitionSpec
 
-    def __init__(self, hw, system_config, spec: FrameAcquisitionSpec):
-        super().__init__(hw, system_config, spec)
+    def __init__(self, hw, system_config, spec: FrameAcquisitionSpec, 
+                 thread_name: str = "Frame Acquisition"):
+        super().__init__(hw, system_config, spec, thread_name)
         self.spec: FrameAcquisitionSpec # to refine type hints
 
         # Set up slow scanner, fast scanner is already set up in super().__init__()
@@ -903,46 +902,47 @@ class FrameAcquisition(LineAcquisition):
 
 # ---------- 3-D acquisitions ----------
 class StackAcquisitionSpec(FrameAcquisitionSpec):
+    """Common Z-stack geometry, independent of how the axial motion is driven."""
     def __init__(self, 
-                 lower_limit: str | units.Position, 
-                 upper_limit: str | units.Position, 
+                 z_range: dict | units.PositionRange,  
                  depth_spacing: str | units.Position,
-                 saved_frames_per_step: int = 2, 
-                 sacrificial_frames_per_step: int = 2,
                  **kwargs):
-        kwargs['frames_per_acquisition'] = -1   # allow unlimited frames
+        kwargs['frames_per_acquisition'] = -1   # allow unlimited frames in child FrameAcquisition
         super().__init__(**kwargs)
 
-        self.lower_limit = units.Position(lower_limit)
-        self.upper_limit = units.Position(upper_limit)
-        if self.depth_range < 0:
-            raise ValueError("Stack upper limit must be greater than lower limit.")
+        if isinstance(z_range, units.PositionRange):
+            self.z_range = z_range
+        else:
+            self.z_range = units.PositionRange(**z_range)
 
         self.depth_spacing = units.Position(depth_spacing)
         if self.depth_spacing <= 0:
             raise ValueError("Stack depth spacing must be greater than 0.")
-        
-        self._saved_frames_per_step = int(saved_frames_per_step)
-        if not (0 <= self._saved_frames_per_step < 10):
-            raise ValueError("Saved frames out of range [0,10)")
-        
-        self._sacrificial_frames_per_step = int(sacrificial_frames_per_step)
-        if not (0 <= self._sacrificial_frames_per_step < 10):
-            raise ValueError("Sacrificial frames out of range [0,10)")
 
-    @property
-    def depth_range(self) -> units.Position:
-        return self.upper_limit - self.lower_limit
 
-    @property
-    def depths_per_acquisition(self) -> int:
-        return self.depths.size
-    
-    @property
-    def depths(self) -> np.ndarray:
-        """Returns the list of depths for each frame in the stack."""
-        return np.arange(self.lower_limit, self.upper_limit, self.depth_spacing)
-    
+class StepAndHoldStackSpec(StackAcquisitionSpec):
+    """Step the Z axis during a sacrificial-frame window, then hold while acquiring."""
+    def __init__(self,
+                 published_frames_per_step: int = 1,    # increase for averaging
+                 discarded_frames_per_step: int = 1,
+                 **kwargs):
+        super().__init__(**kwargs)
+
+        pfps = int(published_frames_per_step)
+        if pfps < 1:
+            raise ValueError(f"published_frames_per_step must be > 0, got {pfps}")
+        self.published_frames_per_step = pfps
+
+        dfps = int(discarded_frames_per_step)
+        if dfps < 0:
+            raise ValueError(f"discarded_frames_per_step must be >=0, got {dfps}")
+        self.discarded_frames_per_step = dfps
+
+
+class ContinuousStackSpec(StackAcquisitionSpec):
+    """Constant-velocity Z sweep; one frame per depth. No per-step frame counts."""
+    pass
+
 
 class StackAcquisition(Acquisition):
     required_resources = [Digitizer, FastRasterScanner, SlowRasterScanner, ObjectiveZScanner]
@@ -953,42 +953,50 @@ class StackAcquisition(Acquisition):
     def __init__(self, hw, system_config, spec):
         super().__init__(hw, system_config, spec)
         self.spec: StackAcquisitionSpec # to refine type hints
+        self._z_axis = self.hw.preferred_z_motor # for brevity
 
-        self._original_z_position = self.hw.preferred_z_motor.position
-        self._depths = self.spec.depths
+        self._original_z_position = self._z_axis.position
+        self._original_z_velocity = self._z_axis.max_velocity
 
         # Set up child FrameAcquisition & subscribe to it
-        self.spec.buffers_per_acquisition = -1 # codes for infinite buffers
         self._frame_acquisition = FrameAcquisition(hw, system_config, self.spec)
         self._frame_acquisition.add_subscriber(self)
 
-        # Initialize object scanner
-        self.hw.preferred_z_motor.max_velocity = units.Velocity("150 um/s")
-        self.hw.preferred_z_motor.acceleration = units.Acceleration("1 mm/s^2")
+        # Prepare Z stage
+        self._z_axis.move_to(self.z_undershoot)
 
     def _receive_product(self, 
                          block: bool = True, 
                          timeout: float | None = None) -> AcquisitionProduct:
         return super()._receive_product(block, timeout) # type: ignore
 
-    def _work(self):
-        """
-        For video-rate frame scanning (resonant or polygon scanners), there are
-        3 ways to manage axial movement during a Z stack:
-            1) Continuous actuation--constant slow z axis movement, but end up 
-                with shearing in data
-            2) Very fast step (likely w/ piezo) during frame slow axis flyback 
-            3) Step during a sacrificial frame period
+    def _discard(self, n: int) -> None:
+        """Receive and drop n frames (e.g. sacrificial frames)."""
+        for _ in range(n):
+            with self._receive_product():
+                pass
 
-        For galvo-galvo scanning, ... TODO
-        """
-        # Move to lower limit
-        z_scanner = self.hw.preferred_z_motor
-        z_scanner.move_to(units.Position(self._depths[0])) # here is where it might be nice to have Dirigo.Unit arrays
+    @property
+    def z_undershoot(self) -> units.Position:
+        raise NotImplementedError
+
+    @property
+    def z_overshoot(self) -> units.Position:
+        raise NotImplementedError
+
+    @property
+    def n_depths(self) -> int:
+        return math.ceil(self.spec.z_range.range / self.spec.depth_spacing)
+
+    def _work(self):
+
+        # Take up backlash, if any
+        if self._z_axis.backlash > 0:
+            self._z_axis.move_to(units.Position(self._depths[0])) 
         
         # spin until reach start position
         time.sleep(units.Time('10 ms'))
-        while z_scanner.moving:
+        while self._z_axis.moving:
             time.sleep(units.Time('10 ms'))
 
         try:
@@ -1009,7 +1017,7 @@ class StackAcquisition(Acquisition):
 
                 if i < self.spec.depths_per_acquisition:
                     # Move Z scanner to next depth
-                    z_scanner.move_to(units.Position(self._depths[i]))
+                    self._z_axis.move_to(units.Position(self._depths[i]))
 
                     # Wait for sacrificial frames
                     for _ in range(self.spec._sacrificial_frames_per_step):
@@ -1018,8 +1026,13 @@ class StackAcquisition(Acquisition):
         finally:
             self._frame_acquisition.stop()
             self._publish(None) # publish the sentinel
-            z_scanner.move_to(self._original_z_position) # move back to original position
 
+            # restore original velocity & position
+            self._z_axis.max_velocity = self._original_z_velocity
+            self._z_axis.move_to(self._original_z_position)
+
+
+    # Typing refinements
     @property
     def digitizer_profile(self) -> DigitizerProfile:
         return self.hw.digitizer.profile
@@ -1032,4 +1045,101 @@ class StackAcquisition(Acquisition):
     def get_specification(cls, spec_name = "default") -> StackAcquisitionSpec:
         return super().get_specification(spec_name) # type: ignore
 
+
+class StepAndHoldStackAcquisition(StackAcquisition):
+    """Step during a sacrificial-frame period, then hold and save frames."""
+    Spec: Type[StepAndHoldStackSpec] = StepAndHoldStackSpec
+
+    def __init__(self, hw, system_config, spec):
+        super().__init__(hw, system_config, spec)
+        self.spec: StepAndHoldStackSpec  # refine type hints
+
+    @classmethod
+    def get_specification(cls, spec_name = "default") -> StepAndHoldStackSpec:
+        return super().get_specification(spec_name) # type: ignore
+    
+    @property
+    def z_undershoot(self) -> units.Position:
+        """Slightly undershoot the stack z_range minimum to counter backlash"""
+        return self.spec.z_range.min - self._z_axis.backlash
+
+    def _work(self):
+        try:
+            # Move to starting depth, discard sacrificial frames
+            self._z_axis.move_to(self.spec.z_range.min)
+            self._frame_acquisition.start()
+            self._discard(self.spec.discarded_frames_per_step) # TODO, do we want to make this longer?
+
+            for k in range(self.n_depths):
+
+                for _ in range(self.spec.published_frames_per_step):
+                    with self._receive_product() as product:
+                        self._publish(product)
+
+                if k < self.n_depths-1:
+                    # Move to next depth, then wait out sacrificial frames
+                    self._z_axis.move_to(
+                        self.spec.z_range.min + (k+1)*self.spec.depth_spacing
+                    )
+                    self._discard(self.spec.discarded_frames_per_step)
+
+        finally:
+            self._frame_acquisition.stop()
+            self._publish(None) # publish the sentinel
+
+            # restore original velocity & position
+            self._z_axis.max_velocity = self._original_z_velocity
+            self._z_axis.move_to(self._original_z_position)
+
+
+class ContinuousStackAcquisition(StackAcquisition):
+    """Step during a sacrificial-frame period, then hold and save frames."""
+    Spec: Type[ContinuousStackSpec] = ContinuousStackSpec
+
+    def __init__(self, hw, system_config, spec):
+        super().__init__(hw, system_config, spec)
+        self.spec: ContinuousStackSpec  # refine type hints
+
+    @property
+    def z_undershoot(self) -> units.Position:
+        """Undershoot the stack z_range minimum to counter backlash and allow axis to establish constant velocity"""
+        return self.spec.z_range.min - 3*self.spec.depth_spacing - self._z_axis.backlash
+
+    def _work(self):
+        prev_pos = self._z_axis.position
+        try:
+            # Take up backlash
+            self._z_axis.move_to(
+                position = self.spec.z_range.min - 3*self.spec.depth_spacing,
+                blocking = True
+            )
+            self._z_axis.max_velocity = self.spec.depth_spacing * self._frame_acquisition.buffer_rate
+            self._z_axis.acceleration = self.spec.depth_spacing * self._frame_acquisition.buffer_rate * self._frame_acquisition.buffer_rate
+
+            # Start acquisition, start Z axis motion (or other order?)
+            # TODO this would be much better if Z-stage could be HW-triggered by the digitizer
+            self._frame_acquisition.start()
+            while not self._frame_acquisition.active.is_set():
+                time.sleep(0.001)
+
+            self._z_axis.move_to(
+                self.spec.z_range.min + (self.n_depths + 3)*self.spec.depth_spacing
+            ) 
             
+            while self._n_published < self.n_depths:
+                with self._receive_product() as product:
+                    # Discard until depth in range
+                    if product.positions[-1] < (self.spec.z_range.min - 0.5*self.spec.depth_spacing):
+                        print("Discarding an acquisition product")
+                    else:
+                        self._publish(product)
+                        if self._n_published == 1:
+                            print("START", product.positions[-1] - self.spec.z_range.min)                           
+                        
+        finally:
+            self._frame_acquisition.stop()
+            self._publish(None) # publish the sentinel
+
+            # restore original velocity & position
+            self._z_axis.max_velocity = self._original_z_velocity
+            self._z_axis.move_to(self._original_z_position)

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "dirigo"
-version = "0.3.15"
+version = "0.3.16"
 description = "Dirigo is an extensible backend for scientific image acquisition"
 authors = [
     {name = "T. D. Weber", email = "tweber@mit.edu"}
@@ -36,7 +36,8 @@ dirigo-init = "dirigo.init:main"
 [project.entry-points."dirigo_acquisitions"]
 raster_line      = "dirigo.plugins.acquisitions:LineAcquisition"
 raster_frame     = "dirigo.plugins.acquisitions:FrameAcquisition"
-raster_stack     = "dirigo.plugins.acquisitions:StackAcquisition"
+step_stack       = "dirigo.plugins.acquisitions:StepAndHoldStackAcquisition"
+continuous_stack = "dirigo.plugins.acquisitions:ContinuousStackAcquisition"
 line_camera_line = "dirigo.plugins.acquisitions:LineCameraLineAcquisition"
 # calibrations (create data for calibrations)
 trigger_delay_calibration = "dirigo.plugins.calibrations:TriggerDelayCalibration"
