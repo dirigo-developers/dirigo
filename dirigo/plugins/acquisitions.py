@@ -1,8 +1,9 @@
 from pathlib import Path
 import threading, math, time
-from typing import Type, Literal
+from typing import Type
 from functools import cached_property
 from dataclasses import dataclass, asdict
+from enum import Enum
 
 from platformdirs import user_config_dir
 import numpy as np
@@ -14,8 +15,7 @@ from dirigo.hw_interfaces.hw_interface import NoBuffers
 from dirigo.sw_interfaces.acquisition import Acquisition, AcquisitionSpec, AcquisitionProduct
 from dirigo.hw_interfaces.detector import DetectorSet, Detector
 from dirigo.hw_interfaces.digitizer import (
-    Digitizer, DigitizerProfile, AuxiliaryIOMode, SampleClockSource,
-    InputMode, TriggerSource, StreamingMode
+    Digitizer, DigitizerProfile, AuxiliaryIOMode, StreamingMode,
 )
 from dirigo.hw_interfaces.scanner import (Waveforms,
     FastRasterScanner, SlowRasterScanner, GalvoScanner, ResonantScanner,
@@ -29,6 +29,19 @@ from dirigo.hw_interfaces.stage import MultiAxisStage
 
 TWO_PI = 2 * math.pi 
 
+
+class AxialDirection(Enum):
+    POSITIVE = 1
+    NEGATIVE = -1
+
+    @property
+    def sign(self) -> int:
+        return self.value
+
+    @property
+    def opposite(self) -> "AxialDirection":
+        return AxialDirection(-self.value)
+    
 
 # ---------- Runtime objects ----------
 @dataclass
@@ -906,6 +919,7 @@ class StackAcquisitionSpec(FrameAcquisitionSpec):
     def __init__(self, 
                  z_range: dict | units.PositionRange,  
                  depth_spacing: str | units.Position,
+                 z_direction: str | AxialDirection = AxialDirection.POSITIVE,
                  **kwargs):
         kwargs['frames_per_acquisition'] = -1   # allow unlimited frames in child FrameAcquisition
         super().__init__(**kwargs)
@@ -918,6 +932,11 @@ class StackAcquisitionSpec(FrameAcquisitionSpec):
         self.depth_spacing = units.Position(depth_spacing)
         if self.depth_spacing <= 0:
             raise ValueError("Stack depth spacing must be greater than 0.")
+
+        if isinstance(z_direction, AxialDirection):
+            self.z_direction = z_direction
+        else:
+            self.z_direction = AxialDirection[str(z_direction).upper()]
 
 
 class StepAndHoldStackSpec(StackAcquisitionSpec):
@@ -981,56 +1000,12 @@ class StackAcquisition(Acquisition):
         raise NotImplementedError
 
     @property
-    def z_overshoot(self) -> units.Position:
-        raise NotImplementedError
-
-    @property
     def n_depths(self) -> int:
-        return math.ceil(self.spec.z_range.range / self.spec.depth_spacing)
+        r_prime = self.spec.z_range.range + self.spec.depth_spacing / 1e6
+        return math.ceil(r_prime / self.spec.depth_spacing)
 
     def _work(self):
-
-        # Take up backlash, if any
-        if self._z_axis.backlash > 0:
-            self._z_axis.move_to(units.Position(self._depths[0])) 
-        
-        # spin until reach start position
-        time.sleep(units.Time('10 ms'))
-        while self._z_axis.moving:
-            time.sleep(units.Time('10 ms'))
-
-        try:
-            # Start child FrameAcquisition
-            self._frame_acquisition.start()
-
-            # Get sacrificial frames (don't pass them along)
-            for _ in range(self.spec._sacrificial_frames_per_step):
-                with self._receive_product(): pass
-
-            for i in range(1, self.spec.depths_per_acquisition+1):
-                for _ in range(self.spec._saved_frames_per_step):
-                    # Wait for frame data, and pass along
-                    with self._receive_product() as product:
-                        self._publish(product)
-
-                    # TOOD, blank laser beam for step time (sacrificial frames)
-
-                if i < self.spec.depths_per_acquisition:
-                    # Move Z scanner to next depth
-                    self._z_axis.move_to(units.Position(self._depths[i]))
-
-                    # Wait for sacrificial frames
-                    for _ in range(self.spec._sacrificial_frames_per_step):
-                        with self._receive_product(): pass
-        
-        finally:
-            self._frame_acquisition.stop()
-            self._publish(None) # publish the sentinel
-
-            # restore original velocity & position
-            self._z_axis.max_velocity = self._original_z_velocity
-            self._z_axis.move_to(self._original_z_position)
-
+        raise NotImplementedError
 
     # Typing refinements
     @property
@@ -1059,33 +1034,50 @@ class StepAndHoldStackAcquisition(StackAcquisition):
         return super().get_specification(spec_name) # type: ignore
     
     @property
+    def _z_start(self) -> units.Position:
+        """First plane of the stack, depending on sweep direction."""
+        if self.spec.z_direction == AxialDirection.POSITIVE:
+            return self.spec.z_range.min
+        else:
+            return self.spec.z_range.max
+
+    @property
     def z_undershoot(self) -> units.Position:
-        """Slightly undershoot the stack z_range minimum to counter backlash"""
-        return self.spec.z_range.min - self._z_axis.backlash
+        """
+        Pre-position on the far side of the first plane so the move into
+        _z_start takes up backlash. Undershoot direction follows the sweep:
+        approach a +z stack from below, a -z stack from above.
+        """
+        return units.Position(self._z_start - self.spec.z_direction.sign * self._z_axis.backlash)
+
+    def _depth_position(self, k: int) -> units.Position:
+        """Target position of plane k (0-indexed), signed by sweep direction."""
+        return units.Position(
+            self._z_start + self.spec.z_direction.sign * k * self.spec.depth_spacing
+        )
 
     def _work(self):
         try:
-            # Move to starting depth, discard sacrificial frames
-            self._z_axis.move_to(self.spec.z_range.min)
+            # Move to first plane (takes up backlash from the undershoot side)
+            print("Moving to", self._z_start, "(start)")
+            self._z_axis.move_to(self._z_start)
             self._frame_acquisition.start()
-            self._discard(self.spec.discarded_frames_per_step) # TODO, do we want to make this longer?
+            self._discard(2 * self.spec.discarded_frames_per_step)
 
             for k in range(self.n_depths):
-
                 for _ in range(self.spec.published_frames_per_step):
                     with self._receive_product() as product:
                         self._publish(product)
 
-                if k < self.n_depths-1:
+                if k < self.n_depths - 1:
                     # Move to next depth, then wait out sacrificial frames
-                    self._z_axis.move_to(
-                        self.spec.z_range.min + (k+1)*self.spec.depth_spacing
-                    )
+                    print("Moving to", self._depth_position(k + 1))
+                    self._z_axis.move_to(self._depth_position(k + 1))
                     self._discard(self.spec.discarded_frames_per_step)
 
         finally:
             self._frame_acquisition.stop()
-            self._publish(None) # publish the sentinel
+            self._publish(None)  # publish the sentinel
 
             # restore original velocity & position
             self._z_axis.max_velocity = self._original_z_velocity
