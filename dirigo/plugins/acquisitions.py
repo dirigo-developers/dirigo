@@ -960,7 +960,18 @@ class StepAndHoldStackSpec(StackAcquisitionSpec):
 
 class ContinuousStackSpec(StackAcquisitionSpec):
     """Constant-velocity Z sweep; one frame per depth. No per-step frame counts."""
-    pass
+    def __init__(self, n_volumes: int = 1, lead_in_depths: int = 3, **kwargs):
+        super().__init__(**kwargs)
+
+        n_volumes = int(n_volumes)
+        if n_volumes < 1:
+            raise ValueError("n_volumes must be >= 1")
+        self.n_volumes = n_volumes
+
+        lead_in_depths = int(lead_in_depths)
+        if lead_in_depths < 0:
+            raise ValueError("lead_in_depths must be >= 0")
+        self.lead_in_depths = lead_in_depths
 
 
 class StackAcquisition(Acquisition):
@@ -976,13 +987,11 @@ class StackAcquisition(Acquisition):
 
         self._original_z_position = self._z_axis.position
         self._original_z_velocity = self._z_axis.max_velocity
+        self._original_z_acceleration = self._z_axis.acceleration
 
         # Set up child FrameAcquisition & subscribe to it
         self._frame_acquisition = FrameAcquisition(hw, system_config, self.spec)
         self._frame_acquisition.add_subscriber(self)
-
-        # Prepare Z stage
-        self._z_axis.move_to(self.z_undershoot)
 
     def _receive_product(self, 
                          block: bool = True, 
@@ -994,10 +1003,6 @@ class StackAcquisition(Acquisition):
         for _ in range(n):
             with self._receive_product():
                 pass
-
-    @property
-    def z_undershoot(self) -> units.Position:
-        raise NotImplementedError
 
     @property
     def n_depths(self) -> int:
@@ -1028,6 +1033,9 @@ class StepAndHoldStackAcquisition(StackAcquisition):
     def __init__(self, hw, system_config, spec):
         super().__init__(hw, system_config, spec)
         self.spec: StepAndHoldStackSpec  # refine type hints
+
+        # Prepare Z stage
+        self._z_axis.move_to(self.z_undershoot, blocking=True)
 
     @classmethod
     def get_specification(cls, spec_name = "default") -> StepAndHoldStackSpec:
@@ -1085,48 +1093,140 @@ class StepAndHoldStackAcquisition(StackAcquisition):
 
 
 class ContinuousStackAcquisition(StackAcquisition):
-    """Step during a sacrificial-frame period, then hold and save frames."""
+    """
+    Acquire one or more constant-velocity Z stacks.
+
+    Frames are published in volume-major order. Between volumes, frames
+    acquired during flyback and backlash take-up are discarded.
+    """
     Spec: Type[ContinuousStackSpec] = ContinuousStackSpec
 
     def __init__(self, hw, system_config, spec):
         super().__init__(hw, system_config, spec)
         self.spec: ContinuousStackSpec  # refine type hints
 
+    @classmethod
+    def get_specification(cls, spec_name="default") -> ContinuousStackSpec:
+        return super().get_specification(spec_name)  # type: ignore
+
     @property
-    def z_undershoot(self) -> units.Position:
-        """Undershoot the stack z_range minimum to counter backlash and allow axis to establish constant velocity"""
-        return self.spec.z_range.min - 3*self.spec.depth_spacing - self._z_axis.backlash
+    def _sweep_sign(self) -> int:
+        return self.spec.z_direction.sign
+
+    @property
+    def _z_lead_in(self) -> units.Position:
+        """
+        Point at which the sweep begins.
+
+        The distance between this point and _z_start allows the stage to
+        accelerate before entering the published Z range.
+        """
+        return units.Position(
+            self._z_start 
+            - self._sweep_sign * self.spec.lead_in_depths * self.spec.depth_spacing
+        )
+
+    @property
+    def _z_start(self) -> units.Position:
+        """First nominal plane of each volume."""
+        if self.spec.z_direction == AxialDirection.POSITIVE:
+            return self.spec.z_range.min
+        return self.spec.z_range.max
+
+    @property
+    def _sweep_target(self) -> units.Position:
+        """
+        Target beyond the last nominal plane.
+
+        The extra travel prevents the stage from decelerating while frames
+        inside the requested Z range are being acquired.
+        """
+        extra_travel = (self.n_depths + self.spec.lead_in_depths) * self.spec.depth_spacing
+        return units.Position(self._z_start + self._sweep_sign * extra_travel)
+
+    def _has_entered_stack(self, z: units.Position) -> bool:
+        """
+        Return True once the frame position is within half a plane of the
+        first nominal stack position.
+        """
+        half_spacing = 0.5 * self.spec.depth_spacing
+
+        if self._sweep_sign > 0:
+            return z >= self._z_start - half_spacing
+
+        return z <= self._z_start + half_spacing
+
+    def _prepare_next_volume(self) -> None:
+        """
+        Fly-back to lead-in point from the correct direction.
+
+        Frames generated during the move are discarded.
+        """
+        self._z_axis.move_to(self._z_lead_in, blocking=False)
+
+        while True:
+            with self._receive_product() as product:
+                z = product.positions[-1]
+
+                if abs(z - self._z_lead_in) < self.spec.depth_spacing/10:
+                    return
+
+    def _acquire_one_volume(self, volume_index: int, first_sequence_index: int,) -> int:
+        """
+        Perform one sweep and publish exactly n_depths frames.
+        """
+        self._z_axis.move_to(self._sweep_target, blocking=False)
+
+        entered_stack = False
+        depth_index = 0
+        sequence_index = first_sequence_index
+
+        while depth_index < self.n_depths:
+            with self._receive_product() as product:
+                if not entered_stack:
+                    z = product.positions[-1]
+                    entered_stack = self._has_entered_stack(z)
+
+                    if not entered_stack:
+                        continue
+
+                product.sequence_index = sequence_index
+                product.volume_index = volume_index
+                product.depth_index = depth_index
+
+                self._publish(product)
+
+                sequence_index += 1
+                depth_index += 1
+
+        return sequence_index
 
     def _work(self):
-        prev_pos = self._z_axis.position
-        try:
-            # Take up backlash
-            self._z_axis.move_to(
-                position = self.spec.z_range.min - 3*self.spec.depth_spacing,
-                blocking = True
-            )
-            self._z_axis.max_velocity = self.spec.depth_spacing * self._frame_acquisition.buffer_rate
-            self._z_axis.acceleration = self.spec.depth_spacing * self._frame_acquisition.buffer_rate * self._frame_acquisition.buffer_rate
+        frame_rate = self._frame_acquisition.buffer_rate
+        sweep_velocity = self.spec.depth_spacing * frame_rate
+        sweep_acceleration = sweep_velocity * frame_rate
 
-            # Start acquisition, start Z axis motion (or other order?)
-            # TODO this would be much better if Z-stage could be HW-triggered by the digitizer
-            self._frame_acquisition.start()
-            while not self._frame_acquisition.active.is_set():
+        sequence_index = 0
+
+        try:
+            self._z_axis.move_to(self._z_lead_in, blocking=True)
+
+            self._z_axis.max_velocity = sweep_velocity
+            self._z_axis.acceleration = sweep_acceleration
+
+            self._frame_acquisition.start() 
+            
+            while not self._frame_acquisition.active.is_set(): # wait until FrameAcquisition is active
                 time.sleep(0.001)
 
-            self._z_axis.move_to(
-                self.spec.z_range.min + (self.n_depths + 3)*self.spec.depth_spacing
-            ) 
-            
-            while self._n_published < self.n_depths:
-                with self._receive_product() as product:
-                    # Discard until depth in range
-                    if product.positions[-1] < (self.spec.z_range.min - 0.5*self.spec.depth_spacing):
-                        print("Discarding an acquisition product")
-                    else:
-                        self._publish(product)
-                        if self._n_published == 1:
-                            print("START", product.positions[-1] - self.spec.z_range.min)                           
+            for volume_index in range(self.spec.n_volumes):
+                if volume_index > 0:
+                    self._prepare_next_volume()
+
+                sequence_index = self._acquire_one_volume(
+                    volume_index=volume_index,
+                    first_sequence_index=sequence_index,
+                )
                         
         finally:
             self._frame_acquisition.stop()
@@ -1134,4 +1234,5 @@ class ContinuousStackAcquisition(StackAcquisition):
 
             # restore original velocity & position
             self._z_axis.max_velocity = self._original_z_velocity
+            self._z_axis.acceleration = self._original_z_acceleration
             self._z_axis.move_to(self._original_z_position)

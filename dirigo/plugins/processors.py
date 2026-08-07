@@ -733,3 +733,38 @@ class RollingAverageProcessor(Processor[RasterFrameProcessor]):
     @property
     def data_range(self) -> units.IntRange:
         return self._data_range
+
+
+class AxialPeakFinderProcessor(Processor[RasterFrameProcessor]):
+    def __init__(self, upstream):
+        super().__init__(upstream)
+        self._data_range = upstream.data_range
+        self._acquisition: FrameAcquisition | LineAcquisition 
+
+        self._stack_data = []
+        self._depths = []
+
+    def _receive_product(self) -> ProcessorProduct:
+            return super()._receive_product(self) # type: ignore
+    
+    def _work(self):
+        try:
+            while True:
+                with self._receive_product() as frame:
+                    self._stack_data.append(frame.data.copy())
+                    self._depths.append(frame.positions[-1])
+
+        except EndOfStream:
+            self._publish(None)
+
+        self._extract_peak()
+
+    def _extract_peak(self):
+        stack = np.array(self._stack_data)
+        z_profile = np.sum(stack, axis=(1,2,3))
+        i = np.argmax(z_profile)
+        print("Signal peak:", self._depths[i])
+
+    @property
+    def data_range(self) -> units.IntRange:
+        return self._data_range

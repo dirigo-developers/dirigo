@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "dirigo"
-version = "0.3.16"
+version = "0.3.17"
 description = "Dirigo is an extensible backend for scientific image acquisition"
 authors = [
     {name = "T. D. Weber", email = "tweber@mit.edu"}
@@ -51,6 +51,7 @@ raw_raster_frame = "dirigo.plugins.loaders:RawRasterFrameLoader"
 raster_frame = "dirigo.plugins.processors:RasterFrameProcessor"
 line_camera_line = "dirigo.plugins.processors:LineCameraLineProcessor"
 rolling_average = "dirigo.plugins.processors:RollingAverageProcessor"
+axial_peak_finder = "dirigo.plugins.processors:AxialPeakFinderProcessor"
 
 [project.entry-points."dirigo_color_vectors"]
 gray = "dirigo.plugins.displays:Gray"

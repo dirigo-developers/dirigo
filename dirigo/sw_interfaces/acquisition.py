@@ -2,6 +2,7 @@ from typing import TYPE_CHECKING, Type, List, Optional
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 import uuid
+import queue
 
 import numpy as np
 
@@ -43,21 +44,39 @@ class AcquisitionSpec:
 
 class AcquisitionProduct(Product):
     """
-    Container for acquisition's product(s): (raw) data, timestamps (optional), 
-    and positions (optional).
-    
-    Automatically returns itself to acquisition product pool when released by 
-    all subscribing consumers (functionality of the Product base class).
+    Container for acquired data and its per-product coordinates.
+
+    Index fields are zero-based. An index is None when that logical axis is
+    not applicable to the acquisition.
     """
-    # data: np.ndarray # Dimensions: Record, Sample, Channel
-    # timestamps: float | np.ndarray | None = None # should be one or more time points (in seconds since the start)
-    # positions: tuple[float] | np.ndarray | None = None # should be one or more sets of coordinates (x,y)
-    __slots__ = ("data", "timestamps", "positions")
-    def __init__(self, pool, data: np.ndarray, timestamps = None, positions = None):
+
+    __slots__ = (
+        "timestamps", 
+        "positions",
+        "sequence_index",
+        "volume_index",
+        "depth_index"
+    )
+
+    data: np.ndarray
+
+    def __init__(
+        self, 
+        pool: queue.Queue, 
+        data: np.ndarray, 
+        timestamps = None, 
+        positions = None,
+        sequence_index: int | None = None,
+        volume_index: int | None = None,
+        depth_index: int | None = None,
+    ):
         super().__init__(pool, data)
+
         self.timestamps = timestamps
         self.positions = positions
-        self.data: np.ndarray
+        self.sequence_index = sequence_index
+        self.volume_index = volume_index
+        self.depth_index = depth_index
 
 
 class AcquisitionWorker(Worker):

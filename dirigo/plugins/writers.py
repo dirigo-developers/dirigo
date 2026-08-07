@@ -92,7 +92,7 @@ class TiffWriter(Writer):
         self._stack_data = []
 
     def _receive_product(self) ->  AcquisitionProduct | ProcessorProduct:
-        return super()._receive_product(self) # type: ignore
+        return super()._receive_product() # type: ignore
          
     def _work(self):
         try:
@@ -118,6 +118,23 @@ class TiffWriter(Writer):
             self._store_z_plane(frame)
         else:
             raise ValueError("Unsupported TiffWriter mode: {self.mode}")
+
+    def _accumulate_frame_metadata(
+        self,
+        frame: AcquisitionProduct | ProcessorProduct,
+    ) -> None:
+        
+        timestamps = getattr(frame, "timestamps", None)
+        if timestamps is not None:
+            self._timestamps.append(
+                np.asarray(timestamps, dtype=np.float64).copy()
+            )
+
+        positions = getattr(frame, "positions", None)
+        if positions is not None:
+            self._positions.append(
+                np.asarray(positions, dtype=np.float64).copy()
+            )
 
     def _save_frame(self, frame: AcquisitionProduct | ProcessorProduct):
         # Create the writer object if necessary
@@ -147,11 +164,7 @@ class TiffWriter(Writer):
         )
         self.frames_saved += 1
 
-        # Accumulate timestamps & positions
-        if hasattr(frame, 'timestamps') and frame.timestamps is not None:
-            self._timestamps.append(frame.timestamps)
-        if hasattr(frame, 'positions') and frame.positions is not None:
-            self._positions.append(frame.positions)
+        self._accumulate_frame_metadata(frame)
 
         # when number of frames per file reached, close writer & write metadata
         if self.frames_saved % self.frames_per_file == 0:
