@@ -229,7 +229,7 @@ class RasterFrameProcessor(Processor[Acquisition]):
             ampl = runtime_info.scanner_amplitude
             self._distortion_polynomial = io.load_line_distortion_calibration(ampl)
         except:
-            self._distortion_polynomial = Polynomial([1])
+            self.clear_distortion_polynomial()
 
         self._scaling_factor = 2 ** (
             self._bits_precision - runtime_info.digitizer_bit_depth
@@ -250,6 +250,9 @@ class RasterFrameProcessor(Processor[Acquisition]):
         self._lags = np.full(shape=(10,), fill_value=np.nan, dtype=np.float32) # to track bidi phase alignment
         self._lag_counter = 0
         self._frames_processed = 0
+
+    def clear_distortion_polynomial(self) -> None:
+        self._distortion_polynomial = Polynomial([1])
 
     def _receive_product(self, block: bool = True, timeout: float | None = None) -> AcquisitionProduct:
         return super()._receive_product(block, timeout) # type: ignore
@@ -307,6 +310,9 @@ class RasterFrameProcessor(Processor[Acquisition]):
             # / (self._acquisition.digitizer_profile.sample_clock.rate * avg_trig_period)
             processed.phase = self._trigger_error
             processed.frequency = float(self._fast_scanner_frequency)
+
+        processed.strip_index = acq_product.strip_index
+        processed.depth_index = acq_product.depth_index
         
         return processed
 
@@ -537,6 +543,8 @@ class LineCameraLineProcessor(Processor[LineCameraLineAcquisition]):
             nsamples_to_sum = self.nsamples_to_sum
         )
         out_product.positions = in_product.positions
+        out_product.strip_index = in_product.strip_index
+        out_product.depth_index = in_product.depth_index
 
         self._buffers_processed += 1
         
