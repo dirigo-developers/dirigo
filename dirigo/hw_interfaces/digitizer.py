@@ -101,6 +101,10 @@ class ExternalTriggerCoupling(StrEnum):
     AC = "ac"
     DC = "dc"
 
+class ExternalTriggerRange(StrEnum):
+    "Enumerate non-analog voltage range (e.g. TTL)."
+    TTL = "ttl"
+
 class AuxiliaryIOMode(StrEnum):
     """Enumerate auxiliary I/O modes for trigger/pacer/digital lines."""
     DISABLE             = "disable"
@@ -189,7 +193,7 @@ class TriggerProfile:
     level: units.Voltage | None
     external_coupling: ExternalTriggerCoupling | None
     external_impedance: units.Resistance | ImpedanceMode | None
-    external_range: units.VoltageRange | None
+    external_range: units.VoltageRange | ExternalTriggerRange | None
 
     @classmethod
     def from_dict(cls, d: dict) -> "TriggerProfile":
@@ -199,7 +203,7 @@ class TriggerProfile:
 
         external_coupling = (
             ExternalTriggerCoupling(str(d["external_coupling"]).lower())
-            if "external_coupling" in d else None
+            if "external_coupling" in d else ExternalTriggerCoupling.DC
         )
 
         if "external_impedance" in d:
@@ -217,8 +221,10 @@ class TriggerProfile:
                     min=d["external_range"]["min"], 
                     max=d["external_range"]["max"]
                 )
+            elif isinstance(d["external_range"], str) and d["external_range"].lower() == "ttl":
+                external_range = ExternalTriggerRange.TTL
             else:
-                external_range = units.VoltageRange(d["external_range"])
+                external_range = units.VoltageRange(d["external_range"]) # e.g "±5 V"
         else:
             external_range = None
 
@@ -226,7 +232,7 @@ class TriggerProfile:
             source              = TriggerSource(str(d["source"]).lower()),
             slope               = TriggerSlope(str(d["slope"]).lower()),
             level               = level,
-            external_coupling   = external_coupling or ExternalTriggerCoupling.DC,
+            external_coupling   = external_coupling,
             external_impedance  = external_impedance,
             external_range      = external_range,
         )
@@ -570,13 +576,13 @@ class Trigger(ABC):
 
     @property
     @abstractmethod
-    def external_range(self) -> units.VoltageRange: # return dirigo.VoltageRange?
+    def external_range(self) -> units.VoltageRange | ExternalTriggerRange:
         """Voltage range for external triggers."""
         pass
     
     @external_range.setter
     @abstractmethod
-    def external_range(self, range: units.VoltageRange):
+    def external_range(self, range: units.VoltageRange | ExternalTriggerRange):
         """Set the voltage range for external triggers.
         
         Must match one of the options provided by `external_range_options`.
@@ -585,7 +591,7 @@ class Trigger(ABC):
 
     @property
     @abstractmethod
-    def external_range_options(self) -> Collection[units.VoltageRange]:
+    def external_range_options(self) -> Collection[units.VoltageRange | ExternalTriggerRange]:
         """Set of available external trigger voltage ranges."""
         pass
 
