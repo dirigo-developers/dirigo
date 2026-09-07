@@ -1,6 +1,7 @@
 from typing import Optional, cast
 from abc import abstractmethod
 from typing import TypeVar, Generic, Self
+import queue
 
 import numpy as np
 
@@ -21,22 +22,32 @@ class ProcessorProduct(Product):
     Automatically returns itself to processor product pool when released by 
     all subscribing consumers (functionality of the Product base class).
     """
-    __slots__ = ("data", "timestamps", "positions", "indices", "phase", "frequency")
+    __slots__ = (
+        "timestamps", 
+        "positions", 
+        "phase", 
+        "frequency",
+        "strip_index",
+        "depth_index",
+    )
     def __init__(self, 
-                 pool, 
+                 pool: queue.Queue, 
                  data: np.ndarray, 
                  timestamps = None, 
                  positions = None,
-                 indices = None,
                  phase = None,
-                 frequency = None):
+                 frequency = None,
+                 strip_index: int | None = None,
+                 depth_index: int | None = None,
+    ):
         super().__init__(pool, data)
+
         self.timestamps = timestamps
         self.positions = positions
-        self.indices: Optional[tuple[int, ...]] = indices
-        self.phase: Optional[float] = phase # should be in radians
-        self.frequency: Optional[float] = frequency # should be in hertz
-        self.data: np.ndarray
+        self.phase = phase # should be in radians
+        self.frequency = frequency # should be in hertz
+        self.strip_index = strip_index
+        self.depth_index = depth_index
 
 
 class Processor(Generic[U_co], Worker):

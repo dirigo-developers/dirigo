@@ -54,6 +54,7 @@ class AcquisitionProduct(Product):
         "timestamps", 
         "positions",
         "sequence_index",
+        "strip_index",
         "volume_index",
         "depth_index"
     )
@@ -67,6 +68,7 @@ class AcquisitionProduct(Product):
         timestamps = None, 
         positions = None,
         sequence_index: int | None = None,
+        strip_index: int | None = None,
         volume_index: int | None = None,
         depth_index: int | None = None,
     ):
@@ -75,6 +77,7 @@ class AcquisitionProduct(Product):
         self.timestamps = timestamps
         self.positions = positions
         self.sequence_index = sequence_index
+        self.strip_index = strip_index
         self.volume_index = volume_index
         self.depth_index = depth_index
 
