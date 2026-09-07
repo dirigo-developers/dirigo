@@ -1,6 +1,7 @@
 from functools import cached_property
 import json, struct
 from typing import Sequence, Literal
+from pathlib import Path
 
 import tifffile
 import numpy as np
@@ -13,9 +14,10 @@ from dirigo.plugins.acquisitions import (
     SampleAcquisitionSpec, FrameAcquisition, FrameAcquisitionSpec, 
     StackAcquisitionSpec
 )
+from dirigo.components.io import SystemConfig
     
 
-def serialize_float64_list(arrays: Sequence[np.ndarray]) -> bytes:
+def _serialize_float64_list(arrays: Sequence[np.ndarray]) -> bytes:
     """
     Pack a sequence of float64 NumPy arrays (all same shape) into one
     compressed bytes object.
@@ -47,6 +49,26 @@ def serialize_float64_list(arrays: Sequence[np.ndarray]) -> bytes:
     header = struct.pack(fmt, ndims, *ref.shape)     # bytes
 
     return header + stack.ravel().tobytes()
+
+
+def _deserialize_float64_list(blob: bytes):
+    """
+    Reverse of `serialize_float64_list` (full shape in header).
+    Returns a list of np.ndarray, all copies (writable).
+    """
+    ndims, = struct.unpack_from("<Q", blob, 0)
+
+    fmt          = f"<Q{ndims}Q"
+    header_size  = struct.calcsize(fmt)
+    shape        = struct.unpack_from(fmt, blob, 0)[1:]
+
+    items_per_frame = np.prod(shape)
+    bytes_per_frame = items_per_frame * 8
+    n_frames        = (len(blob) - header_size) // bytes_per_frame
+
+    data   = np.frombuffer(blob, dtype=np.float64, offset=header_size)
+    stack  = data.reshape((n_frames, *shape))
+    return [stack[i].copy() for i in range(n_frames)]
 
 
 class TiffWriter(Writer):
@@ -189,11 +211,11 @@ class TiffWriter(Writer):
                 with tifffile.TiffFile(self._fn, mode='r+b') as tif: # type: ignore
 
                     if len(self._timestamps) > 0:
-                        data = serialize_float64_list(self._timestamps)
+                        data = _serialize_float64_list(self._timestamps)
                         tif.pages[0].tags[self.TIMESTAMPS_TAG].overwrite(data) # type: ignore
 
                     if len(self._positions) > 0:
-                        data = serialize_float64_list(self._positions)
+                        data = _serialize_float64_list(self._positions)
                         tif.pages[0].tags[self.POSITIONS_TAG].overwrite(data) # type: ignore
 
             # Clear accumulants
@@ -303,3 +325,94 @@ class TiffWriter(Writer):
                 (self.POSITIONS_TAG,         'B',  1,  temp_entry,    True)
             ]
 
+
+
+def read_system_config(filepath: Path):
+
+    with tifffile.TiffFile(filepath) as tif:
+        if len(tif.pages) == 0:
+            raise ValueError(f"TIFF file contains no pages: {filepath}")
+
+        page = tif.pages[0]
+        tag = page.tags.get(TiffWriter.SYSTEM_CONFIG_TAG)
+
+        if tag is None:
+            raise KeyError(
+                f"TIFF file has no System Config tag "
+                f"({TiffWriter.SYSTEM_CONFIG_TAG}): {filepath}"
+            )
+
+        value = tag.value
+
+    if not isinstance(value, str):
+        raise ValueError(
+            f"SystemConfig tag has unexpected type {type(value).__name__}; "
+            "expected str"
+        )
+    
+    text = value.rstrip("\x00")
+
+    try:
+        system_config_dict = json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise ValueError(
+            f"SystemConfig tag in {filepath} does not contain valid JSON"
+        ) from exc
+
+    return SystemConfig.from_dict(system_config_dict)
+
+
+def read_acquisition_spec(filepath: Path):
+    """Returns a dictionary of values for the Acquisition Spec."""
+
+    with tifffile.TiffFile(filepath) as tif:
+        if len(tif.pages) == 0:
+            raise ValueError(f"TIFF file contains no pages: {filepath}")
+
+        page = tif.pages[0]
+        tag = page.tags.get(TiffWriter.ACQUISITION_SPEC_TAG)
+
+        if tag is None:
+            raise KeyError(
+                f"TIFF file has no Acquisition Spec tag "
+                f"({TiffWriter.ACQUISITION_SPEC_TAG}): {filepath}"
+            )
+
+        value = tag.value
+
+    if not isinstance(value, str):
+        raise ValueError(
+            f"Acquisition Spec tag has unexpected type {type(value).__name__}; "
+            "expected str"
+        )
+    
+    text = value.rstrip("\x00")
+
+    try:
+        acquisition_spec_dict = json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise ValueError(
+            f"Acquisition Spec tag in {filepath} does not contain valid JSON"
+        ) from exc
+
+    return acquisition_spec_dict
+
+
+def read_positions(filepath: Path):
+
+    with tifffile.TiffFile(filepath) as tif:
+        if not tif.pages:
+            raise ValueError(f"TIFF file contains no pages: {filepath}")
+
+        tag = tif.pages[0].tags.get(TiffWriter.POSITIONS_TAG)
+        if tag is None or (tag.value == b' \x00'):
+           raise ValueError(
+               f"Positions tag in {filepath} does not contain value position data."
+           )
+
+        return _deserialize_float64_list(tag.value)
+
+
+if __name__ == "__main__":
+    spec = read_acquisition_spec(r"C:\dirigo-data\temp\macro_mag_calibration_0.tif")
+    spec

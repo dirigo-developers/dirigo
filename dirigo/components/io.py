@@ -226,6 +226,27 @@ class SystemConfig:
     def from_toml(cls, toml_path: "Path") -> "SystemConfig":
         return cls(load_toml(toml_path))
 
+    @classmethod
+    def from_dict(cls, data: dict) -> "SystemConfig":
+
+        raw: dict[str, dict[str, Any]] = {}
+
+        for key in _CONFIG_KEYS:
+            section = data.get(key)
+
+            if section is None:
+                continue
+
+            if not isinstance(section, dict):
+                raise TypeError(
+                    f"SystemConfig section {key!r} must be a dict or None; "
+                    f"got {type(section).__name__}"
+                )
+
+            raw[key] = dict(section)
+
+        return cls(raw)
+
     def has(self, key: str) -> bool:
         return getattr(self, key) is not None
 
