@@ -57,6 +57,6 @@ Groups of settable parameters for devices are group into profiles. The initializ
 
 ## Funding
 
-Development of Dirigo has been supported in part by the National Cancer Institute of the National Institutes of Health under award number R01CA249151.
+Development of Dirigo has been supported in part by the National Cancer Institute of the National Institutes of Health under award numbers K99CA307867 and R01CA249151.
 
 The content of this repository is solely the responsibility of the authors and does not necessarily represent the official views of the National Institutes of Health.
