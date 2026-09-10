@@ -12,7 +12,7 @@ from dirigo.sw_interfaces import Writer
 from dirigo.sw_interfaces.acquisition import Acquisition, AcquisitionProduct
 from dirigo.plugins.acquisitions import (
     SampleAcquisitionSpec, FrameAcquisition, FrameAcquisitionSpec, 
-    StackAcquisitionSpec
+    StackAcquisitionSpec, LineAcquisitionRuntimeInfo
 )
 from dirigo.components.io import SystemConfig
     
@@ -396,6 +396,42 @@ def read_acquisition_spec(filepath: Path):
         ) from exc
 
     return acquisition_spec_dict
+
+
+def read_runtime_info(filepath: Path):
+    """Returns a dictionary of values for the Runtime Info."""
+
+    with tifffile.TiffFile(filepath) as tif:
+        if len(tif.pages) == 0:
+            raise ValueError(f"TIFF file contains no pages: {filepath}")
+
+        page = tif.pages[0]
+        tag = page.tags.get(TiffWriter.RUNTIME_INFO_TAG)
+
+        if tag is None:
+            raise KeyError(
+                f"TIFF file has no Runtime Info tag "
+                f"({TiffWriter.RUNTIME_INFO_TAG}): {filepath}"
+            )
+
+        value = tag.value
+
+    if not isinstance(value, str):
+        raise ValueError(
+            f"Runtime Info tag has unexpected type {type(value).__name__}; "
+            "expected str"
+        )
+    
+    text = value.rstrip("\x00")
+
+    try:
+        runtime_info_dict = json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise ValueError(
+            f"Runtime Info tag in {filepath} does not contain valid JSON"
+        ) from exc
+
+    return LineAcquisitionRuntimeInfo.from_dict(runtime_info_dict)
 
 
 def read_positions(filepath: Path):

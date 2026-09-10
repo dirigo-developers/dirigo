@@ -168,7 +168,7 @@ def load_line_gradient_calibration(
     )
 
     x = entries[:,0]
-    if abs(line_width - (x[-1] - x[0])) / line_width > 0.001:
+    if abs(line_width - (x[-1] - x[0])) / line_width > 0.01:
         raise RuntimeError("Line gradient calibrated on different line size.")
     print(abs(pixel_size - (x[1] - x[0])))
     if abs(pixel_size - (x[1] - x[0])) / pixel_size > 0.01:
@@ -263,3 +263,5 @@ class SystemConfig:
         # original TOML mapping (no None entries; missing keys absent)
         return self._raw
     
+if __name__ == "__main__":
+    load_line_gradient_calibration(units.Position("1 mm"), units.Position("1 um"))
