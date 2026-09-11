@@ -55,8 +55,8 @@ class AcquisitionProduct(Product):
         "positions",
         "sequence_index",
         "strip_index",
+        "depth_index",
         "volume_index",
-        "depth_index"
     )
 
     data: np.ndarray
@@ -69,8 +69,8 @@ class AcquisitionProduct(Product):
         positions = None,
         sequence_index: int | None = None,
         strip_index: int | None = None,
-        volume_index: int | None = None,
         depth_index: int | None = None,
+        volume_index: int | None = None,
     ):
         super().__init__(pool, data)
 
@@ -78,8 +78,8 @@ class AcquisitionProduct(Product):
         self.positions = positions
         self.sequence_index = sequence_index
         self.strip_index = strip_index
-        self.volume_index = volume_index
         self.depth_index = depth_index
+        self.volume_index = volume_index
 
 
 class AcquisitionWorker(Worker):

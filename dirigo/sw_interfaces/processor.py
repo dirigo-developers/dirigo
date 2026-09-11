@@ -27,8 +27,10 @@ class ProcessorProduct(Product):
         "positions", 
         "phase", 
         "frequency",
+        "sequence_index",
         "strip_index",
         "depth_index",
+        "volume_index",
     )
     def __init__(self, 
                  pool: queue.Queue, 
@@ -37,8 +39,10 @@ class ProcessorProduct(Product):
                  positions = None,
                  phase = None,
                  frequency = None,
+                 sequence_index: int | None = None,
                  strip_index: int | None = None,
                  depth_index: int | None = None,
+                 volume_index: int | None = None
     ):
         super().__init__(pool, data)
 
@@ -46,8 +50,10 @@ class ProcessorProduct(Product):
         self.positions = positions
         self.phase = phase # should be in radians
         self.frequency = frequency # should be in hertz
+        self.sequence_index = sequence_index
         self.strip_index = strip_index
         self.depth_index = depth_index
+        self.volume_index = volume_index
 
 
 class Processor(Generic[U_co], Worker):

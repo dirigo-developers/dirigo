@@ -6,10 +6,12 @@ import tifffile
 import numpy as np
 
 from dirigo.sw_interfaces.acquisition import Loader
-from dirigo.plugins.writers import TiffWriter
-from dirigo.components.io import SystemConfig
-from dirigo.plugins.acquisitions import LineAcquisitionRuntimeInfo, FrameAcquisitionSpec
-from dirigo.hw_interfaces.digitizer import DigitizerProfile
+from dirigo.plugins.writers import (
+    read_system_config, read_acquisition_spec, read_runtime_info,
+    read_digitizer_profile, read_positions, read_timestamps,
+    read_sequence_indices, read_strip_indices, read_depth_indices, read_volume_indices
+)
+from dirigo.plugins.acquisitions import FrameAcquisitionSpec
 
 
 
@@ -40,51 +42,46 @@ class RawRasterFrameLoader(Loader):
         super().__init__(file_path, thread_name="Frame loader")
 
         with tifffile.TiffFile(self._file_path) as tif:   
+            page = tif.pages[0]
+            self._init_product_pool(n=4, shape=page.shape, dtype=page.dtype)
 
-            self._init_product_pool(
-                n=4, 
-                shape=tif.pages[0].shape, 
-                dtype=tif.pages[0].dtype
-            )
+        self.system_config = read_system_config(self._file_path)
+        self.spec = spec_class(**read_acquisition_spec(self._file_path))
+        self.runtime_info = read_runtime_info(self._file_path)
+        self.digitizer_profile = read_digitizer_profile(self._file_path)
 
-            tags = tif.pages[0].tags
+        self._timestamps = read_timestamps(self._file_path)
+        self._positions = read_positions(self._file_path)
+        self._sequence_indices = read_sequence_indices(self._file_path)
+        self._strip_indices = read_strip_indices(self._file_path)
+        self._depth_indices = read_depth_indices(self._file_path)
+        self._volume_indices = read_volume_indices(self._file_path)
 
-            cfg_dict = json.loads(tags[TiffWriter.SYSTEM_CONFIG_TAG].value)
-            self.system_config = SystemConfig(cfg_dict)
-
-            runtime_dict = json.loads(tags[TiffWriter.RUNTIME_INFO_TAG].value)
-            self.runtime_info = LineAcquisitionRuntimeInfo.from_dict(runtime_dict)
-
-            spec_dict = json.loads(tags[TiffWriter.ACQUISITION_SPEC_TAG].value)
-            self.spec = spec_class(**spec_dict)
-
-            digi_dict = json.loads(tags[TiffWriter.DIGITIZER_PROFILE_TAG].value)
-            self.digitizer_profile = DigitizerProfile.from_dict(digi_dict)
-
-            self.frames_read = 0
+        self.frames_read = 0
 
     def _work(self):
         try:
             with tifffile.TiffFile(self._file_path) as tif:   
                 
-                n_frames = len(tif.pages)
-                
-                self._timestamps = deserialize_float64_list(
-                    tif.pages[0].tags[TiffWriter.TIMESTAMPS_TAG].value
-                )
-                self._positions = deserialize_float64_list(
-                    tif.pages[0].tags[TiffWriter.POSITIONS_TAG].value
-                )
-
-                while self.frames_read < n_frames:
+                while self.frames_read < len(tif.pages):
                     frame = self._get_free_product()
 
                     # Copy raw data
                     frame.data[...] = tif.pages[self.frames_read].asarray()
 
-                    # Copy metadata
-                    frame.timestamps = self._timestamps[self.frames_read]
-                    frame.positions = self._positions[self.frames_read]
+                    # Copy metadata, if available
+                    if self._timestamps:
+                        frame.timestamps = self._timestamps[self.frames_read]
+                    if self._positions:
+                        frame.positions = self._positions[self.frames_read]
+                    if self._sequence_indices:
+                        frame.sequence_index = self._sequence_indices[self.frames_read]
+                    if self._strip_indices:
+                        frame.strip_index = self._strip_indices[self.frames_read]
+                    if self._depth_indices:
+                        frame.depth_index = self._depth_indices[self.frames_read]
+                    if self._volume_indices:
+                        frame.volume_index = self._volume_indices[self.frames_read]
 
                     print(f"publishing frame {self.frames_read}")
                     self._publish(frame)

@@ -10,12 +10,18 @@ from dirigo.sw_interfaces.worker import EndOfStream
 from dirigo.sw_interfaces.processor import Processor, ProcessorProduct
 from dirigo.sw_interfaces import Writer
 from dirigo.sw_interfaces.acquisition import Acquisition, AcquisitionProduct
+from dirigo.hw_interfaces.digitizer import DigitizerProfile
 from dirigo.plugins.acquisitions import (
     SampleAcquisitionSpec, FrameAcquisition, FrameAcquisitionSpec, 
     StackAcquisitionSpec, LineAcquisitionRuntimeInfo
 )
 from dirigo.components.io import SystemConfig
     
+
+_INDEX_DTYPE = np.dtype("<u8")  # little-endian uint64
+_FLOAT_DTYPE = np.dtype("<f8")  # little-endian float64
+_TEMP_ENTRY = b"\x00"
+
 
 def _serialize_float64_list(arrays: Sequence[np.ndarray]) -> bytes:
     """
@@ -48,7 +54,7 @@ def _serialize_float64_list(arrays: Sequence[np.ndarray]) -> bytes:
     fmt    = f"<Q{ndims}Q"                           # e.g. "<Q2Q" for 2‑D frames
     header = struct.pack(fmt, ndims, *ref.shape)     # bytes
 
-    return header + stack.ravel().tobytes()
+    return header + stack.astype(_FLOAT_DTYPE, copy=False).ravel().tobytes()
 
 
 def _deserialize_float64_list(blob: bytes):
@@ -66,10 +72,20 @@ def _deserialize_float64_list(blob: bytes):
     bytes_per_frame = items_per_frame * 8
     n_frames        = (len(blob) - header_size) // bytes_per_frame
 
-    data   = np.frombuffer(blob, dtype=np.float64, offset=header_size)
+    data   = np.frombuffer(blob, dtype=_FLOAT_DTYPE, offset=header_size)
     stack  = data.reshape((n_frames, *shape))
     return [stack[i].copy() for i in range(n_frames)]
 
+
+def _serialize_uint64_list(values: list[int]) -> bytes:
+    """Serialize non-negative integer indices as little-endian uint64 values."""
+    return np.asarray(values, dtype=_INDEX_DTYPE).tobytes(order="C")
+
+
+def _deserialize_uint64_list(blob: bytes) -> list[int]:
+    """Deserialize a little-endian uint64 index vector."""
+    return np.frombuffer(blob, dtype=_INDEX_DTYPE).tolist()
+    
 
 class TiffWriter(Writer):
     """
@@ -78,13 +94,17 @@ class TiffWriter(Writer):
     Private fields: (65000-65535 available as re-usable)
 
     """
-    SYSTEM_CONFIG_TAG      = 65000  # Static info
-    RUNTIME_INFO_TAG       = 65001  # Dynamic runtime/driver provided info
-    ACQUISITION_SPEC_TAG   = 65100  # General specification for acquisition type
-    DIGITIZER_PROFILE_TAG  = 65200  # Rarely changed settings
-    CAMERA_PROFILE_TAG     = 65201
-    TIMESTAMPS_TAG         = 65400  # Per-frame metadata
-    POSITIONS_TAG          = 65401
+    SYSTEM_CONFIG_TAG = 65000  # Static info
+    RUNTIME_INFO_TAG = 65001  # Dynamic runtime/driver provided info
+    ACQUISITION_SPEC_TAG = 65100  # General specification for acquisition type
+    DIGITIZER_PROFILE_TAG = 65200  # Rarely changed settings
+    CAMERA_PROFILE_TAG = 65201
+    TIMESTAMPS_TAG = 65400  # Per-frame metadata
+    POSITIONS_TAG = 65401
+    SEQUENCE_INDEX_TAG = 65402
+    STRIP_INDEX_TAG = 65403
+    DEPTH_INDEX_TAG = 65404
+    VOLUME_INDEX_TAG = 65405
 
     def __init__(self, 
                  upstream: Acquisition | Processor,
@@ -111,6 +131,11 @@ class TiffWriter(Writer):
 
         self._timestamps = [] # accumulate as frames arrive from acquistion or processor
         self._positions = []
+        self._sequence_indices = []
+        self._strip_indices = []
+        self._depth_indices = []
+        self._volume_indices = []
+
         self._stack_data = []
 
     def _receive_product(self) ->  AcquisitionProduct | ProcessorProduct:
@@ -146,17 +171,27 @@ class TiffWriter(Writer):
         frame: AcquisitionProduct | ProcessorProduct,
     ) -> None:
         
-        timestamps = getattr(frame, "timestamps", None)
-        if timestamps is not None:
+        if frame.timestamps is not None:
             self._timestamps.append(
-                np.asarray(timestamps, dtype=np.float64).copy()
+                np.asarray(frame.timestamps, dtype=np.float64).copy()
             )
 
-        positions = getattr(frame, "positions", None)
-        if positions is not None:
+        if frame.positions is not None:
             self._positions.append(
-                np.asarray(positions, dtype=np.float64).copy()
+                np.asarray(frame.positions, dtype=np.float64).copy()
             )
+
+        if frame.sequence_index is not None:
+            self._sequence_indices.append(int(frame.sequence_index))
+
+        if frame.strip_index is not None:
+            self._strip_indices.append(int(frame.strip_index))
+
+        if frame.depth_index is not None:
+            self._depth_indices.append(int(frame.depth_index))
+
+        if frame.volume_index is not None:
+            self._volume_indices.append(int(frame.volume_index))
 
     def _save_frame(self, frame: AcquisitionProduct | ProcessorProduct):
         # Create the writer object if necessary
@@ -204,23 +239,50 @@ class TiffWriter(Writer):
             self._writer = None
             self.files_saved += 1
 
-            if self._timestamps or self._positions:
+            has_frame_metadata = any((
+                self._timestamps,
+                self._positions,
+                self._sequence_indices,
+                self._strip_indices,
+                self._depth_indices,
+                self._volume_indices,
+            ))
+
+            if has_frame_metadata:
                 # write metadata by overwrite (appends data to end of file and
                 # patches the offset to point at this new location, tifffile does
                 # all of this automatically)
                 with tifffile.TiffFile(self._fn, mode='r+b') as tif: # type: ignore
+                    page = tif.pages[0]
 
-                    if len(self._timestamps) > 0:
-                        data = _serialize_float64_list(self._timestamps)
-                        tif.pages[0].tags[self.TIMESTAMPS_TAG].overwrite(data) # type: ignore
+                    if self._timestamps:
+                        page.tags[self.TIMESTAMPS_TAG].overwrite(
+                            _serialize_float64_list(self._timestamps)
+                        )
 
-                    if len(self._positions) > 0:
-                        data = _serialize_float64_list(self._positions)
-                        tif.pages[0].tags[self.POSITIONS_TAG].overwrite(data) # type: ignore
+                    if self._positions:
+                        page.tags[self.POSITIONS_TAG].overwrite(
+                            _serialize_float64_list(self._positions)
+                        )
+
+                    for tag_code, values in (
+                        (self.SEQUENCE_INDEX_TAG, self._sequence_indices),
+                        (self.STRIP_INDEX_TAG, self._strip_indices),
+                        (self.DEPTH_INDEX_TAG, self._depth_indices),
+                        (self.VOLUME_INDEX_TAG, self._volume_indices),
+                    ):
+                        if values:
+                            page.tags[tag_code].overwrite(
+                                _serialize_uint64_list(values)
+                            )
 
             # Clear accumulants
-            self._timestamps = []
-            self._positions = []
+            self._timestamps.clear()
+            self._positions.clear()
+            self._sequence_indices.clear()
+            self._strip_indices.clear()
+            self._depth_indices.clear()
+            self._volume_indices.clear()
     
     def _write_stack(self):
         spec: StackAcquisitionSpec = self._acquisition.spec     # type: ignore
@@ -302,8 +364,16 @@ class TiffWriter(Writer):
         system_json = json.dumps(self._acquisition.system_config.to_dict())
         runtime_json = json.dumps(self._acquisition.runtime_info.to_dict())
         spec_json = json.dumps(self._acquisition.spec.to_dict())      
-        temp_entry = b' \x00' # temp will be patched (overwritten) later
 
+        per_frame_tags = [
+            (self.TIMESTAMPS_TAG,     "B", 1, _TEMP_ENTRY, True),
+            (self.POSITIONS_TAG,      "B", 1, _TEMP_ENTRY, True),
+            (self.SEQUENCE_INDEX_TAG, "B", 1, _TEMP_ENTRY, True),
+            (self.STRIP_INDEX_TAG,    "B", 1, _TEMP_ENTRY, True),
+            (self.DEPTH_INDEX_TAG,    "B", 1, _TEMP_ENTRY, True),
+            (self.VOLUME_INDEX_TAG,   "B", 1, _TEMP_ENTRY, True),
+        ]
+        
         if isinstance(self._acquisition.spec, SampleAcquisitionSpec):
             digi_json = json.dumps(self._acquisition.digitizer_profile.to_dict())
             return [
@@ -311,8 +381,7 @@ class TiffWriter(Writer):
                 (self.RUNTIME_INFO_TAG,      's',  0,  runtime_json,  True),
                 (self.ACQUISITION_SPEC_TAG,  's',  0,  spec_json,     True),
                 (self.DIGITIZER_PROFILE_TAG, 's',  0,  digi_json,     True),
-                (self.TIMESTAMPS_TAG,        'B',  1,  temp_entry,    True),
-                (self.POSITIONS_TAG,         'B',  1,  temp_entry,    True)
+                *per_frame_tags,
             ]
         else:
             #cam_json = json.dumps(self._acq.camera_profile.to_dict()) # TODO make camera profile & to_dict()
@@ -321,8 +390,7 @@ class TiffWriter(Writer):
                 (self.RUNTIME_INFO_TAG,      's',  0,  runtime_json,  True),
                 (self.ACQUISITION_SPEC_TAG,  's',  0,  spec_json,     True),
                 #(self.CAMERA_PROFILE_TAG,    's',  0,  cam_json,      True),
-                (self.TIMESTAMPS_TAG,        'B',  1,  temp_entry,    True),
-                (self.POSITIONS_TAG,         'B',  1,  temp_entry,    True)
+                *per_frame_tags,
             ]
 
 
@@ -434,14 +502,62 @@ def read_runtime_info(filepath: Path):
     return LineAcquisitionRuntimeInfo.from_dict(runtime_info_dict)
 
 
-def read_positions(filepath: Path):
+def read_digitizer_profile(filepath: Path) -> DigitizerProfile:
+    with tifffile.TiffFile(filepath) as tif:
+        if len(tif.pages) == 0:
+            raise ValueError(f"TIFF file contains no pages: {filepath}")
+
+        page = tif.pages[0]
+        tag = page.tags.get(TiffWriter.DIGITIZER_PROFILE_TAG)
+
+        if tag is None:
+            raise KeyError(
+                f"TIFF file has no Digitizer Profile tag "
+                f"({TiffWriter.DIGITIZER_PROFILE_TAG}): {filepath}"
+            )
+
+        value = tag.value
+
+    if not isinstance(value, str):
+        raise ValueError(
+            f"Digitizter Profile tag has unexpected type {type(value).__name__}; "
+            "expected str"
+        )
+    
+    text = value.rstrip("\x00")
+
+    try:
+        digitizer_profile_dict = json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise ValueError(
+            f"Digitizer Profile tag in {filepath} does not contain valid JSON"
+        ) from exc
+
+    return DigitizerProfile.from_dict(digitizer_profile_dict)
+
+
+def read_timestamps(filepath: Path):
 
     with tifffile.TiffFile(filepath) as tif:
         if not tif.pages:
             raise ValueError(f"TIFF file contains no pages: {filepath}")
 
+        tag = tif.pages[0].tags.get(TiffWriter.TIMESTAMPS_TAG)
+        if tag is None or (tag.value == _TEMP_ENTRY):
+           raise ValueError(
+               f"Timestamps tag in {filepath} does not contain value position data."
+           )
+
+        return _deserialize_float64_list(tag.value)
+
+
+def read_positions(filepath: Path):
+    with tifffile.TiffFile(filepath) as tif:
+        if not tif.pages:
+            raise ValueError(f"TIFF file contains no pages: {filepath}")
+
         tag = tif.pages[0].tags.get(TiffWriter.POSITIONS_TAG)
-        if tag is None or (tag.value == b' \x00'):
+        if tag is None or (tag.value == _TEMP_ENTRY):
            raise ValueError(
                f"Positions tag in {filepath} does not contain value position data."
            )
@@ -449,6 +565,49 @@ def read_positions(filepath: Path):
         return _deserialize_float64_list(tag.value)
 
 
-if __name__ == "__main__":
-    spec = read_acquisition_spec(r"C:\dirigo-data\temp\macro_mag_calibration_0.tif")
-    spec
+def read_sequence_indices(filepath: Path):
+    with tifffile.TiffFile(filepath) as tif:
+        if not tif.pages:
+            raise ValueError(f"TIFF file contains no pages: {filepath}")
+
+        tag = tif.pages[0].tags.get(TiffWriter.SEQUENCE_INDEX_TAG)
+        if tag is None or (tag.value == _TEMP_ENTRY):
+            return None
+        else:
+            return _deserialize_uint64_list(tag.value)
+
+
+def read_strip_indices(filepath: Path):
+    with tifffile.TiffFile(filepath) as tif:
+        if not tif.pages:
+            raise ValueError(f"TIFF file contains no pages: {filepath}")
+
+        tag = tif.pages[0].tags.get(TiffWriter.STRIP_INDEX_TAG)
+        if tag is None or (tag.value == _TEMP_ENTRY):
+            return None
+        else:
+            return _deserialize_uint64_list(tag.value)
+
+
+def read_depth_indices(filepath: Path):
+    with tifffile.TiffFile(filepath) as tif:
+        if not tif.pages:
+            raise ValueError(f"TIFF file contains no pages: {filepath}")
+
+        tag = tif.pages[0].tags.get(TiffWriter.DEPTH_INDEX_TAG)
+        if tag is None or (tag.value == _TEMP_ENTRY):
+            return None
+        else:
+            return _deserialize_uint64_list(tag.value)
+
+
+def read_volume_indices(filepath: Path):
+    with tifffile.TiffFile(filepath) as tif:
+        if not tif.pages:
+            raise ValueError(f"TIFF file contains no pages: {filepath}")
+
+        tag = tif.pages[0].tags.get(TiffWriter.VOLUME_INDEX_TAG)
+        if tag is None or (tag.value == _TEMP_ENTRY):
+            return None
+        else:
+            return _deserialize_uint64_list(tag.value)
