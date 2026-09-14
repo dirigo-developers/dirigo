@@ -160,14 +160,14 @@ class Worker(threading.Thread, ABC):
             except ValueError:
                 pass  # already removed
 
-    def _publish(self, obj: Product | None):
+    def _publish(self, obj: Product | float | None):
         """Fan out obj to all subscribers. """
         with self._subs_lock:
             subs_snapshot = tuple(self._subscribers)
 
-        if obj is None: # sentinel for work finished
+        if (obj is None) or isinstance(obj, float):
             for s in subs_snapshot:
-                s._inbox.put(None)
+                s._inbox.put(obj)
             return
         
         if not isinstance(obj, Product):
