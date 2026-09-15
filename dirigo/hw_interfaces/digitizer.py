@@ -161,7 +161,7 @@ class ChannelProfile:
             impedance = ImpedanceMode(s) if s in (e.value for e in ImpedanceMode) \
                 else units.Resistance(str(imp_raw))
 
-        rng = d.get("range")
+        rng = d.get("input_range")
         if isinstance(rng, dict):
             input_range = units.VoltageRange(rng['min'], rng['max'])
         elif isinstance(rng, str):
