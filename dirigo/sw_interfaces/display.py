@@ -2,7 +2,7 @@ from abc import ABC, abstractmethod
 from enum import Enum
 from typing import Callable, Literal, Self, Tuple, ClassVar, Type, overload
 from importlib.metadata import entry_points
-
+import queue
 
 import numpy as np
 
@@ -145,7 +145,23 @@ def load_transfer_function(name: str, **params) -> TransferFunction:
 
 # ---------- Display Worker API ----------
 class DisplayProduct(Product):
-    pass
+    __slots__ = (
+        "timestamps", 
+        "positions", 
+        "sequence_index",
+        "strip_index",
+        "depth_index",
+        "volume_index",
+    )
+    def __init__(self, pool: queue.Queue, data: np.ndarray):
+        super().__init__(pool, data)
+
+        self.timestamps = None
+        self.positions = None
+        self.sequence_index = None
+        self.strip_index = None
+        self.depth_index = None
+        self.volume_index = None
 
 
 class Display(Worker):

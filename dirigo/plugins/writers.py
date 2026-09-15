@@ -170,7 +170,7 @@ class TiffWriter(Writer):
         self,
         frame: AcquisitionProduct | ProcessorProduct,
     ) -> None:
-        
+
         if frame.timestamps is not None:
             self._timestamps.append(
                 np.asarray(frame.timestamps, dtype=np.float64).copy()
