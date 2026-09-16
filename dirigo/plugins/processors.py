@@ -154,9 +154,12 @@ def compute_cross_power_spectrum(F: np.ndarray):
 
 
 class RasterFrameProcessor(Processor[Acquisition]):
-    def __init__(self, 
-                 upstream: LineAcquisition | FrameAcquisition, # and subclasses: FrameAcquisition, StackAcquisition, etc.
-                 bits_precision: int = 16):
+    def __init__(
+            self, 
+            upstream: LineAcquisition | FrameAcquisition,
+            bits_precision: int = 16,
+            auto_background: bool = False,
+        ):
         """
         Initialize a raster frame processor worker for the Acquisition worker.
 
@@ -185,14 +188,15 @@ class RasterFrameProcessor(Processor[Acquisition]):
             n_lines = self._spec.lines_per_buffer
         
         n_channels = sum([c.enabled for c in digitizer_profile.channels])
-        dt = np.int16 # TODO set this programatically
+        dt = np.int16
         self.processed_shape = (n_lines, self._spec.pixels_per_line, n_channels)
 
         self._invert_mask = -2 * np.array(
             [c.inverted for c in digitizer_profile.channels], dtype=dt
         ) + 1
 
-        self.signal_offset = np.round(io.load_signal_offset()).astype(np.int16)
+        self._auto_background_estimate: bool = auto_background
+        self.signal_offset = np.zeros(n_channels, dtype=dt)
 
         # Pre-allocate array for processed image
         self._init_product_pool(n=4, shape=self.processed_shape, dtype=dt)
@@ -261,6 +265,12 @@ class RasterFrameProcessor(Processor[Acquisition]):
         try:
             while True: 
                 with self._receive_product() as acquisition_product:
+                    if self._auto_background_estimate and (self._frames_processed == 0):
+                        self.signal_offset = np.round(np.mean(
+                            acquisition_product.data[:10, :, :], 
+                            axis=(0,1),
+                        )).astype(np.int16)
+
                     processed = self._process_frame(acquisition_product)
                     self._publish(processed) # sends off to Writer and/or Display workers
                     self._frames_processed += 1
