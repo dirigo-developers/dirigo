@@ -46,6 +46,7 @@ laser_frequency_calibration = "dirigo.plugins.calibrations:LaserPulseFrequencyCa
 
 [project.entry-points."dirigo_loaders"]
 raw_raster_frame = "dirigo.plugins.loaders:RawRasterFrameLoader"
+raw_camera_frame = "dirigo.plugins.loaders:RawCameraFrameLoader"
 
 [project.entry-points."dirigo_processors"]
 raster_frame = "dirigo.plugins.processors:RasterFrameProcessor"
