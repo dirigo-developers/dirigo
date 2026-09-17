@@ -13,7 +13,7 @@ from dirigo.sw_interfaces.acquisition import Acquisition, AcquisitionProduct
 from dirigo.hw_interfaces.digitizer import DigitizerProfile
 from dirigo.plugins.acquisitions import (
     SampleAcquisitionSpec, FrameAcquisition, FrameAcquisitionSpec, 
-    StackAcquisitionSpec, LineAcquisitionRuntimeInfo
+    StackAcquisitionSpec, LineAcquisitionRuntimeInfo, CameraAcquisitionRuntimeInfo
 )
 from dirigo.components.io import SystemConfig
     
@@ -499,7 +499,10 @@ def read_runtime_info(filepath: Path):
             f"Runtime Info tag in {filepath} does not contain valid JSON"
         ) from exc
 
-    return LineAcquisitionRuntimeInfo.from_dict(runtime_info_dict)
+    if 'camera_bit_depth' in runtime_info_dict.keys():
+        return CameraAcquisitionRuntimeInfo.from_dict(runtime_info_dict)
+    else:
+        return LineAcquisitionRuntimeInfo.from_dict(runtime_info_dict)
 
 
 def read_digitizer_profile(filepath: Path) -> DigitizerProfile:
