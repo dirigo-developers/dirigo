@@ -39,6 +39,8 @@ class RawRasterFrameLoader(Loader):
     def __init__(
         self, 
         file_path: str | Path, 
+        strips: int | list[int] | None = None,
+        depths: int | list[int] | None = None,
         spec_class: Type[FrameAcquisitionSpec] = FrameAcquisitionSpec
     ):
         super().__init__(file_path, thread_name="Raster Frame loader")
@@ -59,6 +61,24 @@ class RawRasterFrameLoader(Loader):
         self._depth_indices = read_depth_indices(self._file_path)
         self._volume_indices = read_volume_indices(self._file_path)
 
+        if strips is None:
+            self._selected_strips = list(set(self._strip_indices))
+        elif isinstance(strips, list):
+            self._selected_strips = strips
+        elif isinstance(strips, int):
+            self._selected_strips = [strips]
+        else:
+            raise ValueError("strips must be an integer or list of integers (or None)")
+
+        if depths is None:
+            self._selected_depths = list(set(self._depths_indices))
+        elif isinstance(depths, list):
+            self._selected_depths = depths
+        elif isinstance(depths, int):
+            self._selected_depths = [depths]
+        else:
+            raise ValueError("depths must be an integer or list of integers (or None)")
+        
         self.frames_read = 0
 
     def _work(self):
@@ -66,6 +86,12 @@ class RawRasterFrameLoader(Loader):
             with tifffile.TiffFile(self._file_path) as tif:   
                 
                 while self.frames_read < len(tif.pages):
+                    chosen_strip = self._strip_indices[self.frames_read] in self._selected_strips
+                    chosen_depth = self._depth_indices[self.frames_read] in self._selected_depths
+                    if not (chosen_strip and chosen_depth):
+                        self.frames_read += 1
+                        continue
+                        
                     frame = self._get_free_product()
 
                     # Copy raw data

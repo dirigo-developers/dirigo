@@ -228,12 +228,6 @@ class RasterFrameProcessor(Processor[Acquisition]):
                 lines_per_frame = self.processed_shape[0]
                 n = 2**int(np.log2(self.samples_per_period/2 - 2*self._fixed_trigger_delay))
                 self._cropped = np.zeros((lines_per_frame, n), dtype=np.float32) # preallocate
-        
-        try:
-            ampl = runtime_info.scanner_amplitude
-            self._distortion_polynomial = io.load_line_distortion_calibration(ampl)
-        except:
-            self.clear_distortion_polynomial()
 
         self._scaling_factor = 2 ** (
             self._bits_precision - runtime_info.digitizer_bit_depth
@@ -254,9 +248,6 @@ class RasterFrameProcessor(Processor[Acquisition]):
         self._lags = np.full(shape=(10,), fill_value=np.nan, dtype=np.float32) # to track bidi phase alignment
         self._lag_counter = 0
         self._frames_processed = 0
-
-    def clear_distortion_polynomial(self) -> None:
-        self._distortion_polynomial = Polynomial([1])
 
     def _receive_product(self, block: bool = True, timeout: float | None = None) -> AcquisitionProduct:
         return super()._receive_product(block, timeout) # type: ignore
@@ -328,53 +319,122 @@ class RasterFrameProcessor(Processor[Acquisition]):
 
     @cached_property
     def _temporal_edges(self):
-        # Set up an array with the SPATIAL edges of pixels--we will bin samples into the pixel edges
+        # Set up an array with the SPATIAL edges of pixels--we will bin
+        # samples into the pixel edges.
         ldc = self._spec.line_duty_cycle
 
-        # Create a resampling function based on fast axis waveform type
         if 'resonant' in self._acquisition.system_config.fast_raster_scanner['type'].lower():
-            ff = np.sin(np.pi/2 * ldc)
-            # image line should be taken from center of sinusoid sweep
-            s = np.linspace(ff, -ff, self._spec.pixels_per_line + 1) 
+            # Desired reconstructed image field, expressed in the nominal
+            # resonant scanner coordinate. This can intentionally be narrower
+            # than the recorded input interval to preserve resampling margin.
+            field_limit = np.sin(np.pi / 2.0 * ldc)
 
-            # account for distortion
-            if self._distortion_polynomial == Polynomial([1]):
-                s_corrected = s
-            else:
-                c0, c1, c2 = self._distortion_polynomial.coef
-                s_corrected = s/c0 - (c2/c0**4)*s**3 # Approximate inverse
+            # Uniform output-image edges, x.
+            x_edges = np.linspace(
+                field_limit,
+                -field_limit,
+                self._spec.pixels_per_line + 1,
+                dtype=np.float64,
+            )
 
-            # arccos inverts the cosinusoidal path, normalize scan period to 0.0 to 1.0
-            temporal_edges = np.arccos(s_corrected) / TWO_PI
+            # Calibration convention:
+            #
+            #     x(u)  = c0*u + (c2/3)*u**3
+            #     dx/du = c0 + c2*u**2
+            #
+            c0 = float(self._acquisition.runtime_info.line_distortion.magnification)
+            c2 = float(self._acquisition.runtime_info.line_distortion.distortion)
+
+            # Raw resonant scanner coordinate required for each desired image edge.
+            u_edges = self._inverse_line_distortion(x_edges, c0, c2)
+
+            if np.any(np.abs(u_edges) > 1.0):
+                raise ValueError(
+                    "Distortion correction requests positions outside the "
+                    "physical resonant scanner trajectory."
+                )
+
+            temporal_edges = np.arccos(u_edges) / TWO_PI
 
         else:
-            # Duty cycle needs to be slightly adjusted to reflect pixel period rounding 
-            ldc_corrected = self._spec.pixels_per_line / round(self._spec.pixels_per_line / ldc)
+            # Duty cycle needs to be slightly adjusted to reflect pixel period rounding.
+            ldc_corrected = self._spec.pixels_per_line / round(
+                self._spec.pixels_per_line / ldc
+            )
 
             if self._spec.bidirectional_scanning:
                 pixel_edges = np.linspace(
-                    start   = (1 - ldc_corrected) / 4, 
-                    stop    = 0.5 - (1 - ldc_corrected) / 4, 
-                    num     = self._spec.pixels_per_line + 1
+                    start=(1 - ldc_corrected) / 4,
+                    stop=0.5 - (1 - ldc_corrected) / 4,
+                    num=self._spec.pixels_per_line + 1,
                 )
             else:
-                # assume we start at 0 and go to corrected LDC
                 pixel_edges = np.linspace(
-                    start   = 0, 
-                    stop    = ldc_corrected, 
-                    num     = self._spec.pixels_per_line + 1
+                    start=0,
+                    stop=ldc_corrected,
+                    num=self._spec.pixels_per_line + 1,
                 )
 
-            temporal_edges = pixel_edges # The scan should already be linearized
+            temporal_edges = pixel_edges
 
         if self._spec.bidirectional_scanning:
-            temporal_edges_fwd = temporal_edges
-            temporal_edges_rvs = 1.0 - temporal_edges
-            temporal_edges = np.vstack([temporal_edges_fwd, temporal_edges_rvs]) 
+            temporal_edges = np.vstack([
+                temporal_edges,
+                1.0 - temporal_edges,
+            ])
         else:
             temporal_edges = np.vstack([temporal_edges])
 
         return temporal_edges
+
+    @staticmethod
+    def _inverse_line_distortion(
+        x: np.ndarray,
+        c0: float,
+        c2: float,
+    ) -> np.ndarray:
+        """
+        Return resonant scanner coordinate u for desired linear image
+        coordinate x.
+
+        The local magnification is:
+            dx/du = c0 + c2 * u**2
+
+        And therefore:
+            x = c0 * u + (c2 / 3) * u**3
+
+        Parameters
+        ----------
+        x:
+            Desired linearized image coordinate.
+        c0:
+            Central magnification factor. For example, 1.02 is a 2%
+            center-field magnification correction.
+        c2:
+            Quadratic local-magnification coefficient.
+        """
+        if c0 <= 0:
+            raise ValueError("Central magnification c0 must be positive.")
+
+        x = np.asarray(x, dtype=np.float64)
+
+        # Use 1st order inverse series as starting point
+        u = x / c0 - (c2 / (3.0 * c0**4)) * x**3
+
+        # Numerically invert x = c0*u + (c2/3)*u**3.
+        for _ in range(2):
+            local_magnification = c0 + c2 * u**2
+
+            if np.any(local_magnification <= 0):
+                raise ValueError(
+                    "Line-distortion mapping is not monotonic over the "
+                    "requested field."
+                )
+
+            residual = c0 * u + (c2 / 3.0) * u**3 - x
+            u -= residual / local_magnification
+
+        return u
 
     def calculate_start_indices(self, trigger_phase: int = 0):
         """Calculate the start position in digitizer records for each pixel."""

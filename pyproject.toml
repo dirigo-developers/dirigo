@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "dirigo"
-version = "0.3.18"
+version = "0.3.19"
 description = "Dirigo is an extensible backend for scientific image acquisition"
 authors = [
     {name = "T. D. Weber", email = "tweber@mit.edu"}
@@ -26,7 +26,7 @@ dependencies = [
     "toml",
     "platformdirs",
     "tifffile",
-    "nidaqmx"
+    "nidaqmx",
 ]
 urls = {"Homepage" = "https://github.com/dirigo-developers/dirigo"}
 

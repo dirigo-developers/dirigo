@@ -2,7 +2,7 @@ from pathlib import Path
 import threading, math, time
 from typing import Type
 from functools import cached_property
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, field, asdict
 from enum import Enum
 
 from platformdirs import user_config_dir
@@ -41,7 +41,18 @@ class AxialDirection(Enum):
     @property
     def opposite(self) -> "AxialDirection":
         return AxialDirection(-self.value)
-    
+
+
+@dataclass
+class LineDistortion:
+    """
+    Quadratic polynomial-based model of line distortion.
+
+    Each set of LineDistortion data should be specific to a scanner magnitude.
+    """
+    magnification: float = 1.0
+    distortion: float = 0.0
+
 
 # ---------- Runtime objects ----------
 @dataclass
@@ -54,28 +65,38 @@ class LineAcquisitionRuntimeInfo:
     digitizer_bit_depth: int
     digitizer_trigger_offset: int
     n_channels: int
-    stage_scanner_angle: units.Angle | None = None
+    stage_scanner_angle: units.Angle = units.Angle(0)
+    line_distortion: LineDistortion = field(
+        default_factory=LineDistortion
+    )
 
     @classmethod
     def from_acquisition(cls, acquisition: "LineAcquisition"):
         return cls(
-            line_rate                = acquisition.hw.fast_raster_scanner.frequency,
-            scanner_amplitude        = acquisition.hw.fast_raster_scanner.amplitude,
-            digitizer_bit_depth      = acquisition.hw.digitizer.bit_depth,
-            digitizer_trigger_offset = acquisition.hw.digitizer.acquire.trigger_delay,
-            n_channels               = sum([c.enabled for c in acquisition.hw.digitizer.channels]),
-            stage_scanner_angle      = acquisition.hw.laser_scanning_optics.stage_scanner_angle
+            line_rate=acquisition.hw.fast_raster_scanner.frequency,
+            scanner_amplitude=acquisition.hw.fast_raster_scanner.amplitude,
+            digitizer_bit_depth= acquisition.hw.digitizer.bit_depth,
+            digitizer_trigger_offset=acquisition.hw.digitizer.acquire.trigger_delay,
+            n_channels=sum([c.enabled for c in acquisition.hw.digitizer.channels]),
+            stage_scanner_angle=acquisition.hw.laser_scanning_optics.stage_scanner_angle,
+            # TODO add a way to get the stored line distortion info
         )
     
     @classmethod
     def from_dict(cls, d: dict):
+        distortion: dict = d.get("line_distortion", {})
+
         return cls(
-            line_rate                = units.Frequency(d['line_rate']),
-            scanner_amplitude        = units.Angle(d['scanner_amplitude']),
-            digitizer_bit_depth      = int(d['digitizer_bit_depth']),
-            digitizer_trigger_offset = int(d['digitizer_trigger_offset']),
-            n_channels               = int(d['n_channels']),
-            stage_scanner_angle      = units.Angle(d['stage_scanner_angle'])
+            line_rate=units.Frequency(d['line_rate']),
+            scanner_amplitude=units.Angle(d['scanner_amplitude']),
+            digitizer_bit_depth=int(d['digitizer_bit_depth']),
+            digitizer_trigger_offset=int(d['digitizer_trigger_offset']),
+            n_channels=int(d['n_channels']),
+            stage_scanner_angle=units.Angle(d['stage_scanner_angle']),
+            line_distortion=LineDistortion(
+                magnification=float(distortion.get("magnification", 1.0)),
+                distortion=float(distortion.get("distortion", 0.0)),
+            ),
         )
     
     def to_dict(self) -> dict:

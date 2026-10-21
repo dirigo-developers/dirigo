@@ -7,6 +7,7 @@ from dirigo.sw_interfaces.acquisition import AcquisitionProduct
 from dirigo.hw_interfaces.hw_interface import HardwareInterface
 
 
+
 class CameraConnectionType(Enum):
     CAMERA_LINK = 0
     GIGE        = 1
