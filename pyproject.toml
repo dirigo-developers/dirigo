@@ -1,101 +1,71 @@
 [build-system]
-requires = ["setuptools>=61.0", "wheel"]
+requires = ["setuptools>=77.0.3"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "dirigo"
-version = "0.3.19"
+version = "0.4.0"
 description = "Dirigo is an extensible backend for scientific image acquisition"
 authors = [
-    {name = "T. D. Weber", email = "tweber@mit.edu"}
+    {name = "Timothy D. Weber", email = "tweber@mit.edu"}
 ]
-license = {text = "MIT"}
+license = "MIT"
+license-files = ["LICENSE"]
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.14"
 classifiers = [
-  "Programming Language :: Python :: 3",
-  "Programming Language :: Python :: 3.12",
-  "Programming Language :: Python :: 3.13",
-  "License :: OSI Approved :: MIT License",
-  "Operating System :: Microsoft :: Windows",
-  "Topic :: System :: Hardware"
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.14",
+    "Operating System :: Microsoft :: Windows",
+    "Topic :: Scientific/Engineering",
+    "Topic :: Scientific/Engineering :: Medical Science Apps.",
 ]
 dependencies = [
+    "numpy",
     "numba",
     "scipy",
     "toml",
     "platformdirs",
     "tifffile",
-    "nidaqmx",
 ]
-urls = {"Homepage" = "https://github.com/dirigo-developers/dirigo"}
 
-[project.scripts]
-dirigo-init = "dirigo.init:main"
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "pytest-cov",
+    "ruff",
+    "ty",
+    "pre-commit",
+]
 
-[project.entry-points."dirigo_acquisitions"]
-raster_line      = "dirigo.plugins.acquisitions:LineAcquisition"
-raster_frame     = "dirigo.plugins.acquisitions:FrameAcquisition"
-step_stack       = "dirigo.plugins.acquisitions:StepAndHoldStackAcquisition"
-continuous_stack = "dirigo.plugins.acquisitions:ContinuousStackAcquisition"
-line_camera_line = "dirigo.plugins.acquisitions:LineCameraLineAcquisition"
-# calibrations (create data for calibrations)
-trigger_delay_calibration = "dirigo.plugins.calibrations:TriggerDelayCalibration"
-stage_translation_calibration = "dirigo.plugins.calibrations:StageTranslationCalibration"
-laser_frequency_calibration = "dirigo.plugins.calibrations:LaserPulseFrequencyCalibration"
+[project.urls]
+Homepage = "https://github.com/dirigo-developers/dirigo"
 
-[project.entry-points."dirigo_loaders"]
-raw_raster_frame = "dirigo.plugins.loaders:RawRasterFrameLoader"
-raw_camera_frame = "dirigo.plugins.loaders:RawCameraFrameLoader"
+[tool.ruff]
+line-length = 88
+indent-width = 4
+target-version = "py314"
 
-[project.entry-points."dirigo_processors"]
-raster_frame = "dirigo.plugins.processors:RasterFrameProcessor"
-line_camera_line = "dirigo.plugins.processors:LineCameraLineProcessor"
-rolling_average = "dirigo.plugins.processors:RollingAverageProcessor"
-axial_peak_finder = "dirigo.plugins.processors:AxialPeakFinderProcessor"
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle
+    "W",    # pycodestyle warnings
+    "F",    # pyflakes
+    "I",    # isort
+    "UP",   # pyupgrade
+    "B",    # flake8-bugbear
+    "SIM",  # flake8-simplify
+    "ANN",  # flake8-annotations
+    "PT",   # pytest style
+    "RUF",  # Ruff-specific
+    "N",    # pep8-naming
+    "NPY",  # numpy
+    "PERF", # perflint
+]
 
-[project.entry-points."dirigo_color_vectors"]
-gray = "dirigo.plugins.displays:Gray"
-red = "dirigo.plugins.displays:Red"
-green = "dirigo.plugins.displays:Green"
-blue = "dirigo.plugins.displays:Blue"
-cyan = "dirigo.plugins.displays:Cyan"
-magenta = "dirigo.plugins.displays:Magenta"
-yellow = "dirigo.plugins.displays:Yellow"
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra --cov=dirigo --cov-report=term-missing --import-mode=importlib"
 
-[project.entry-points."dirigo_transfer_functions"]
-gamma = "dirigo.plugins.displays:Gamma"
-inverted_gamma = "dirigo.plugins.displays:InvertedGamma"
-
-[project.entry-points."dirigo_displays"] # e.g. display processors
-frame = "dirigo.plugins.displays:FrameDisplay"
-
-[project.entry-points."dirigo_writers"]
-tiff = "dirigo.plugins.writers:TiffWriter"
-# special calibration writers
-trigger_delay_calibration = "dirigo.plugins.calibrations:TriggerDelayCalibrationWriter"
-#line_distortion_calibration = "dirigo.plugins.calibrations:LineDistortionCalibrationWriter"
-#stage_scanner_angle_calibration = "dirigo.plugins.calibrations:StageScannerAngleCalibrationWriter"
-signal_offset_calibration = "dirigo.plugins.calibrations:SignalOffsetCalibrationWriter"
-line_gradient_calibration = "dirigo.plugins.calibrations:LineGradientCalibrationWriter"
-
-[project.entry-points."dirigo_encoders"]
-linear_encoders_via_ni = "dirigo.plugins.encoders:MultiAxisLinearEncodersViaNI"
-
-[project.entry-points."dirigo_scanners"]
-resonant_scanner_via_ni = "dirigo.plugins.scanners:ResonantScannerViaNI"
-polygon_scanner_via_ni = "dirigo.plugins.scanners:PolygonScannerViaNI"
-fast_galvo_scanner_via_ni = "dirigo.plugins.scanners:FastGalvoScannerViaNI"
-slow_galvo_scanner_via_ni = "dirigo.plugins.scanners:SlowGalvoScannerViaNI"
-
-[project.entry-points."dirigo_beam_attenuators"]
-half_wave_plate = "dirigo.plugins.beam_attenuators:HalfWavePlateAttenuator"
-
-[project.entry-points."dirigo_shutters"]
-shutter_via_ni = "dirigo.plugins.shutters:ShutterViaNI"
-
-[project.entry-points."dirigo_illuminators"]
-led_via_ni = "dirigo.plugins.illuminators:LEDViaNI"
-
-[project.entry-points."dirigo_detectors"]
-generic = "dirigo.plugins.detectors:GenericDetector"
+[tool.ty.environment]
+python-version = "3.14"
