@@ -2,18 +2,7 @@ import pytest
 
 from dirigo.worker import Worker
 
-
-class StubWorker(Worker):
-    """Minimal concrete worker for testing inherited behavior."""
-
-    def _prepare(self) -> None:
-        pass
-
-    def _work(self) -> None:
-        pass
-
-    def _close(self) -> None:
-        pass
+from .stubs import BlockingWorker, StubWorker
 
 
 def test_worker_cannot_be_instantiated_directly() -> None:
@@ -25,6 +14,11 @@ def test_upstream_defaults_to_none() -> None:
     worker = StubWorker()
 
     assert worker.upstream is None
+
+
+def test_worker_rejects_invalid_upstream() -> None:
+    with pytest.raises(expected_exception=TypeError, match="upstream"):
+        StubWorker(upstream=object())  # ty: ignore[invalid-argument-type]
 
 
 def test_upstream_preserves_the_supplied_worker() -> None:
@@ -51,4 +45,34 @@ def test_explicit_name_is_preserved(name: str) -> None:
     worker = StubWorker(name=name)
 
     assert worker.name == name
+
+
+def test_worker_cannot_start_twice() -> None:
+    worker = StubWorker()
+    worker._start()
+
+    try:
+        with pytest.raises(expected_exception=RuntimeError, match="already started"):
+            worker._start()
+    finally:
+        worker._wait(timeout=2.0)
+
+
+def test_worker_cannot_wait_before_start() -> None:
+    worker = StubWorker()
+
+    with pytest.raises(expected_exception=RuntimeError, match="has not started"):
+        worker._wait()
+
+
+def test_worker_wait_raises_on_timeout() -> None:
+    worker = BlockingWorker()
+    worker._start()
+
+    try:
+        with pytest.raises(expected_exception=TimeoutError, match="did not finish"):
+            worker._wait(timeout=0.0)
+    finally:
+        worker.release.set()
+        worker._wait(timeout=2.0)
 

@@ -47,6 +47,8 @@ indent-width = 4
 target-version = "py314"
 
 [tool.ruff.lint]
+preview = true
+explicit-preview-rules = true
 select = [
     "E",    # pycodestyle
     "W",    # pycodestyle warnings
@@ -61,6 +63,7 @@ select = [
     "N",    # pep8-naming
     "NPY",  # numpy
     "PERF", # perflint
+    "E302", # two blank lines between top-level classes and functions
 ]
 
 [tool.pytest.ini_options]
