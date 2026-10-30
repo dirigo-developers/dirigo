@@ -1,16 +1,19 @@
 from threading import Lock
 from time import monotonic
+from typing import Any
 
 from .worker import Worker
+
+type _AnyWorker = Worker[Any, Any]
 
 
 class Pipeline:
     """A single-use execution graph of workers."""
 
-    def __init__(self, *workers: Worker) -> None:
+    def __init__(self, *workers: _AnyWorker) -> None:
         self._started: bool = False
-        self._workers: list[Worker] = []
-        self._launched: list[Worker] = []
+        self._workers: list[_AnyWorker] = []
+        self._launched: list[_AnyWorker] = []
 
         self._exception: BaseException | None = None
         self._exception_lock = Lock()
@@ -21,7 +24,7 @@ class Pipeline:
             self.add(worker)
 
     @property
-    def workers(self) -> tuple[Worker, ...]:
+    def workers(self) -> tuple[_AnyWorker, ...]:
         """All included workers in topological order.
 
         Each addition appends new workers upstream first, skipping duplicates.
@@ -30,7 +33,7 @@ class Pipeline:
         """
         return tuple(self._workers)
 
-    def add(self, worker: Worker) -> None:
+    def add(self, worker: _AnyWorker) -> None:
         """Include a worker and its upstream dependencies.
 
         Workers are included once, by identity, with dependencies before their
@@ -47,9 +50,9 @@ class Pipeline:
 
         existing_ids: set[int] = {id(item) for item in self._workers}
         visited_ids: set[int] = set()
-        pending: list[Worker] = []
+        pending: list[_AnyWorker] = []
 
-        current: Worker | None = worker
+        current: _AnyWorker | None = worker
 
         while current is not None:
             current_id: int = id(current)
@@ -125,15 +128,16 @@ class Pipeline:
         raise NotImplementedError
 
     def abort(self) -> None:
-        """Request cancellation without waiting for cleanup.
-
-        Repeated requests, including after completion, are harmless.
+        """Request graph-wide cancellation without waiting for completion.
 
         Raises:
             RuntimeError: If execution has not started.
         """
         if not self._started:
             raise RuntimeError("Pipeline execution has not started.")
+
+        for worker in self._workers:
+            worker._mark_abort_requested()
 
         for worker in self._workers:
             worker._request_abort()
@@ -201,7 +205,7 @@ class Pipeline:
         """Close prepared, unlaunched workers in reverse order."""
         for worker in reversed(workers):
             try:
-                worker._close()
+                worker._close_worker()
             except BaseException as exc:
                 worker._close_exception = exc
                 failure.add_note(

@@ -1,30 +1,44 @@
 from abc import ABC, abstractmethod
 from collections.abc import Callable
+from contextlib import AbstractContextManager
 from threading import Event, Thread
+from typing import Any
+
+from .exceptions import OperationCancelled
+from .product import Product
+from .publisher import Publisher
+from .subscription import Subscription
 
 
-class Worker(ABC):
+class Worker[InputT = object, OutputT = object](ABC):
+    """A single-use pipeline stage with a dedicated execution thread."""
+
     def __init__(
         self,
         *,
-        upstream: Worker | None = None,
+        upstream: Worker[Any, InputT] | None = None,
         name: str | None = None,
     ) -> None:
         if upstream is not None and not isinstance(upstream, Worker):
             raise TypeError("upstream must be a Worker or None.")
 
-        self._upstream: Worker | None = upstream
+        self._upstream: Worker[Any, InputT] | None = upstream
         self._name: str = name if name is not None else type(self).__name__
 
         self._thread: Thread | None = None
-        self._abort_requested = Event()
         self._finished = Event()
-
+        self._abort_requested = Event()
         self._exception: BaseException | None = None
         self._close_exception: BaseException | None = None
 
+        self._publisher = Publisher[OutputT]()
+        self._subscription: Subscription[InputT] | None = None
+
+        if upstream is not None:
+            self._subscription = upstream._publisher.subscribe(capacity=1)
+
     @property
-    def upstream(self) -> Worker | None:
+    def upstream(self) -> Worker[Any, InputT] | None:
         return self._upstream
 
     @property
@@ -33,15 +47,18 @@ class Worker(ABC):
 
     @abstractmethod
     def _prepare(self) -> None:
-        """Prepare resources needed for execution."""
+        """Prepare resources on the thread calling Pipeline.start()."""
 
     @abstractmethod
     def _work(self) -> None:
-        """Produce or consume products until completion."""
+        """On dedicated thread, produce or consume products until completion."""
 
     @abstractmethod
     def _close(self) -> None:
-        """Flush and release resources, including after partial preparation."""
+        """Release resources, including after partial preparation.
+
+        May run on the worker thread or the pipeline's calling thread.
+        """
 
     def _start(
         self,
@@ -74,22 +91,30 @@ class Worker(ABC):
         self,
         on_failure: Callable[[BaseException], None] | None = None,
     ) -> None:
-        """Execute work, then close resources and signal completion."""
+        """Wait for the execution thread and its cleanup to finish."""
         try:
             try:
                 self._work()
             except BaseException as exc:
-                self._exception: BaseException = exc
-                if on_failure is not None:
-                    on_failure(exc)
+                expected_cancellation = (
+                    isinstance(exc, OperationCancelled)
+                    and self._abort_requested.is_set()
+                )
+
+                if not expected_cancellation:
+                    self._exception = exc
+
+                    if on_failure is not None:
+                        on_failure(exc)
         finally:
             try:
-                self._close()
+                self._close_worker()
             except BaseException as exc:
-                self._close_exception: BaseException = exc
+                self._close_exception = exc
 
                 if self._exception is None:
-                    self._exception: BaseException = exc
+                    self._exception = exc
+
                     if on_failure is not None:
                         on_failure(exc)
                 else:
@@ -99,6 +124,43 @@ class Worker(ABC):
             finally:
                 self._finished.set()
 
-    def _request_abort(self) -> None:
-        """Request cooperative cancellation."""
+    def _publish(
+        self,
+        payload: OutputT,
+        timeout: float | None = None,
+    ) -> None:
+        """Publish a payload through this worker's output."""
+        self._publisher.publish(Product(payload), timeout=timeout)
+
+    def _receive(
+        self,
+        timeout: float | None = None,
+    ) -> AbstractContextManager[Product[InputT]]:
+        """Borrow the next product from this worker's upstream."""
+        if self._subscription is None:
+            raise RuntimeError("Worker has no upstream subscription.")
+
+        return self._subscription.receive(timeout=timeout)
+
+    def _mark_abort_requested(self) -> None:
+        """Record cancellation without waking channel operations."""
         self._abort_requested.set()
+
+    def _request_abort(self) -> None:
+        """Record cancellation and wake this worker's channel operations."""
+        self._mark_abort_requested()
+        self._publisher.abort()
+
+        if self._subscription is not None:
+            self._subscription.abort()
+
+    def _close_worker(self) -> None:
+        """Close resources and channels, including after partial preparation."""
+        try:
+            self._close()
+        finally:
+            try:
+                if self._subscription is not None:
+                    self._subscription.close()
+            finally:
+                self._publisher.close()

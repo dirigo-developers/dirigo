@@ -1,9 +1,11 @@
 from threading import Event
+from typing import Any, Never
 
+from dirigo.exceptions import EndOfStream
 from dirigo.worker import Worker
 
 
-class StubWorker(Worker):
+class StubWorker[InputT = object, OutputT = object](Worker[InputT, OutputT]):
     """Minimal concrete worker for testing inherited behavior."""
 
     def _prepare(self) -> None:
@@ -119,3 +121,28 @@ class TriggeredFailureWorker(StubWorker):
         if self.fail_on_close:
             raise self.failure
 
+
+class BooleanSource(StubWorker[Never, bool]):
+    def __init__(self, values: tuple[bool, ...]) -> None:
+        super().__init__()
+        self.values = values
+        self.published = 0
+
+    def _work(self) -> None:
+        for value in self.values:
+            self._publish(value, timeout=2.0)
+            self.published += 1
+
+
+class CollectingWorker(StubWorker[bool, Never]):
+    def __init__(self, *, upstream: Worker[Any, bool]) -> None:
+        super().__init__(upstream=upstream)
+        self.values: list[object] = []
+
+    def _work(self) -> None:
+        try:
+            while True:
+                with self._receive(timeout=2.0) as product:
+                    self.values.append(product.payload)
+        except EndOfStream:
+            return
