@@ -1,6 +1,7 @@
 from threading import Condition
 
 from .exceptions import OperationCancelled
+from .pool import Lease
 from .product import Product
 from .subscription import Subscription
 
@@ -30,11 +31,7 @@ class Publisher[T]:
             self._subscriptions.append(subscription)
             return subscription
 
-    def publish(
-        self,
-        product: Product[T],
-        timeout: float | None = None,
-    ) -> None:
+    def publish(self, product: Product[T], timeout: float | None = None) -> None:
         """Broadcast a product once every recipient queue has capacity.
 
         Recipients are selected before waiting. On timeout, no recipient
@@ -51,27 +48,32 @@ class Publisher[T]:
         if not isinstance(product, Product):
             raise TypeError("product must be a Product.")
 
-        if timeout is not None and timeout < 0:
-            raise ValueError("timeout must be nonnegative or None.")
-
         with self._condition:
-            self._raise_if_aborted_or_closed()
-            subscriptions = tuple(self._subscriptions)
+            recipients = self._wait_for_recipients(timeout)
 
-            available: bool = self._condition.wait_for(
-                lambda: self._closed or all(
-                    subscription._ready_for_publish()
-                    for subscription in subscriptions
-                ),
-                timeout=timeout,
-            )
+            product._retain_deliveries(len(recipients))
 
-            self._raise_if_aborted_or_closed()
+            for subscription in recipients:
+                subscription._enqueue(product)
 
-            if not available:
-                raise TimeoutError("Publication exceeded the timeout.")
+            self._condition.notify_all()
 
-            for subscription in subscriptions:
+    def publish_lease(self, lease: Lease[T], timeout: float | None = None) -> None:
+        """Transfer a producer lease to the current active recipients.
+
+        Timeout, closure or cancellation before transfer leaves the lease valid.
+        Success invalidates the producer handle, even with no recipients.
+        """
+        if not isinstance(lease, Lease):
+            raise TypeError("lease must be a Lease.")
+
+        # Fail early for an expired handle. _transfer() checks again after waiting.
+        _ = lease.payload
+        with self._condition:
+            recipients = self._wait_for_recipients(timeout)
+            product = lease._transfer(len(recipients))
+
+            for subscription in recipients:
                 subscription._enqueue(product)
 
             self._condition.notify_all()
@@ -117,3 +119,28 @@ class Publisher[T]:
 
         if self._closed:
             raise RuntimeError("Publisher is closed.")
+
+    def _wait_for_recipients(
+            self,
+            timeout: float | None,
+        ) -> tuple[Subscription[T], ...]:
+        """Caller holds the publisher lock; waiting releases it temporarily."""
+        if timeout is not None and timeout < 0:
+            raise ValueError("timeout must be nonnegative or None.")
+
+        self._raise_if_aborted_or_closed()
+
+        snapshot = tuple(self._subscriptions)
+        available = self._condition.wait_for(
+            lambda: self._closed
+            or all(subscription._ready_for_publish() for subscription in snapshot),
+            timeout=timeout,
+        )
+
+        self._raise_if_aborted_or_closed()
+
+        if not available:
+            raise TimeoutError("Publication exceeded the timeout.")
+
+        # A consumer may have detached while wait_for() released the lock.
+        return tuple(s for s in snapshot if s._accepts_deliveries())

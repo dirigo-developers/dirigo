@@ -10,21 +10,17 @@ from .product import Product
 class Subscription[T]:
     """A bounded delivery channel from one publisher to one consumer."""
 
-    def __init__(
-        self,
-        *,
-        capacity: int = 1,
-        _condition: Condition,
-    ) -> None:
+    def __init__(self, *, capacity: int = 1, _condition: Condition) -> None:
         if capacity <= 0:
             raise ValueError("capacity must be positive.")
 
         self._capacity = capacity
         self._products: deque[Product[T]] = deque() # used as FIFO container
         self._condition = _condition
+
+        self._producer_closed: bool = False
         self._closed: bool = False
         self._aborted: bool = False
-        self._producer_closed: bool = False
 
     def receive(
         self,
@@ -75,8 +71,10 @@ class Subscription[T]:
             product = self._products.popleft()
             self._condition.notify_all()
 
-        # Consumer processing takes place outside the channel lock.
-        yield product
+        try:
+            yield product
+        finally:
+            product._release_delivery()
 
     def close(self) -> None:
         """Detach this consumer and discard its queued deliveries.
@@ -89,7 +87,7 @@ class Subscription[T]:
                 return
 
             self._closed = True
-            self._products.clear()
+            self._discard_pending()
             self._condition.notify_all()
 
     def abort(self) -> None:
@@ -108,11 +106,19 @@ class Subscription[T]:
 
         self._aborted = True
         self._closed = True
-        self._products.clear()
+        self._discard_pending()
+
+    def _discard_pending(self) -> None:
+        """Release each queued delivery; caller holds the condition lock."""
+        while self._products:
+                self._products.popleft()._release_delivery()
 
     def _ready_for_publish(self) -> bool:
         """Whether this subscription permits publication to proceed."""
         return self._closed or len(self._products) < self._capacity
+
+    def _accepts_deliveries(self) -> bool:
+        return not self._closed
 
     def _enqueue(self, product: Product[T]) -> None:
         """Queue a delivery unless this consumer has detached."""
