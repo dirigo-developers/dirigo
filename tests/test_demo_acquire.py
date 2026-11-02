@@ -6,8 +6,9 @@ import numpy as np
 import pytest
 
 from dirigo import units
-from dirigo.demo_acquire import DemoAcquire
 from dirigo.digitizer import CaptureLayout, SampleArray
+
+from ._demo_acquire import DemoAcquire
 
 EXPECTED = np.array(
     [
