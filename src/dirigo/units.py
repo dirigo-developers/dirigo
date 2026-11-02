@@ -505,3 +505,26 @@ class FrequencyRange(RangeWithUnits[Frequency]):
 @dataclass(frozen=True, init=False, repr=False)
 class SampleRateRange(RangeWithUnits[SampleRate]):
     UNIT_QUANTITY_CLASS: ClassVar[type[UnitQuantity]] = SampleRate
+
+
+@dataclass(frozen=True, slots=True)
+class IntRange:
+    """Inclusive integer bounds, including singleton ranges."""
+
+    min: int
+    max: int
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.min, int) or not isinstance(self.max, int):
+            raise TypeError("Integer range endpoints must be integers.")
+
+        if self.min > self.max:
+            raise ValueError("Range min must not exceed max.")
+
+    @property
+    def range(self) -> int:
+        """Number of integers in the inclusive range."""
+        return self.max - self.min + 1
+
+    def within_range(self, value: int) -> bool:
+        return self.min <= value <= self.max

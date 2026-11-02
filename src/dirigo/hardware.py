@@ -7,9 +7,14 @@ class Device(ABC):
 
     @abstractmethod
     def close(self) -> None:
-        """Release connections and owned resources.
+        """Stop activity and release this device's owned resources.
 
-        Repeated calls must be safe, including after acquisition failure.
+        Repeated calls must be safe.
+
+        Support cleanup after partial acquisition preparation or a failed
+        start. Attempt remaining cleanup even if an earlier step fails.
+
+        Do not release resources borrowed from another Device.
         """
 
 
