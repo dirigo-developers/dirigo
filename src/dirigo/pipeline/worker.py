@@ -26,6 +26,8 @@ class Worker[InputT = object, OutputT = object](ABC):
         self._upstream: Worker[Any, InputT] | None = upstream
         self._name: str = name if name is not None else type(self).__name__
 
+        self._pipeline_token: object | None = None
+
         self._thread: Thread | None = None
         self._finished = Event()
         self._abort_requested = Event()

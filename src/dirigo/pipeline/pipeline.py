@@ -19,6 +19,8 @@ class Pipeline:
 
         self._hardware = hardware
 
+        self._ownership_token = object()
+
         self._started: bool = False
         self._workers: list[_AnyWorker] = []
         self._launched: list[_AnyWorker] = []
@@ -28,8 +30,14 @@ class Pipeline:
 
         self._preparation_failed = False
 
-        for worker in workers:
-            self.add(worker)
+        try:
+            for worker in workers:
+                self.add(worker)
+        except BaseException:
+            # A failed constructor must not strand earlier accepted workers.
+            for worker in self._workers:
+                worker._pipeline_token = None
+            raise
 
     @property
     def workers(self) -> tuple[_AnyWorker, ...]:
@@ -71,9 +79,20 @@ class Pipeline:
             if current_id in existing_ids:
                 break
 
+            if (
+                current._pipeline_token is not None
+                and current._pipeline_token is not self._ownership_token
+            ):
+                raise RuntimeError(
+                    f"Worker {current.name!r} already belongs to another pipeline."
+                )
+
             visited_ids.add(current_id)
             pending.append(current)
             current: Worker | None = current.upstream
+
+        for item in pending:
+            item._pipeline_token = self._ownership_token
 
         self._workers.extend(reversed(pending))
 
@@ -83,14 +102,21 @@ class Pipeline:
         Prepare workers upstream first, then launch consumers before
         producers. The graph becomes fixed when execution starts.
 
+        Finish connecting workers before calling this method. Every active
+        subscription must belong to an included worker. An incomplete graph
+        is rejected before preparation and can be repaired with add().
+
         Raises:
             RuntimeError: If execution has already started.
+            ValueError: If the graph is empty or has an omitted consumer.
         """
         if self._started:
             raise RuntimeError("Pipeline execution has already started.")
 
         if not self._workers:
             raise ValueError("Cannot start an empty pipeline.")
+
+        self._validate_graph()
 
         self._started = True
         attempted: list[Worker] = []
@@ -223,6 +249,25 @@ class Pipeline:
                 )
             finally:
                 worker._finished.set()
+
+    def _validate_graph(self) -> None:
+        """Reject active subscriptions whose consumers will not be launched."""
+        subscription_ids = {
+            id(worker._subscription)
+            for worker in self._workers
+            if worker._subscription is not None
+        }
+
+        for worker in self._workers:
+            if any(
+                id(subscription) not in subscription_ids
+                for subscription in worker._publisher._active_subscriptions()
+            ):
+                raise ValueError(
+                    f"Worker {worker.name!r} has an active subscription "
+                    "outside this pipeline. Include every connected consumer "
+                    "with Pipeline.add() before starting."
+                )
 
     def _bind_hardware_sources(self) -> None:
         """Bind all hardware sources before any worker prepares."""

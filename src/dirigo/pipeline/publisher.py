@@ -113,6 +113,15 @@ class Publisher[T]:
 
             self._condition.notify_all()
 
+    def _active_subscriptions(self) -> tuple[Subscription[T], ...]:
+        """Snapshot attached consumers for pipeline graph validation."""
+        with self._condition:
+            return tuple(
+                subscription
+                for subscription in self._subscriptions
+                if subscription._accepts_deliveries()
+            )
+
     def _raise_if_aborted_or_closed(self) -> None:
         """Raise if publication has ended or been cancelled."""
         if self._aborted:
