@@ -12,13 +12,12 @@ class Pipeline:
 
     def __init__(self, *workers: _AnyWorker) -> None:
         self._started: bool = False
-        self._workers: list[_AnyWorker] = []
-        self._launched: list[_AnyWorker] = []
-
+        self._preparation_failed = False
         self._exception: BaseException | None = None
         self._exception_lock = Lock()
 
-        self._preparation_failed = False # preparation failed and cleanup has completed
+        self._workers: list[_AnyWorker] = []
+        self._launched: list[_AnyWorker] = []
 
         for worker in workers:
             self.add(worker)

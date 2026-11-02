@@ -5,6 +5,7 @@ from threading import Event, Thread
 from typing import Any
 
 from .exceptions import OperationCancelled
+from .pool import Lease, Pool
 from .product import Product
 from .publisher import Publisher
 from .subscription import Subscription
@@ -30,6 +31,8 @@ class Worker[InputT = object, OutputT = object](ABC):
         self._abort_requested = Event()
         self._exception: BaseException | None = None
         self._close_exception: BaseException | None = None
+
+        self._pool: Pool[OutputT] | None = None
 
         self._publisher = Publisher[OutputT]()
         self._subscription: Subscription[InputT] | None = None
@@ -59,6 +62,32 @@ class Worker[InputT = object, OutputT = object](ABC):
 
         May run on the worker thread or the pipeline's calling thread.
         """
+
+    def _init_pool(self, *, capacity: int, factory: Callable[[], OutputT]) -> None:
+        """Create this worker's exclusively owned output pool.
+
+        Usually called from _prepare(). Initialization is allowed once.
+        """
+        if self._pool is not None:
+            raise RuntimeError("Output pool is already initialized.")
+
+        pool = Pool[OutputT](capacity=capacity, factory=factory)
+        self._pool = pool
+
+        # Cancellation may have arrived while the factory was running.
+        if self._abort_requested.is_set():
+            pool.abort()
+
+    def _acquire(
+        self,
+        timeout: float | None = None,
+    ) -> AbstractContextManager[Lease[OutputT]]:
+        """Borrow writable output storage through a context manager."""
+        pool = self._pool
+        if pool is None:
+            raise RuntimeError("Worker has no output pool.")
+
+        return pool.acquire(timeout=timeout)
 
     def _start(
         self,
@@ -126,11 +155,22 @@ class Worker[InputT = object, OutputT = object](ABC):
 
     def _publish(
         self,
-        payload: OutputT,
+        payload: OutputT | Lease[OutputT] | Product[OutputT],
         timeout: float | None = None,
     ) -> None:
-        """Publish a payload through this worker's output."""
-        self._publisher.publish(Product(payload), timeout=timeout)
+        """Publish a new value/lease, or forward an existing borrowed product.
+
+        Leases and Products already carry metadata. Plain payloads are shorthand
+        for an unpooled Product with empty metadata. Use dataclasses.replace()
+        to create a new metadata envelope while borrowing an existing Product.
+        Product and Lease are envelope/ownership handles, not plain payload types.
+        """
+        if isinstance(payload, Product):
+            self._publisher.publish(payload, timeout=timeout)
+        elif isinstance(payload, Lease):
+            self._publisher.publish_lease(payload, timeout=timeout)
+        else:
+            self._publisher.publish(Product(payload), timeout=timeout)
 
     def _receive(
         self,
@@ -149,6 +189,11 @@ class Worker[InputT = object, OutputT = object](ABC):
     def _request_abort(self) -> None:
         """Record cancellation and wake this worker's channel operations."""
         self._mark_abort_requested()
+
+        pool = self._pool
+        if pool is not None:
+            pool.abort()
+
         self._publisher.abort()
 
         if self._subscription is not None:
@@ -163,4 +208,9 @@ class Worker[InputT = object, OutputT = object](ABC):
                 if self._subscription is not None:
                     self._subscription.close()
             finally:
-                self._publisher.close()
+                try:
+                    self._publisher.close()
+                finally:
+                    pool = self._pool
+                    if pool is not None:
+                        pool.abort()

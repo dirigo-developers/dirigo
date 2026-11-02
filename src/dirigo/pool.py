@@ -5,7 +5,7 @@ from threading import Condition
 
 from ._ownership import _Ownership
 from .exceptions import OperationCancelled
-from .product import Product
+from .product import _EMPTY_METADATA, Metadata, Product
 
 
 class Lease[T]:
@@ -13,13 +13,15 @@ class Lease[T]:
 
     Successful publish_lease() transfers this claim. Releasing or leaving the
     acquisition context afterward is harmless. Raw aliases must not be used
-    after release or transfer.
+    after release or transfer. Every fresh lease starts with empty metadata,
+    even when its payload storage has been used before.
     """
 
     def __init__(self, *, _pool: Pool[T], _ownership: _Ownership[T]) -> None:
         self._pool = _pool
         self._ownership = _ownership
         self._released = False
+        self._metadata = _EMPTY_METADATA
 
     @property
     def payload(self) -> T:
@@ -27,6 +29,22 @@ class Lease[T]:
         with self._pool._condition:
             self._raise_if_released()
             return self._ownership.payload
+
+    @property
+    def metadata(self) -> Metadata:
+        """Return this acquisition's metadata while the producer lease is active."""
+        with self._pool._condition:
+            self._raise_if_released()
+            return self._metadata
+
+    @metadata.setter
+    def metadata(self, metadata: Metadata) -> None:
+        """Replace metadata before publication; the record itself stays frozen."""
+        with self._pool._condition:
+            self._raise_if_released()
+            if not isinstance(metadata, Metadata):
+                raise TypeError("metadata must be Metadata.")
+            self._metadata = metadata
 
     def _raise_if_released(self) -> None:
         """Caller must hold the pool condition lock."""
@@ -42,12 +60,13 @@ class Lease[T]:
             self._ownership._release_locked()
 
     def _transfer(self, deliveries: int) -> Product[T]:
-        """Reserve every delivery before relinquishing the producer's claim."""
+        """Capture payload/metadata and reserve deliveries under the pool lock."""
         with self._pool._condition:
             self._raise_if_released()
             product = Product(
                 self._ownership.payload,
                 _ownership=self._ownership,
+                metadata=self._metadata,
             )
             self._ownership._retain_locked(deliveries)
             self._released = True

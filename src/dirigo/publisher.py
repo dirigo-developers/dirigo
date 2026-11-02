@@ -61,6 +61,7 @@ class Publisher[T]:
     def publish_lease(self, lease: Lease[T], timeout: float | None = None) -> None:
         """Transfer a producer lease to the current active recipients.
 
+        Payload and metadata are captured from the lease on successful transfer.
         Timeout, closure or cancellation before transfer leaves the lease valid.
         Success invalidates the producer handle, even with no recipients.
         """
