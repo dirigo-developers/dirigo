@@ -2,10 +2,9 @@ from threading import Condition, Event, Thread
 
 import pytest
 
-from dirigo.exceptions import EndOfStream, OperationCancelled
-from dirigo.pool import Pool
-from dirigo.product import Product
-from dirigo.publisher import Publisher
+from dirigo.pipeline import EndOfStream, OperationCancelled, Product
+from dirigo.pipeline.pool import Pool
+from dirigo.pipeline.publisher import Publisher
 
 
 def _pool() -> Pool[bytearray]:

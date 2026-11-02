@@ -1,6 +1,7 @@
 from typing import Never
 
-from .hardware import Hardware
+from dirigo.hardware.hardware import Hardware
+
 from .worker import Worker
 
 

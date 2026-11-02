@@ -2,7 +2,8 @@ from threading import Lock
 from time import monotonic
 from typing import Any
 
-from .hardware import Hardware
+from dirigo.hardware.hardware import Hardware
+
 from .source import HardwareSource
 from .worker import Worker
 

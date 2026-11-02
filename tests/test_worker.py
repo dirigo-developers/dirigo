@@ -1,6 +1,6 @@
 import pytest
 
-from dirigo.worker import Worker
+from dirigo.pipeline import Worker
 
 from .stubs import BlockingWorker, StubWorker
 

@@ -5,11 +5,14 @@ from typing import Never
 
 import pytest
 
-from dirigo.exceptions import EndOfStream, OperationCancelled
-from dirigo.pipeline import Pipeline
-from dirigo.product import Product
-from dirigo.publisher import Publisher
-from dirigo.subscription import Subscription
+from dirigo.pipeline import (
+    EndOfStream,
+    OperationCancelled,
+    Pipeline,
+    Product,
+)
+from dirigo.pipeline.publisher import Publisher
+from dirigo.pipeline.subscription import Subscription
 
 from .stubs import BooleanSource, CollectingWorker, StubWorker
 

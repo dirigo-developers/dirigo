@@ -1,8 +1,7 @@
 from threading import Event
 from typing import Any, Never
 
-from dirigo.exceptions import EndOfStream
-from dirigo.worker import Worker
+from dirigo.pipeline import EndOfStream, Worker
 
 
 class StubWorker[InputT = object, OutputT = object](Worker[InputT, OutputT]):

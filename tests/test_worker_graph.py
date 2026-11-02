@@ -3,8 +3,8 @@ from typing import Never
 
 import pytest
 
-from dirigo.exceptions import EndOfStream
-from dirigo.pipeline import Pipeline
+from dirigo import Pipeline
+from dirigo.pipeline import EndOfStream
 
 from .stubs import BooleanSource, CollectingWorker, StubWorker
 

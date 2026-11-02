@@ -3,12 +3,10 @@ from typing import Any, Never
 
 import pytest
 
-from dirigo.exceptions import EndOfStream, OperationCancelled
-from dirigo.pipeline import Pipeline
-from dirigo.pool import Pool
-from dirigo.product import Metadata, Product
-from dirigo.publisher import Publisher
-from dirigo.worker import Worker
+from dirigo import Pipeline
+from dirigo.pipeline import EndOfStream, Metadata, OperationCancelled, Product, Worker
+from dirigo.pipeline.pool import Pool
+from dirigo.pipeline.publisher import Publisher
 
 from .stubs import StubWorker
 

@@ -2,10 +2,7 @@ import threading
 
 import pytest
 
-from dirigo.exceptions import EndOfStream
-from dirigo.pipeline import Pipeline
-from dirigo.source import Source
-from dirigo.worker import Worker
+from dirigo.pipeline import EndOfStream, Pipeline, Source, Worker
 
 PUBLISH_TIMEOUT = 0.5   # turns a stall into an error we can match
 WAIT_TIMEOUT = 5.0      # safety net so a broken test can't hang CI

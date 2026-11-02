@@ -2,7 +2,7 @@ from threading import Condition
 
 import pytest
 
-from dirigo._ownership import _Ownership
+from dirigo.pipeline._ownership import _Ownership
 
 
 def test_ownership_rejects_negative_retain_count() -> None:

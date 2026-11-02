@@ -4,7 +4,7 @@ from typing import cast
 import pytest
 
 from dirigo.hardware import Device
-from dirigo.hardware_config import DeviceFactory, load_hardware
+from dirigo.hardware.config import DeviceFactory, load_hardware
 
 
 class FakeDevice(Device):

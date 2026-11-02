@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 
 from dirigo import units
-from dirigo.digitizer import CaptureLayout, SampleArray
+from dirigo.hardware.digitizer import CaptureLayout, SampleArray
 
 from ._demo_acquire import DemoAcquire
 

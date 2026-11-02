@@ -15,7 +15,7 @@ from time import monotonic
 import numpy as np
 
 from dirigo import units
-from dirigo.digitizer import (
+from dirigo.hardware.digitizer import (
     Acquire,
     CaptureInfo,
     CaptureLayout,

@@ -2,8 +2,8 @@ from threading import Event, Thread
 
 import pytest
 
-from dirigo.exceptions import OperationCancelled
-from dirigo.pool import Pool
+from dirigo.pipeline import OperationCancelled
+from dirigo.pipeline.pool import Pool
 
 
 def test_pool_preallocates_and_acquires_distinct_buffers() -> None:

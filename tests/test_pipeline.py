@@ -2,7 +2,7 @@ from threading import Thread, get_ident
 
 import pytest
 
-from dirigo.pipeline import Pipeline
+from dirigo import Pipeline
 
 from .stubs import (
     AbortableWorker,

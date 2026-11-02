@@ -20,7 +20,8 @@ import numpy as np
 import numpy.typing as npt
 
 from dirigo import units
-from dirigo.hardware import Device
+
+from .hardware import Device
 
 __all__ = [
     "Acquire",

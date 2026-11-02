@@ -2,10 +2,9 @@ from typing import Any, Never, cast
 
 import pytest
 
-from dirigo.hardware import Device, Hardware
-from dirigo.pipeline import Pipeline
-from dirigo.source import HardwareSource, Source
-from dirigo.worker import Worker
+from dirigo import Hardware, Pipeline
+from dirigo.hardware import Device
+from dirigo.pipeline.source import HardwareSource, Source, Worker
 
 
 class FakeDevice(Device):

@@ -3,9 +3,8 @@ from typing import Any, Never
 
 import pytest
 
-from dirigo.exceptions import EndOfStream, OperationCancelled
-from dirigo.pipeline import Pipeline
-from dirigo.worker import Worker
+from dirigo import Pipeline
+from dirigo.pipeline import EndOfStream, OperationCancelled, Worker
 
 from .stubs import StubWorker
 
