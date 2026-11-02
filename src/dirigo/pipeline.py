@@ -2,6 +2,8 @@ from threading import Lock
 from time import monotonic
 from typing import Any
 
+from .hardware import Hardware
+from .source import HardwareSource
 from .worker import Worker
 
 type _AnyWorker = Worker[Any, Any]
@@ -10,14 +12,20 @@ type _AnyWorker = Worker[Any, Any]
 class Pipeline:
     """A single-use execution graph of workers."""
 
-    def __init__(self, *workers: _AnyWorker) -> None:
+    def __init__(self, *workers: _AnyWorker, hardware: Hardware | None = None) -> None:
+        if hardware is not None and not isinstance(hardware, Hardware):
+            raise TypeError("hardware must be a Hardware instance or None.")
+
+        self._hardware = hardware
+
         self._started: bool = False
-        self._preparation_failed = False
+        self._workers: list[_AnyWorker] = []
+        self._launched: list[_AnyWorker] = []
+
         self._exception: BaseException | None = None
         self._exception_lock = Lock()
 
-        self._workers: list[_AnyWorker] = []
-        self._launched: list[_AnyWorker] = []
+        self._preparation_failed = False
 
         for worker in workers:
             self.add(worker)
@@ -87,6 +95,8 @@ class Pipeline:
         attempted: list[Worker] = []
 
         try:
+            self._bind_hardware_sources()
+
             for worker in self._workers:
                 attempted.append(worker)
                 worker._prepare()
@@ -213,3 +223,24 @@ class Pipeline:
             finally:
                 worker._finished.set()
 
+    def _bind_hardware_sources(self) -> None:
+        """Bind all hardware sources before any worker prepares."""
+        sources = [
+            worker
+            for worker in self._workers
+            if isinstance(worker, HardwareSource)
+        ]
+
+        if not sources:
+            return
+
+        hardware = self._hardware
+
+        if hardware is None:
+            names = ", ".join(repr(source.name) for source in sources)
+            raise RuntimeError(
+                f"Hardware collection required by source(s): {names}."
+            )
+
+        for source in sources:
+            source._bind_hardware(hardware)
