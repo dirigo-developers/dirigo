@@ -509,17 +509,22 @@ class SampleRateRange(RangeWithUnits[SampleRate]):
 
 @dataclass(frozen=True, slots=True)
 class IntRange:
-    """Inclusive integer bounds, including singleton ranges."""
+    """Inclusive integer bounds with min strictly less than max."""
 
     min: int
     max: int
 
     def __post_init__(self) -> None:
-        if not isinstance(self.min, int) or not isinstance(self.max, int):
+        if (
+            not isinstance(self.min, int)
+            or not isinstance(self.max, int)
+            or isinstance(self.min, bool)
+            or isinstance(self.max, bool)
+        ):
             raise TypeError("Integer range endpoints must be integers.")
 
-        if self.min > self.max:
-            raise ValueError("Range min must not exceed max.")
+        if self.min >= self.max:
+            raise ValueError("Range max must be greater than min.")
 
     @property
     def range(self) -> int:
