@@ -1,6 +1,8 @@
 """Test finite OME Z-stacks, pooled input, and incomplete-recording cleanup."""
 
 import json
+from collections.abc import Generator
+from contextlib import contextmanager
 from pathlib import Path
 from threading import Event
 from typing import Any, BinaryIO
@@ -12,7 +14,7 @@ import tifffile
 
 from dirigo import units
 from dirigo.frames import FrameArray, FrameInterpretation, FrameMetadata
-from dirigo.pipeline import Metadata, Pipeline, Product, Source
+from dirigo.pipeline import EndOfStream, Metadata, Pipeline, Product, Source
 from dirigo.sinks import OmeTiffWriter
 
 
@@ -394,3 +396,47 @@ def test_abort_closes_incrementally_written_output_without_ome_metadata(
             assert len(tif.pages) == 2
     finally:
         _abort_and_join(pipeline)
+
+
+def test_abort_at_end_of_stream_prevents_ome_finalization(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Honor cancellation recorded between end-of-stream and finalization.
+
+    Supply the complete expected stack, then mark cancellation as the final
+    receive reports EndOfStream. This exercises the post-loop cancellation
+    guard without aborting the subscription itself.
+    """
+    product = Product(
+        np.zeros((4, 5), dtype=np.uint8),
+        metadata=FrameMetadata(z_index=0),
+    )
+    path = tmp_path / "stack.ome.tif"
+    writer = OmeTiffWriter(
+        upstream=StackSource((product,)),
+        path=path,
+        z_planes=1,
+    )
+    handles = _track_output(writer, monkeypatch)
+    receive = writer._receive
+
+    @contextmanager
+    def receive_and_mark_abort() -> Generator[Product[FrameArray]]:
+        try:
+            with receive() as incoming:
+                yield incoming
+        except EndOfStream:
+            writer._mark_abort_requested()
+            raise
+
+    monkeypatch.setattr(writer, "_receive", receive_and_mark_abort)
+
+    _run(writer)
+
+    assert len(handles) == 1
+    assert handles[0].closed
+
+    with tifffile.TiffFile(path) as tif:
+        assert not tif.is_ome
+        assert len(tif.pages) == 1

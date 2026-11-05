@@ -125,7 +125,9 @@ class OmeTiffWriter(TiffWriter):
                     f"received {len(records)}."
                 )
 
-            assert tif is not None and shape is not None and dtype is not None
+            assert tif is not None
+            assert shape is not None
+            assert dtype is not None
             self._finalize_ome(tif, shape, dtype, records)
 
     def _write_z_plane(
