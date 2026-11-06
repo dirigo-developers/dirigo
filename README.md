@@ -1,62 +1,128 @@
 # Dirigo
-[![PyPI](https://img.shields.io/pypi/v/dirigo)](https://pypi.org/project/dirigo/)
-[![Documentation Status](https://readthedocs.org/projects/dirigo/badge/?version=latest)](https://dirigo.readthedocs.io/en/latest/?badge=latest)
 
-**Dirigo** is an extensible, high-performance backend for scientific image acquisition, designed with high-speed laser scanning microscopy in mind but adaptable to a wide range of medium- to high-complexity imaging systems.
+Dirigo is an extensible Python backend for scientific image acquisition,
+developed with laser scanning microscopy in mind.
 
-Dirigo separates hardware control, acquisition logic, and user interface, making it easy to:
+Version 0.4 is an ongoing rewrite. It establishes contracts for hardware
+control, threaded processing pipelines, and recording. Interfaces may change
+as acquisition workflows are developed.
 
-- Add new hardware via plugin drivers that implement generic device interfaces (digitizers, scanners, stages, cameras, etc.)
+## Current scope
 
-- Reconfigure data acquisition and processing pipelines using a Worker/publisher–subscriber model
+The current implementation includes:
 
-- Integrate adaptive acquisition strategies through feedback loops between processing and control
+- Threaded worker pipelines with bounded delivery queues, cancellation,
+  failure reporting, and resource cleanup.
+- Reusable output buffers and metadata carried alongside product payloads.
+- Hardware ownership, TOML configuration loading, and digitizer interfaces.
+- Physical quantities and ranges.
+- TIFF recording for monochrome, multichannel, and RGB frames.
+- OME-TIFF recording for finite, ordered Z-stacks.
 
-- Build custom GUIs or integrate with existing tools via a clean API (a reference GUI is available as a [separate package](https://github.com/dirigo-developers/dirigo-gui))
+Hardware acquisition requires compatible driver implementations and device
+configuration. The synthetic recording example runs without hardware.
 
-Performance-critical operations are accelerated with [Numba](https://numba.pydata.org/) JIT compilation, releasing the GIL during execution and enabling parallel/vectorized processing.
+## Development installation
 
-Dirigo follows a modular, package-oriented architecture: almost all components—hardware drivers, processing modules, GUIs—are separate Python packages that can be developed, installed, and updated independently.
+The project currently targets Windows and requires Python 3.14 or later.
+Use a dedicated environment.
 
-Dirigo is in *very* early development. While the API and architecture are functional, documentation and ready-to-use releases are in progress.
+For example, with conda:
 
+```powershell
+conda create -n dirigo-0-4 python=3.14
+conda activate dirigo-0-4
+```
 
-## Digitizer ↔ LSM mode compatibility
+From the root of a checkout of the v0.4 development branch, install Dirigo
+and its development dependencies:
 
-**Legend:** ✓ supported now · △ possible/experimental · ✗ not recommended/unsupported · — unknown  
+```powershell
+python -m pip install -e ".[dev]"
+```
 
-| Digitizer (vendor/model family) | Galvo–Galvo **analog** | Galvo–Galvo **photon counting** | Resonant–Galvo **analog** | Polygon–Galvo **analog** |
-|---|:---:|:---:|:---:|:---:|
-| **NI X-Series** (e.g., PCIe-63xx) | ✓* | ✓ (up to 4 chan.) | ✗† | ✗† |
-| **NI S-Series** (e.g., PCI-6110/6115) | ✓ | ✓ (up to 2 chan.) | △§ | △§ |
-| **AlazarTech** (e.g., ATS9440) | ✓ | ✗ | ✓ | ✓ |
-| **Teledyne SP Devices** (e.g., ADQ32) | ✓ | ✗ | ✓ | ✓ |
-| **Other / custom** (contact [TDW](https://github.com/tweber225)) | — | — | — | — |
+The editable installation makes changes under `src/` available without
+reinstalling the package.
 
-*Notes*  
-\* Multichannel acquisition subject to aggregate AI sample rate (e.g 2 channels: 500 kS/s, 4 channels 250 kS/s).  
-† AI sample rate typically insufficient for resonant/polygon rates.  
-§ Borderline: Max sample rate may limit pixels per line, dependent on scanner frequency. Not yet validated.  
+## First example
 
+Generate synthetic frames and record them to a TIFF file:
 
-## Installation
-Dirigo should be installed in a virtual environment. We recommend [miniconda](https://docs.conda.io/en/latest/). Install Dirigo from PyPI with `pip install dirigo`. To enable additional hardware and acquisition modes, also install Dirigo plugins. A list can be found here: https://github.com/orgs/dirigo-developers/repositories
- 
-## Initialization
-Verify installations (with miniconda, `conda list`) and run the initialization script by running `dirigo-init`. This script will set up Dirigo settings folders and files. It will not overwrite existing files.
+```powershell
+python examples/record_synthetic_frames.py
+```
 
-### System configuration
-The `system_config.toml` file contains a list of the available hardware, the associated Python entry point, and information required to configure each device. An example can be found here: [system_config.toml](examples/system_config.toml)
+The script writes `synthetic_frames.tif` in the current working directory.
+Existing output files are preserved: choose another destination or remove
+the previous recording before running the example again.
 
-### Frame specification
-Acquisition sequence variables (e.g. frame size) are described with a specification file. The initialization script will generate a `FrameAcquisition` specification file at `Dirigo/acquisitions/frame/default.toml` which should be updated before starting Dirigo.
+Read the [example walkthrough](docs/recording-synthetic-frames.md) for an
+explanation of sources, products, metadata, and pipeline execution.
 
-### Digitizer profile
-Groups of settable parameters for devices are group into profiles. The initialization script will generate a blank digitizer profile at `Dirigo/acquisitions/frame/default.toml` which will need to be updated. An example from the `dirigo-alazar` plugin can be found here: [default_ats9440.toml](https://github.com/dirigo-developers/dirigo-alazar/blob/main/examples/default_ats9440.toml)
+## Development checks
 
+Run these commands from the repository root with the development
+environment activated:
+
+```powershell
+ruff check .
+ruff format --check .
+ty check
+python -m pytest
+```
+
+Pytest reports coverage using the configuration in `pyproject.toml`.
+
+During development, run the tests relevant to the change. For example:
+
+```powershell
+python -m pytest tests/sinks/test_tiff_writer.py --no-cov
+```
+
+Before pushing a completed increment, run the full checks above.
+
+## Commit hooks
+
+Enable the configured pre-commit hooks once per local checkout:
+
+```powershell
+pre-commit install
+```
+
+Run them manually against all tracked files:
+
+```powershell
+pre-commit run --all-files
+```
+
+The hooks check Python lint, formatting, and types. They report problems
+without modifying files.
+
+The local Ty hook uses the development environment. When committing through
+VS Code's Source Control panel, launch VS Code from an activated conda
+environment so the Git process can find Ty.
+
+## Continuous integration
+
+GitHub Actions runs installation, lint, formatting, type, and test checks
+on pushes and pull requests.
+
+## Updating documentation
+
+When changing behavior or an interface, review the affected docstrings,
+examples, and guides in the same change. Document implemented behavior and
+identify proposed behavior explicitly.
+
+## License
+
+Dirigo is distributed under the [MIT License](LICENSE).
 
 ## Funding
 
-Development of Dirigo has been supported in part by the National Cancer Institute of the National Institutes of Health under award numbers K99CA307867 and R01CA249151.
+Development of Dirigo has been supported in part by the National Cancer
+Institute of the National Institutes of Health under award numbers
+K99CA307867 and R01CA249151.
 
-The content of this repository is solely the responsibility of the authors and does not necessarily represent the official views of the National Institutes of Health.
+The content of this repository is solely the responsibility of the authors
+and does not necessarily represent the official views of the National
+Institutes of Health.
