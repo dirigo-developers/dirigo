@@ -82,7 +82,7 @@ def test_add_rejects_non_worker() -> None:
 def test_pipeline_construction_with_non_worker_fails() -> None:
     """Pipeline construction rejects arguments that are not Worker instances."""
     with pytest.raises(TypeError, match="worker must be a Worker"):
-        Pipeline(object()) # ty: ignore[invalid-argument-type]
+        Pipeline(object())  # ty: ignore[invalid-argument-type]
 
 
 def test_add_includes_dependencies_upstream_first() -> None:

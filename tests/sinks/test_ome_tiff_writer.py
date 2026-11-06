@@ -189,10 +189,9 @@ def test_stack_round_trip_with_reused_input_buffer(
         else:
             assert key not in pixels.attrib
 
-    entry = root.find(
-        ".//{*}MapAnnotation/{*}Value/{*}M[@K='frame_metadata']"
-    )
-    assert entry is not None and entry.text is not None
+    entry = root.find(".//{*}MapAnnotation/{*}Value/{*}M[@K='frame_metadata']")
+    assert entry is not None
+    assert entry.text is not None
     assert json.loads(entry.text) == [
         {
             "sequence_index": record.sequence_index,
@@ -283,9 +282,7 @@ def test_invalid_stream_is_not_finalized_as_ome(
         for i, record in enumerate(records)
     )
     path = tmp_path / "stack.ome.tif"
-    writer = OmeTiffWriter(
-        upstream=StackSource(products), path=path, z_planes=z_planes
-    )
+    writer = OmeTiffWriter(upstream=StackSource(products), path=path, z_planes=z_planes)
     handles = _track_output(writer, monkeypatch)
 
     with pytest.raises(ValueError, match=message):
@@ -336,9 +333,7 @@ def test_existing_output_is_preserved(tmp_path: Path) -> None:
     product = Product(
         np.zeros((4, 5), dtype=np.uint8), metadata=FrameMetadata(z_index=0)
     )
-    writer = OmeTiffWriter(
-        upstream=StackSource((product,)), path=path, z_planes=1
-    )
+    writer = OmeTiffWriter(upstream=StackSource((product,)), path=path, z_planes=1)
 
     with pytest.raises(FileExistsError):
         _run(writer)
@@ -359,9 +354,7 @@ def test_abort_closes_incrementally_written_output_without_ome_metadata(
     written = Event()
     write = tifffile.TiffWriter.write
 
-    def tracked_write(
-        tif: tifffile.TiffWriter, *args: Any, **kwargs: Any
-    ) -> Any:
+    def tracked_write(tif: tifffile.TiffWriter, *args, **kwargs):  # ruff: ignore[missing-return-type-private-function, missing-type-args, missing-type-kwargs]
         result = write(tif, *args, **kwargs)
         written.set()
         return result

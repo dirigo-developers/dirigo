@@ -28,7 +28,7 @@ def test_quantity_types_parse_into_base_units() -> None:
         (Frequency, "2 MHz", 2e6, "Hz"),
         (SampleRate, "2 MS/s", 2e6, "S/s"),
         (Time, "3 ms", 0.003, "s"),
-        (Position, "7 µm", 7e-6, "m"),
+        (Position, "7 µm", 7e-6, "m"),  # ruff: ignore[ambiguous-unicode-character-string]
         (SpatialFrequency, "2 1/mm", 2000.0, "m⁻¹"),
         (Velocity, "3 mm/s", 0.003, "m/s"),
         (AngularVelocity, "180 deg/s", math.pi, "rad/s"),
@@ -52,13 +52,21 @@ def test_numeric_inputs_always_use_base_units() -> None:
 
 def test_parser_accepts_scientific_notation_and_micro_aliases() -> None:
     assert Voltage(" -1.5e-3V ") == Voltage("-1.5 mV")
-    assert Time("1 us") == Time("1 μs") == Time("1 µs")
+    assert Time("1 us") == Time("1 μs") == Time("1 µs")  # ruff: ignore[ambiguous-unicode-character-string]
 
 
-def test_constructor_rejects_invalid_values_and_dimensions() -> None:
-    for text in ("2", "2 bananas", "oops", "1 V trailing"):
-        with pytest.raises(ValueError):
-            Voltage(text)
+@pytest.mark.parametrize(
+    ("text", "m"),
+    [
+        ("2", "Invalid unit"),
+        ("2 bananas", "Invalid unit"),
+        ("oops", "Invalid quantity"),
+        ("1 V trailing", "Invalid unit"),
+    ],
+)
+def test_constructor_rejects_invalid_values_and_dimensions(text: str, m: str) -> None:
+    with pytest.raises(ValueError, match=m):
+        Voltage(text)
 
     with pytest.raises(TypeError):
         Voltage(cast(float, object()))
@@ -76,7 +84,7 @@ def test_formatting_and_base_unit_property() -> None:
     assert str(Time(0)) == "0 s"
     assert repr(voltage) == "Voltage('250 mV')"
 
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="Invalid unit"):
         voltage.with_unit("s")
 
 
@@ -104,7 +112,12 @@ def test_scalar_and_unary_operations_preserve_concrete_type() -> None:
 
     assert all(type(result) is SampleRate for result in results)
     assert [float(result) for result in results] == [
-        4000, 4000, 1000, -2000, 2000, 2000,
+        4000,
+        4000,
+        1000,
+        -2000,
+        2000,
+        2000,
     ]
 
 
@@ -153,8 +166,8 @@ def test_unsupported_arithmetic_does_not_fall_back_to_float() -> None:
         lambda: 2 // value,
         lambda: value % 2,
         lambda: 2 % value,
-        lambda: value ** 2,
-        lambda: 2 ** value,
+        lambda: value**2,
+        lambda: 2**value,
         lambda: divmod(value, 2),
         lambda: divmod(2, value),
     ]
@@ -169,7 +182,7 @@ def test_comparisons_check_dimensions() -> None:
     assert Frequency("1 kHz") == SampleRate("1 kS/s")
     assert Voltage(1) != Time(1)
     assert Voltage(1) != 1
-    assert 1 != Voltage(1)
+    assert Voltage(1) != 1
     assert Voltage(1) < Voltage(2)
     assert Frequency(1) <= SampleRate(2)
     assert Voltage(2) > Voltage(1)
@@ -178,7 +191,7 @@ def test_comparisons_check_dimensions() -> None:
     for operation in (
         lambda: Voltage(1) < Time(2),
         lambda: Voltage(1) < 2,
-        lambda: 2 < Voltage(1),
+        lambda: Voltage(1) > 2,
     ):
         with pytest.raises(TypeError):
             operation()
@@ -202,6 +215,7 @@ def test_division_by_zero_keeps_standard_exception() -> None:
 
 def test_duplicate_dimension_registration_is_rejected() -> None:
     with pytest.raises(ValueError, match="already registered"):
+
         class DuplicateVoltage(Voltage):
             pass
 

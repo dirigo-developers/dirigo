@@ -45,6 +45,7 @@ def test_abort_discards_queued_products(scope: str) -> None:
     relying on immediate destruction; afterward, the weak reference must return
     None. Further reception must report cancellation.
     """
+
     class Payload:
         pass
 

@@ -148,8 +148,7 @@ class Pipeline:
 
             launched_ids: set[int] = {id(worker) for worker in self._launched}
             unlaunched: list[Worker] = [
-                worker for worker in self._workers
-                if id(worker) not in launched_ids
+                worker for worker in self._workers if id(worker) not in launched_ids
             ]
 
             self._close_workers(workers=unlaunched, failure=exc)
@@ -196,9 +195,7 @@ class Pipeline:
 
         for worker in self._launched:
             remaining: float | None = (
-                None
-                if deadline is None
-                else max(0.0, deadline - monotonic())
+                None if deadline is None else max(0.0, deadline - monotonic())
             )
             worker._wait(timeout=remaining)
 
@@ -272,9 +269,7 @@ class Pipeline:
     def _bind_hardware_sources(self) -> None:
         """Bind all hardware sources before any worker prepares."""
         sources = [
-            worker
-            for worker in self._workers
-            if isinstance(worker, HardwareSource)
+            worker for worker in self._workers if isinstance(worker, HardwareSource)
         ]
 
         if not sources:
@@ -284,9 +279,7 @@ class Pipeline:
 
         if hardware is None:
             names = ", ".join(repr(source.name) for source in sources)
-            raise RuntimeError(
-                f"Hardware collection required by source(s): {names}."
-            )
+            raise RuntimeError(f"Hardware collection required by source(s): {names}.")
 
         for source in sources:
             source._bind_hardware(hardware)

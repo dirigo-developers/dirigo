@@ -64,11 +64,13 @@ def test_empty_collection_is_valid() -> None:
 
 def test_names_preserve_insertion_order() -> None:
     """Configured names retain their mapping insertion order."""
-    hardware = Hardware({
-        "y_galvo": FakeScanner(),
-        "digitizer": FakeDigitizer(),
-        "x_galvo": FakeScanner(),
-    })
+    hardware = Hardware(
+        {
+            "y_galvo": FakeScanner(),
+            "digitizer": FakeDigitizer(),
+            "x_galvo": FakeScanner(),
+        }
+    )
 
     assert hardware.names == ("y_galvo", "digitizer", "x_galvo")
 
@@ -115,11 +117,13 @@ def test_failed_construction_does_not_close_supplied_devices() -> None:
     """
     device = FakeScanner()
 
-    with pytest.raises(ValueError):
-        Hardware({
-            "scanner": device,
-            "": FakeDevice(),
-        })
+    with pytest.raises(ValueError, match="names must not be empty"):
+        Hardware(
+            {
+                "scanner": device,
+                "": FakeDevice(),
+            }
+        )
 
     assert device.close_calls == 0
 
@@ -128,10 +132,12 @@ def test_require_selects_named_instance_among_devices_of_same_type() -> None:
     """Names distinguish separate devices implementing the same interface."""
     x_galvo = FakeScanner()
     y_galvo = FakeScanner()
-    hardware = Hardware({
-        "x_galvo": x_galvo,
-        "y_galvo": y_galvo,
-    })
+    hardware = Hardware(
+        {
+            "x_galvo": x_galvo,
+            "y_galvo": y_galvo,
+        }
+    )
 
     assert hardware.require("x_galvo", FakeScanner) is x_galvo
     assert hardware.require("y_galvo", FakeScanner) is y_galvo
@@ -184,11 +190,13 @@ def test_require_wrong_interface_reports_name_and_types() -> None:
 def test_close_uses_reverse_insertion_order() -> None:
     """Device cleanup proceeds in reverse mapping insertion order."""
     events: list[str] = []
-    hardware = Hardware({
-        "controller": FakeDevice("controller", events=events),
-        "scanner": FakeScanner("scanner", events=events),
-        "digitizer": FakeDigitizer("digitizer", events=events),
-    })
+    hardware = Hardware(
+        {
+            "controller": FakeDevice("controller", events=events),
+            "scanner": FakeScanner("scanner", events=events),
+            "digitizer": FakeDigitizer("digitizer", events=events),
+        }
+    )
 
     hardware.close()
 
@@ -198,10 +206,12 @@ def test_close_uses_reverse_insertion_order() -> None:
 def test_aliases_resolve_to_same_device_and_close_it_once() -> None:
     """Multiple names can share one device without causing repeated cleanup."""
     scanner = FakeScanner()
-    hardware = Hardware({
-        "x_galvo": scanner,
-        "scan_axis": scanner,
-    })
+    hardware = Hardware(
+        {
+            "x_galvo": scanner,
+            "scan_axis": scanner,
+        }
+    )
 
     assert hardware.require("x_galvo", FakeScanner) is scanner
     assert hardware.require("scan_axis", FakeScanner) is scanner
@@ -215,10 +225,12 @@ def test_repeated_close_does_not_close_devices_again() -> None:
     """Closing an already closed collection does not repeat device cleanup."""
     scanner = FakeScanner()
     digitizer = FakeDigitizer()
-    hardware = Hardware({
-        "scanner": scanner,
-        "digitizer": digitizer,
-    })
+    hardware = Hardware(
+        {
+            "scanner": scanner,
+            "digitizer": digitizer,
+        }
+    )
 
     hardware.close()
     hardware.close()
@@ -240,10 +252,12 @@ def test_require_after_close_raises_runtime_error(name: str) -> None:
 
 def test_names_remain_available_after_close() -> None:
     """Configured names remain inspectable after device access has ended."""
-    hardware = Hardware({
-        "scanner": FakeScanner(),
-        "digitizer": FakeDigitizer(),
-    })
+    hardware = Hardware(
+        {
+            "scanner": FakeScanner(),
+            "digitizer": FakeDigitizer(),
+        }
+    )
 
     hardware.close()
 

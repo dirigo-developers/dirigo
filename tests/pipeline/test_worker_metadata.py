@@ -80,6 +80,7 @@ def test_processor_explicitly_inherits_or_updates_metadata(
     Inheritance must preserve metadata identity. Updating must create a distinct
     record while leaving the source's original metadata unchanged.
     """
+
     class Processor(StubWorker[bytearray, bytearray]):
         def _prepare(self) -> None:
             self._init_pool(capacity=1, factory=lambda: bytearray(4))
@@ -159,6 +160,7 @@ def test_forwarding_preserves_ownership_and_keeps_branch_metadata_independent(
     Forwarding occurs inside the receive context so downstream claims are
     established before the forwarder's incoming claim is released.
     """
+
     class Forwarder(StubWorker[bytearray, bytearray]):
         def _work(self) -> None:
             try:
@@ -231,6 +233,7 @@ def test_new_payload_publication_does_not_implicitly_inherit_metadata() -> None:
     The outgoing payload must have its new value and empty metadata, proving
     that receiving a record does not implicitly establish publication metadata.
     """
+
     class Source(StubWorker[Never, bool]):
         def _work(self) -> None:
             self._publish(
@@ -242,7 +245,7 @@ def test_new_payload_publication_does_not_implicitly_inherit_metadata() -> None:
         def _work(self) -> None:
             with self._receive(timeout=2.0) as incoming:
                 assert incoming.metadata == Metadata(sequence_index=5)
-                self._publish(not incoming.payload, timeout=2.0) # publishes w/out md
+                self._publish(not incoming.payload, timeout=2.0)  # publishes w/out md
 
     class Sink(StubWorker[bool, Never]):
         def __init__(self, *, upstream: Worker[Any, bool]) -> None:

@@ -62,7 +62,7 @@ def test_sink_requires_upstream_argument() -> None:
 def test_sink_rejects_invalid_upstream(upstream: object) -> None:
     """A sink rejects None and objects that are not Worker instances."""
     with pytest.raises(TypeError, match="upstream"):
-        StubSink(upstream=upstream) # ty: ignore[invalid-argument-type]
+        StubSink(upstream=upstream)  # ty: ignore[invalid-argument-type]
 
 
 @pytest.mark.parametrize("name", [None, "recording", ""])

@@ -79,7 +79,7 @@ def test_gamma_accepts_positive_numeric_exponents(gamma: float) -> None:
 
 
 @pytest.mark.parametrize("gamma", [True, False, None, "0.45"])
-def test_gamma_rejects_invalid_parameter_types(gamma) -> None: # ruff: ignore[missing-type-function-argument]
+def test_gamma_rejects_invalid_parameter_types(gamma) -> None:  # ruff: ignore[missing-type-function-argument]
     """Reject booleans and nonnumeric exponents without coercing them."""
     with pytest.raises(TypeError, match="gamma must be a number"):
         Gamma(gamma=gamma)
@@ -102,6 +102,6 @@ def test_gamma_parameter_is_immutable() -> None:
     transfer = Gamma(gamma=0.45)
 
     with pytest.raises(FrozenInstanceError):
-        transfer.gamma = 2.0 # ty: ignore[invalid-assignment]
+        transfer.gamma = 2.0  # ty: ignore[invalid-assignment]
 
     assert transfer.gamma == 0.45

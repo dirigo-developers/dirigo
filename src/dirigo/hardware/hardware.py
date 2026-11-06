@@ -36,9 +36,7 @@ class Hardware:
                 raise ValueError("Device names must not be empty.")
 
             if not isinstance(device, Device):
-                raise TypeError(
-                    f"Device {name!r} must be a Device instance."
-                )
+                raise TypeError(f"Device {name!r} must be a Device instance.")
 
         self._devices = configured
         self._closed = False

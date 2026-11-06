@@ -120,10 +120,7 @@ def test_frames_round_trip_in_delivery_order(
     Use spatially varying frames with distinct values and a pixel near the
     dtype's maximum to exercise both ordering and the full unsigned bit depth.
     """
-    frames = tuple(
-        np.arange(20, dtype=dtype).reshape(4, 5) + i
-        for i in range(3)
-    )
+    frames = tuple(np.arange(20, dtype=dtype).reshape(4, 5) + i for i in range(3))
     for i, frame in enumerate(frames):
         frame[0, 0] = np.iinfo(dtype).max - i
 
@@ -285,8 +282,7 @@ def test_multichannel_frames_preserve_channels_and_order(
     one-channel input to verify preservation of the declared channel axis.
     """
     frames = tuple(
-        np.arange(5 * 7 * channels, dtype=dtype).reshape(5, 7, channels)
-        + i * 10
+        np.arange(5 * 7 * channels, dtype=dtype).reshape(5, 7, channels) + i * 10
         for i in range(2)
     )
     for i, frame in enumerate(frames):
@@ -338,8 +334,7 @@ def test_rgb_frames_preserve_pixels_and_rgb_interpretation(
 ) -> None:
     """Preserve RGB pixels and declare three interleaved color components."""
     frames = tuple(
-        np.arange(60, dtype=dtype).reshape(4, 5, 3) + i * 10
-        for i in range(2)
+        np.arange(60, dtype=dtype).reshape(4, 5, 3) + i * 10 for i in range(2)
     )
     for i, frame in enumerate(frames):
         frame[0, 0, 0] = np.iinfo(dtype).max - i
@@ -596,7 +591,6 @@ def test_pixel_sizes_require_position_quantities(
         )
 
 
-
 @pytest.mark.parametrize(
     ("interpretation", "shape", "axes"),
     [
@@ -717,7 +711,6 @@ def test_missing_coordinates_are_not_inferred_or_carried_forward(
     ]
 
 
-
 @pytest.mark.parametrize("contiguous", [False, True])
 @pytest.mark.parametrize("dtype", [np.uint8, np.uint16])
 @pytest.mark.parametrize("frame_count", [1, 3])
@@ -780,10 +773,10 @@ def test_tiff_layout_preserves_pixels_metadata_and_calibration(
 
     _run_writer(writer)
 
-    assert len(handles) == 1 and handles[0].closed
+    assert len(handles) == 1
+    assert handles[0].closed
     stored_frames = tuple(
-        np.moveaxis(frame, -1, 0)
-        if interpretation == "multichannel" else frame
+        np.moveaxis(frame, -1, 0) if interpretation == "multichannel" else frame
         for frame in frames
     )
     with tifffile.TiffFile(path) as tif:
@@ -807,9 +800,7 @@ def test_tiff_layout_preserves_pixels_metadata_and_calibration(
             for index, expected in enumerate(stored_frames):
                 assert tif.series[index].axes == axes
                 assert saved[index]["dirigo"] == expected_records[index]
-                np.testing.assert_array_equal(
-                    tif.series[index].asarray(), expected
-                )
+                np.testing.assert_array_equal(tif.series[index].asarray(), expected)
 
         previous_end: int | None = None
         for page in tif.pages:
@@ -832,8 +823,7 @@ def test_tiff_layout_preserves_pixels_metadata_and_calibration(
 def test_contiguous_writer_releases_reused_input_storage(tmp_path: Path) -> None:
     """Save distinct frames correctly while a one-buffer source reuses storage."""
     frames = tuple(
-        np.full((4, 5, 3), 1000 + index, dtype=np.uint16)
-        for index in range(3)
+        np.full((4, 5, 3), 1000 + index, dtype=np.uint16) for index in range(3)
     )
     path = tmp_path / "pooled.tif"
     writer = TiffWriter(
@@ -865,21 +855,18 @@ def test_contiguous_validation_failure_finalizes_completed_frames(
         Product(np.zeros((5, 4), dtype=np.uint8)),
     )
     path = tmp_path / "partial.tif"
-    writer = TiffWriter(
-        upstream=ProductSource(products), path=path, contiguous=True
-    )
+    writer = TiffWriter(upstream=ProductSource(products), path=path, contiguous=True)
 
     with pytest.raises(ValueError, match="constant"):
         _run_writer(writer)
 
     with tifffile.TiffFile(path) as tif:
         saved = tif.shaped_metadata
-        assert saved is not None and len(saved) == 1
+        assert saved is not None
+        assert len(saved) == 1
         assert saved[0]["dirigo"] == {
             "complete": False,
-            "frames": [
-                {"sequence_index": 4, "time_index": None, "z_index": 0}
-            ],
+            "frames": [{"sequence_index": 4, "time_index": None, "z_index": 0}],
         }
         np.testing.assert_array_equal(tif.series[0].asarray(), frame[np.newaxis])
 
@@ -917,9 +904,7 @@ def test_contiguous_abort_finalizes_frames_or_reports_metadata_failure(
 
     monkeypatch.setattr(writer, "_write_frame", tracked_write)
     if fail_finalization:
-        monkeypatch.setattr(
-            writer, "_finalize_contiguous", _fail_tiff_finalization
-        )
+        monkeypatch.setattr(writer, "_finalize_contiguous", _fail_tiff_finalization)
     pipeline = Pipeline(writer)
     try:
         pipeline.start()
@@ -932,7 +917,8 @@ def test_contiguous_abort_finalizes_frames_or_reports_metadata_failure(
             pipeline.wait(timeout=5.0)
             assert pipeline.exception is None
 
-        assert len(handles) == 1 and handles[0].closed
+        assert len(handles) == 1
+        assert handles[0].closed
         if not fail_finalization:
             with tifffile.TiffFile(path) as tif:
                 saved = tif.shaped_metadata
@@ -961,8 +947,7 @@ def test_contiguous_finalization_preserves_existing_failure(
     """Raise finalization errors on success and annotate an existing failure."""
     frame = np.zeros((4, 5), dtype=np.uint8)
     frames = (
-        (frame, np.zeros((5, 4), dtype=np.uint8))
-        if invalid_next_frame else (frame,)
+        (frame, np.zeros((5, 4), dtype=np.uint8)) if invalid_next_frame else (frame,)
     )
     writer = TiffWriter(
         upstream=FrameSource(frames),
@@ -977,7 +962,8 @@ def test_contiguous_finalization_preserves_existing_failure(
     with pytest.raises(error, match=message) as caught:
         _run_writer(writer)
 
-    assert len(handles) == 1 and handles[0].closed
+    assert len(handles) == 1
+    assert handles[0].closed
     if invalid_next_frame:
         assert any(
             "metadata failure" in note
@@ -1017,15 +1003,14 @@ def test_contiguous_write_failure_does_not_commit_a_guessed_shape(
     with pytest.raises(OSError, match="frame write failed"):
         _run_writer(writer)
 
-    assert len(handles) == 1 and handles[0].closed
+    assert len(handles) == 1
+    assert handles[0].closed
     with tifffile.TiffFile(path) as tif:
         assert tif.shaped_metadata is None
 
 
 @pytest.mark.parametrize("contiguous", [None, 0, 1, "yes"])
-def test_contiguous_option_requires_boolean(
-    tmp_path: Path, contiguous: object
-) -> None:
+def test_contiguous_option_requires_boolean(tmp_path: Path, contiguous: object) -> None:
     """Reject non-boolean options instead of interpreting their truthiness."""
     with pytest.raises(TypeError, match="contiguous"):
         TiffWriter(

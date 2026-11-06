@@ -40,10 +40,7 @@ class ColorVector:
             raise TypeError("rgb must be a tuple of three numbers.")
 
         for component in self.rgb:
-            if (
-                not isinstance(component, (int, float))
-                or isinstance(component, bool)
-            ):
+            if not isinstance(component, (int, float)) or isinstance(component, bool):
                 raise TypeError("Color vector components must be numbers.")
 
             if not isfinite(component) or component < 0:
@@ -132,10 +129,7 @@ class DisplaySettings:
         if not self.channels:
             raise ValueError("At least one channel is required.")
 
-        if any(
-            not isinstance(channel, ChannelSettings)
-            for channel in self.channels
-        ):
+        if any(not isinstance(channel, ChannelSettings) for channel in self.channels):
             raise TypeError("Every channel must be ChannelSettings.")
 
         if not isinstance(self.transfer_function, TransferFunction):
@@ -143,9 +137,7 @@ class DisplaySettings:
 
         maximum = self.transfer_function.input_max
         if not isfinite(maximum) or maximum <= 0:
-            raise ValueError(
-                "Transfer function input_max must be finite and positive."
-            )
+            raise ValueError("Transfer function input_max must be finite and positive.")
 
 
 @dataclass(frozen=True, slots=True, kw_only=True, eq=False)

@@ -141,46 +141,56 @@ def test_empty_devices_table_is_valid(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize(
-    "document",
+    ("document", "message"),
     [
         pytest.param(
             "[other]",
+            "must contain a",
             id="missing-devices-table",
         ),
         pytest.param(
             "devices = 3",
+            "must contain a",
             id="devices-is-not-a-table",
         ),
         pytest.param(
             "[devices]\nboard = 3",
+            "must be a table",
             id="device-is-not-a-table",
         ),
         pytest.param(
             '[devices.""]\ndriver = "demo"',
+            "names must not be empty",
             id="empty-device-name",
         ),
         pytest.param(
             "[devices.board]",
+            "requires a nonempty string driver name",
             id="missing-driver",
         ),
         pytest.param(
             "[devices.board]\ndriver = 3",
+            "requires a nonempty string driver name",
             id="nonstring-driver",
         ),
         pytest.param(
             '[devices.board]\ndriver = ""',
+            "requires a nonempty string driver name",
             id="empty-driver",
         ),
         pytest.param(
             '[devices.board]\ndriver = "demo"\nconfig = 3',
+            "config must be a table",
             id="config-is-not-a-table",
         ),
         pytest.param(
             '[devices.board]\ndriver = "demo"\nconfgi = {}',
+            "unsupported fields",
             id="unknown-field",
         ),
         pytest.param(
             '[devices.board]\ndriver = "unknown"',
+            "unknown driver",
             id="unregistered-driver",
         ),
     ],
@@ -188,11 +198,12 @@ def test_empty_devices_table_is_valid(tmp_path: Path) -> None:
 def test_invalid_definitions_are_rejected(
     tmp_path: Path,
     document: str,
+    message: str,
 ) -> None:
     """Reject malformed device definitions and unregistered driver selections."""
     path = _write_config(tmp_path, document)
 
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match=message):
         load_hardware(path, drivers={"demo": FakeDevice})
 
 
@@ -221,7 +232,7 @@ def test_validates_all_entries_before_constructing_any_device(
         """,
     )
 
-    with pytest.raises(ValueError, match="bad.*unknown"):
+    with pytest.raises(ValueError, match="bad.*unknown"):  # ruff: ignore[pytest-raises-ambiguous-pattern]
         load_hardware(path, drivers={"demo": factory})
 
     assert calls == []
@@ -230,7 +241,7 @@ def test_validates_all_entries_before_constructing_any_device(
 def test_noncallable_driver_is_rejected_before_construction(
     tmp_path: Path,
 ) -> None:
-    """Selecting a registry entry that is not callable raises a driver-specific error."""
+    """Selecting registry entry that is not callable raises a driver-specific error."""
     path = _write_config(
         tmp_path,
         """
@@ -382,10 +393,7 @@ def test_rollback_failure_does_not_hide_construction_failure(
 
     assert caught.value is failure
     assert healthy.close_calls == broken.close_calls == 1
-    assert any(
-        "Disconnect failed" in note
-        for note in failure.__notes__
-    )
+    assert any("Disconnect failed" in note for note in failure.__notes__)
 
 
 def test_missing_file_is_reported(tmp_path: Path) -> None:

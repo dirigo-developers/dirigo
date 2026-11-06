@@ -15,7 +15,7 @@ class Subscription[T]:
             raise ValueError("capacity must be positive.")
 
         self._capacity = capacity
-        self._products: deque[Product[T]] = deque() # used as FIFO container
+        self._products: deque[Product[T]] = deque()  # used as FIFO container
         self._condition = _condition
 
         self._producer_closed: bool = False
@@ -51,11 +51,7 @@ class Subscription[T]:
 
         with self._condition:
             available = self._condition.wait_for(
-                lambda: (
-                    self._closed
-                    or self._producer_closed
-                    or bool(self._products)
-                ),
+                lambda: self._closed or self._producer_closed or bool(self._products),
                 timeout=timeout,
             )
 
@@ -111,7 +107,7 @@ class Subscription[T]:
     def _discard_pending(self) -> None:
         """Release each queued delivery; caller holds the condition lock."""
         while self._products:
-                self._products.popleft()._release_delivery()
+            self._products.popleft()._release_delivery()
 
     def _ready_for_publish(self) -> bool:
         """Whether this subscription permits publication to proceed."""

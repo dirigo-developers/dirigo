@@ -28,9 +28,7 @@ def load_hardware(
 
     definitions = document.get("devices")
     if not isinstance(definitions, dict):
-        raise ValueError(
-            "Configuration must contain a [devices] table."
-        )
+        raise ValueError("Configuration must contain a [devices] table.")
 
     registry = dict(drivers)
     plan: list[tuple[str, DeviceFactory, dict[str, object]]] = []
@@ -45,33 +43,23 @@ def load_hardware(
         unknown = definition.keys() - {"driver", "config"}
         if unknown:
             raise ValueError(
-                f"Device {name!r} has unsupported fields: "
-                f"{', '.join(sorted(unknown))}."
+                f"Device {name!r} has unsupported fields: {', '.join(sorted(unknown))}."
             )
 
         driver_name = definition.get("driver")
         if not isinstance(driver_name, str) or not driver_name:
-            raise ValueError(
-                f"Device {name!r} requires a nonempty driver name."
-            )
+            raise ValueError(f"Device {name!r} requires a nonempty string driver name.")
 
         config = definition.get("config", {})
         if not isinstance(config, dict):
-            raise ValueError(
-                f"Device {name!r} config must be a table."
-            )
+            raise ValueError(f"Device {name!r} config must be a table.")
 
         if driver_name not in registry:
-            raise ValueError(
-                f"Device {name!r} selects unknown driver "
-                f"{driver_name!r}."
-            )
+            raise ValueError(f"Device {name!r} selects unknown driver {driver_name!r}.")
 
         factory = registry[driver_name]
         if not callable(factory):
-            raise TypeError(
-                f"Driver {driver_name!r} must be callable."
-            )
+            raise TypeError(f"Driver {driver_name!r} must be callable.")
 
         plan.append((name, factory, config))
 
@@ -89,9 +77,7 @@ def load_hardware(
                     )
 
             except BaseException as exc:
-                exc.add_note(
-                    f"While constructing device {name!r}."
-                )
+                exc.add_note(f"While constructing device {name!r}.")
                 raise
 
             devices[name] = device
@@ -102,7 +88,5 @@ def load_hardware(
         try:
             Hardware(devices).close()
         except BaseException as cleanup_failure:
-            failure.add_note(
-                f"Hardware rollback also failed: {cleanup_failure!r}"
-            )
+            failure.add_note(f"Hardware rollback also failed: {cleanup_failure!r}")
         raise

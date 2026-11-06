@@ -25,17 +25,13 @@ class HardwareSource[OutputT = object](Source[OutputT]):
         hardware = self._bound_hardware
 
         if hardware is None:
-            raise RuntimeError(
-                f"Hardware has not been bound to source {self.name!r}."
-            )
+            raise RuntimeError(f"Hardware has not been bound to source {self.name!r}.")
 
         return hardware
 
     def _bind_hardware(self, hardware: Hardware) -> None:
         """Bind once before preparation; ownership stays with the caller."""
         if self._bound_hardware is not None:
-            raise RuntimeError(
-                f"Hardware is already bound to source {self.name!r}."
-            )
+            raise RuntimeError(f"Hardware is already bound to source {self.name!r}.")
 
         self._bound_hardware = hardware

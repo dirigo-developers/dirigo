@@ -257,16 +257,16 @@ def test_settings_snapshot_is_immutable(channel: ChannelSettings) -> None:
     )
 
     with pytest.raises(FrozenInstanceError):
-        setattr(settings, "channels", ())
+        settings.channels = ()  # ty: ignore[invalid-assignment]
 
     with pytest.raises(FrozenInstanceError):
-        setattr(channel, "enabled", False)
+        channel.enabled = False  # ty: ignore[invalid-assignment]
 
     with pytest.raises(FrozenInstanceError):
-        setattr(channel.color, "rgb", (1.0, 0.0, 0.0))
+        channel.color.rgb = 1.0, 0.0, 0.0  # ty: ignore[invalid-assignment]
 
     with pytest.raises(FrozenInstanceError):
-        setattr(channel.limits, "min", 100)
+        channel.limits.min = 100  # ty: ignore[invalid-assignment]
 
 
 def test_display_image_preserves_metadata_and_freezes_its_envelope() -> None:
@@ -288,4 +288,4 @@ def test_display_image_preserves_metadata_and_freezes_its_envelope() -> None:
     assert image.metadata is metadata
 
     with pytest.raises(FrozenInstanceError):
-        image.metadata = FrameMetadata() # ty: ignore[invalid-assignment]
+        image.metadata = FrameMetadata()  # ty: ignore[invalid-assignment]

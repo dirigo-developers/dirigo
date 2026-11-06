@@ -48,9 +48,7 @@ class TiffWriter(Writer[FrameArray]):
         if not isinstance(contiguous, bool):
             raise TypeError("contiguous must be a boolean.")
         if (pixel_size_x is None) != (pixel_size_y is None):
-            raise ValueError(
-                "Specify both pixel_size_x and pixel_size_y, or neither."
-            )
+            raise ValueError("Specify both pixel_size_x and pixel_size_y, or neither.")
 
         self._resolution: tuple[float, float] | None = None
         if pixel_size_x is not None and pixel_size_y is not None:
@@ -100,9 +98,7 @@ class TiffWriter(Writer[FrameArray]):
                             if tif is None:
                                 output = resources.enter_context(self._open_file())
                                 tif = resources.enter_context(
-                                    tifffile.TiffWriter(
-                                        output, bigtiff=True, ome=False
-                                    )
+                                    tifffile.TiffWriter(output, bigtiff=True, ome=False)
                                 )
                                 shape, dtype = frame.shape, frame.dtype
                             elif frame.shape != shape or frame.dtype != dtype:
@@ -161,18 +157,14 @@ class TiffWriter(Writer[FrameArray]):
             raise ValueError("TIFF frames must be nonempty arrays.")
         if self._interpretation == "monochrome":
             if frame.ndim != 2:
-                raise ValueError(
-                    "Monochrome TIFF frames must be two-dimensional."
-                )
+                raise ValueError("Monochrome TIFF frames must be two-dimensional.")
         else:
             if frame.ndim != 3:
                 raise ValueError(
                     "Multichannel and RGB TIFF frames must be three-dimensional."
                 )
             if self._interpretation == "rgb" and frame.shape[2] != 3:
-                raise ValueError(
-                    "RGB TIFF frames must have exactly three components."
-                )
+                raise ValueError("RGB TIFF frames must have exactly three components.")
         if frame.dtype not in (np.dtype(np.uint8), np.dtype(np.uint16)):
             raise ValueError("TIFF frames must have dtype uint8 or uint16.")
 

@@ -208,6 +208,7 @@ def test_subscription_close_discards_queued_products() -> None:
     Once the queue is discarded and collection runs, the weak reference must
     return None, proving that the delivery channel no longer retains the payload.
     """
+
     class Payload:
         pass
 

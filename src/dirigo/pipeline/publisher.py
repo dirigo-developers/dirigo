@@ -131,9 +131,9 @@ class Publisher[T]:
             raise RuntimeError("Publisher is closed.")
 
     def _wait_for_recipients(
-            self,
-            timeout: float | None,
-        ) -> tuple[Subscription[T], ...]:
+        self,
+        timeout: float | None,
+    ) -> tuple[Subscription[T], ...]:
         """Caller holds the publisher lock; waiting releases it temporarily."""
         if timeout is not None and timeout < 0:
             raise ValueError("timeout must be nonnegative or None.")
@@ -142,8 +142,10 @@ class Publisher[T]:
 
         snapshot = tuple(self._subscriptions)
         available = self._condition.wait_for(
-            lambda: self._closed
-            or all(subscription._ready_for_publish() for subscription in snapshot),
+            lambda: (
+                self._closed
+                or all(subscription._ready_for_publish() for subscription in snapshot)
+            ),
             timeout=timeout,
         )
 

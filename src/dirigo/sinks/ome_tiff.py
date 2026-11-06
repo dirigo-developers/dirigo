@@ -43,9 +43,7 @@ class OmeTiffWriter(TiffWriter):
         if z_planes <= 0:
             raise ValueError("z_planes must be positive.")
         if interpretation not in ("monochrome", "multichannel"):
-            raise ValueError(
-                "interpretation must be 'monochrome' or 'multichannel'."
-            )
+            raise ValueError("interpretation must be 'monochrome' or 'multichannel'.")
         if z_spacing is not None:
             if not isinstance(z_spacing, units.Position):
                 raise TypeError("z_spacing must be a Position.")
@@ -91,8 +89,7 @@ class OmeTiffWriter(TiffWriter):
                             raise ValueError("time_index must be None or zero.")
                         if record.z_index != index:
                             raise ValueError(
-                                f"Expected z_index {index}, received "
-                                f"{record.z_index}."
+                                f"Expected z_index {index}, received {record.z_index}."
                             )
 
                         if tif is None:

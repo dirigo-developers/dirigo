@@ -58,26 +58,27 @@ def test_symmetric_ranges_reuse_quantity_parsing() -> None:
     for text in ("±5 V", " ± 5V ", "±5e-3 kV", "±+5 V"):
         assert VoltageRange(text) == VoltageRange(-5, 5)
 
-    for text in ("±2 us", "±2 μs", "±2 µs"):
+    for text in ("±2 us", "±2 μs", "±2 µs"):  # ruff: ignore[ambiguous-unicode-character-string]
         assert TimeRange(text) == TimeRange("-2 us", "2 us")
 
     assert AngleRange("±90 deg") == AngleRange("-90 deg", "90 deg")
 
 
-def test_invalid_symmetric_ranges_are_rejected() -> None:
-    for text in (
-        "5 V",
-        "±",
-        "±0 V",
-        "±-5 V",
-        "±5 s",
-        "±5 bananas",
-    ):
-        with pytest.raises(ValueError):
-            VoltageRange(text)
-
-    with pytest.raises(ValueError):
-        VoltageRange(5)
+@pytest.mark.parametrize(
+    ("arg", "message"),
+    [
+        ("5 V", "two endpoints"),
+        ("±", "Invalid quantity"),
+        ("±0 V", "min must be less than max"),
+        ("±-5 V", "min must be less than max"),
+        ("±5 s", "Invalid unit"),
+        ("±5 bananas", "Invalid unit"),
+        (5, "two endpoints"),
+    ],
+)
+def test_invalid_symmetric_ranges_are_rejected(arg, message: str) -> None:  # ruff: ignore[missing-type-function-argument]
+    with pytest.raises(ValueError, match=message):
+        VoltageRange(arg)
 
 
 def test_endpoints_must_be_strictly_increasing() -> None:
@@ -87,7 +88,7 @@ def test_endpoints_must_be_strictly_increasing() -> None:
         (math.nan, 1),
         (0, math.nan),
     ):
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="min must be less than max"):
             VoltageRange(lower, upper)
 
 

@@ -196,6 +196,7 @@ def test_processing_chain_transforms_products_and_finishes() -> None:
     Upstream completion must let it finish, which in turn must let the final
     collector finish after receiving every transformed value.
     """
+
     class Inverter(StubWorker[bool, bool]):
         def _work(self) -> None:
             try:
@@ -231,6 +232,7 @@ def test_pipeline_abort_wakes_worker_receiving_from_upstream(
 
     Both workers must finish without failure before the receive timeout expires.
     """
+
     class IdleSource(StubWorker[Never, bool]):
         def _work(self) -> None:
             self._abort_requested.wait()
@@ -263,12 +265,10 @@ def test_pipeline_marks_all_workers_before_waking_channels() -> None:
     worker's abort hook is invoked. This ordering prevents a channel wake-up
     from exposing OperationCancelled to a worker whose request is not yet marked.
     """
+
     class CheckingWorker(AbortableWorker):
         def _request_abort(self) -> None:
-            assert all(
-                worker._abort_requested.is_set()
-                for worker in workers
-            )
+            assert all(worker._abort_requested.is_set() for worker in workers)
             super()._request_abort()
 
     first = CheckingWorker()

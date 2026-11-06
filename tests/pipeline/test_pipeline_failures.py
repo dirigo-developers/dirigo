@@ -151,10 +151,7 @@ def test_pipeline_reports_worker_failure(
 
         if work_failure is not None and close_failure is not None:
             assert worker._close_exception is close_failure
-            assert any(
-                "cleanup failed" in note
-                for note in work_failure.__notes__
-            )
+            assert any("cleanup failed" in note for note in work_failure.__notes__)
     finally:
         _release_and_join(pipeline.workers)
 
@@ -255,10 +252,7 @@ def test_cleanup_failure_preserves_preparation_failure(
             "first.close",
         ]
         assert failing_closer._close_exception is close_failure
-        assert any(
-            "cleanup failed" in note
-            for note in prepare_failure.__notes__
-        )
+        assert any("cleanup failed" in note for note in prepare_failure.__notes__)
     finally:
         _release_and_join(pipeline.workers)
 
@@ -429,13 +423,9 @@ def test_thread_launch_failure_cleans_up_graph(
         launch_order = ["running", "middle", "source"]
         failure_index = launch_order.index(fail_at)
 
-        assert launch_attempts == launch_order[:failure_index + 1]
+        assert launch_attempts == launch_order[: failure_index + 1]
 
-        manual_closes = [
-            name
-            for name, thread_id in closed
-            if thread_id == get_ident()
-        ]
+        manual_closes = [name for name, thread_id in closed if thread_id == get_ident()]
         assert manual_closes == launch_order[failure_index:]
 
         if cleanup_fails:

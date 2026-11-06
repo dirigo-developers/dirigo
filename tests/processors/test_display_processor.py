@@ -135,7 +135,7 @@ def display(settings: DisplaySettings) -> Display:
 
 
 @pytest.fixture
-def pipelines() -> Generator[list[Pipeline], None, None]:
+def pipelines() -> Generator[list[Pipeline]]:
     """Ensure assertions and expected failures cannot leave worker threads running."""
     created: list[Pipeline] = []
     try:
@@ -184,7 +184,7 @@ def test_factory_preserves_display_upstream_and_name(
 @pytest.mark.parametrize("upstream", [None, object()])
 def test_processor_requires_a_valid_upstream(
     display: Display,
-    upstream: Any,
+    upstream,  # ruff: ignore[missing-type-function-argument]
 ) -> None:
     """Reject missing or unrelated upstream workers before execution."""
     with pytest.raises(TypeError, match="upstream"):
@@ -192,7 +192,7 @@ def test_processor_requires_a_valid_upstream(
 
 
 @pytest.mark.parametrize("display", [None, object()])
-def test_processor_requires_a_display(display: Any) -> None:
+def test_processor_requires_a_display(display) -> None:  # ruff: ignore[missing-type-function-argument]
     """Reject unrelated display objects before creating an upstream subscription."""
     with pytest.raises(TypeError, match="display must be a Display"):
         DisplayProcessor(upstream=FrameSource(), display=display)
@@ -239,9 +239,7 @@ def test_frames_metadata_and_paused_redraw(
 
     red = replace(
         settings,
-        channels=(
-            replace(settings.channels[0], color=ColorVector((1.0, 0.0, 0.0))),
-        ),
+        channels=(replace(settings.channels[0], color=ColorVector((1.0, 0.0, 0.0))),),
     )
     display.set_settings(red)
 
@@ -250,9 +248,7 @@ def test_frames_metadata_and_paused_redraw(
     assert image.metadata is source.records[-1]
 
     expected = (
-        [128, 0, 0]
-        if pixel_format is DisplayPixelFormat.RGB24
-        else [0, 0, 128, 255]
+        [128, 0, 0] if pixel_format is DisplayPixelFormat.RGB24 else [0, 0, 128, 255]
     )
     np.testing.assert_array_equal(image.pixels, [[expected]])
     np.testing.assert_array_equal(previous.pixels, sink.received[-1].payload)
@@ -310,7 +306,7 @@ def test_layout_changes_fail_and_release_the_display(
 @pytest.mark.parametrize("invalid", [None, object()])
 def test_nonarray_input_fails_and_releases_the_display(
     display: Display,
-    invalid: Any,
+    invalid,  # ruff: ignore[missing-type-function-argument]
     pipelines: list[Pipeline],
 ) -> None:
     """Reject nonarray payloads without leaving the display attached."""
@@ -427,9 +423,7 @@ def test_publication_uses_the_submission_snapshot(
     captured: list[DisplayImage] = []
     red = replace(
         settings,
-        channels=(
-            replace(settings.channels[0], color=ColorVector((1.0, 0.0, 0.0))),
-        ),
+        channels=(replace(settings.channels[0], color=ColorVector((1.0, 0.0, 0.0))),),
     )
 
     def submit_then_redraw(
@@ -463,7 +457,7 @@ def test_abort_releases_a_borrowed_buffer_and_display_attachment(
     pipelines: list[Pipeline],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Release an in-flight scientific borrow and allow another processor after abort."""
+    """Release an in-flight borrow and allow another processor after abort."""
     entered = Event()
     release = Event()
     original = display._submit

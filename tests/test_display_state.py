@@ -1,7 +1,6 @@
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from threading import Event
-from typing import Any
 
 import numpy as np
 import numpy.typing as npt
@@ -67,7 +66,7 @@ def test_display_initial_state(
 
 
 @pytest.mark.parametrize("settings", [None, object(), "gamma"])
-def test_display_rejects_invalid_initial_settings(settings: Any) -> None:
+def test_display_rejects_invalid_initial_settings(settings: DisplaySettings) -> None:
     """Require a complete DisplaySettings record at construction."""
     with pytest.raises(TypeError, match="settings must be DisplaySettings"):
         Display(settings=settings)
@@ -76,7 +75,7 @@ def test_display_rejects_invalid_initial_settings(settings: Any) -> None:
 @pytest.mark.parametrize("pixel_format", [None, "rgb24", 0])
 def test_display_rejects_invalid_pixel_formats(
     settings: DisplaySettings,
-    pixel_format: Any,
+    pixel_format: DisplayPixelFormat,
 ) -> None:
     """Require a DisplayPixelFormat rather than its name or an unrelated value."""
     with pytest.raises(TypeError, match="pixel_format must be"):
@@ -239,7 +238,7 @@ def test_failed_submission_preserves_the_retained_frame(
     display: Display,
     settings: DisplaySettings,
     red_settings: DisplaySettings,
-    frame: Any,
+    frame,  # ruff: ignore[missing-type-function-argument]
     error: type[Exception],
 ) -> None:
     """Keep the previous image and scientific frame when a submission fails."""
@@ -261,7 +260,7 @@ def test_failed_submission_preserves_the_retained_frame(
 @pytest.mark.parametrize("metadata", [{}, object(), "metadata", True])
 def test_submission_rejects_invalid_metadata(
     display: Display,
-    metadata: Any,
+    metadata,  # ruff: ignore[missing-type-function-argument]
 ) -> None:
     """Reject unrelated metadata values without replacing the current image."""
     frame = np.full((1, 1, 1), 64, dtype=np.uint16)
@@ -278,7 +277,7 @@ def test_submission_rejects_invalid_metadata(
 def test_invalid_settings_preserve_the_current_state(
     display: Display,
     settings: DisplaySettings,
-    invalid: Any,
+    invalid,  # ruff: ignore[missing-type-function-argument]
 ) -> None:
     """Reject incorrectly typed settings without altering the active configuration."""
     display.submit(np.full((1, 1, 1), 64, dtype=np.uint16))
@@ -291,13 +290,20 @@ def test_invalid_settings_preserve_the_current_state(
     assert display.latest_image is previous
 
 
-@pytest.mark.parametrize("failure", ["channel_count", "transfer"])
+@pytest.mark.parametrize(
+    ("failure", "message"),
+    [
+        ("channel_count", "channel count must match"),
+        ("transfer", "must return finite values"),
+    ],
+)
 def test_failed_redraw_preserves_settings_and_image(
     display: Display,
     settings: DisplaySettings,
     failure: str,
+    message: str,
 ) -> None:
-    """Commit neither settings nor pixels when preparing or rendering an update fails."""
+    """Commit neither settings nor pixels when prepping or rendering an update fails."""
 
     class BrokenTransfer(Linear):
         def __call__(
@@ -314,7 +320,7 @@ def test_failed_redraw_preserves_settings_and_image(
     else:
         updated = replace(settings, transfer_function=BrokenTransfer())
 
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match=message):
         display.set_settings(updated)
 
     assert display.settings is settings

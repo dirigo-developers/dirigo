@@ -296,6 +296,7 @@ def test_downstream_preparation_failure_preserves_hardware() -> None:
     Rollback must close the source without starting its work or closing the
     borrowed device collection.
     """
+
     class FailingCollector(Collector):
         def _prepare(self) -> None:
             raise RuntimeError("Downstream preparation failed.")

@@ -137,7 +137,9 @@ class _FrameSource(Worker[None, FrameArray]):
                     self.scheduling_misses += config.scheduled_frames - index
                     return
                 index, skipped = due_slot(
-                    index, now - self.started_at, config.fps,
+                    index,
+                    now - self.started_at,
+                    config.fps,
                     config.scheduled_frames,
                 )
                 self.scheduling_misses += skipped
@@ -171,7 +173,9 @@ class _MeasuredWriter(TiffWriter):
     def __init__(self, source: _FrameSource, path: Path) -> None:
         config = source.config
         super().__init__(
-            upstream=source, path=path, interpretation=config.interpretation,
+            upstream=source,
+            path=path,
+            interpretation=config.interpretation,
             contiguous=config.contiguous,
         )
         # Replace this worker's default capacity-one subscription before launch.
@@ -209,9 +213,7 @@ class _MeasuredWriter(TiffWriter):
                 self.finalization_seconds = monotonic() - self.finalization_started_at
 
     @contextmanager
-    def _receive(
-        self, timeout: float | None = None
-    ) -> Generator[Product[FrameArray]]:
+    def _receive(self, timeout: float | None = None) -> Generator[Product[FrameArray]]:
         try:
             with super()._receive(timeout=timeout) as product:
                 yield product
@@ -291,7 +293,8 @@ def _verify(path: Path, source: _FrameSource, frames: int) -> None:
                 if channel == pages_per_frame - 1:
                     expected.flat[-1] = marker
                 expected_shape = (
-                    config.shape if config.interpretation == "rgb"
+                    config.shape
+                    if config.interpretation == "rgb"
                     else (config.height, config.width)
                 )
                 if data.shape != expected_shape or data.dtype != np.dtype(config.dtype):
@@ -336,18 +339,22 @@ def run_benchmark(
         ended = monotonic()
         _verify(path, source, writer.frames)
         return TiffBenchmarkResult(
-            mode=mode, frames=writer.frames,
+            mode=mode,
+            frames=writer.frames,
             pixel_bytes=writer.frames * config.frame_bytes,
             file_bytes=path.stat().st_size if path.exists() else 0,
             streaming_seconds=(
                 writer.finalization_started_at - source.started_at
-                if writer.finalization_started_at is not None else 0.0
+                if writer.finalization_started_at is not None
+                else 0.0
             ),
             finalization_seconds=writer.finalization_seconds,
             sync_seconds=writer.sync_seconds,
             total_seconds=ended - source.started_at,
-            overruns=source.overruns, scheduling_misses=source.scheduling_misses,
-            max_lateness_seconds=source.max_lateness, peak_buffers=source.peak_buffers,
+            overruns=source.overruns,
+            scheduling_misses=source.scheduling_misses,
+            max_lateness_seconds=source.max_lateness,
+            peak_buffers=source.peak_buffers,
         )
 
 
@@ -383,7 +390,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--channels", type=int, default=1)
     parser.add_argument("--dtype", choices=("uint8", "uint16"), default="uint16")
     parser.add_argument(
-        "--interpretation", choices=("monochrome", "multichannel", "rgb"),
+        "--interpretation",
+        choices=("monochrome", "multichannel", "rgb"),
         default="monochrome",
     )
     parser.add_argument("--fps", type=float, default=30.0)
@@ -394,9 +402,15 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         config = TiffBenchmarkConfig(
-            width=args.width, height=args.height, channels=args.channels,
-            dtype=args.dtype, interpretation=args.interpretation, fps=args.fps,
-            duration=args.duration, buffers=args.buffers, contiguous=args.contiguous,
+            width=args.width,
+            height=args.height,
+            channels=args.channels,
+            dtype=args.dtype,
+            interpretation=args.interpretation,
+            fps=args.fps,
+            duration=args.duration,
+            buffers=args.buffers,
+            contiguous=args.contiguous,
         )
     except (TypeError, ValueError) as exc:
         parser.error(str(exc))

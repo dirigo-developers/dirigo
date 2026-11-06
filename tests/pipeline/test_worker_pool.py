@@ -138,6 +138,7 @@ def test_worker_returns_an_unpublished_output_buffer() -> None:
     Successful reacquisition of the same object proves that unpublished output
     does not leave an outstanding producer claim.
     """
+
     class UnpublishedSource(PooledSource):
         def __init__(self) -> None:
             super().__init__()

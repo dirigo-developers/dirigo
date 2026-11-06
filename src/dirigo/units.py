@@ -17,9 +17,7 @@ class UnitQuantity(float):
     DIMENSIONAL_QUANTITY: ClassVar[tuple[str, str]] = ("1", "1")
     ALLOWED_UNITS_AND_MULTIPLIERS: ClassVar[dict[str, float]] = {"": 1.0}
 
-    _dimension_registry: ClassVar[
-        dict[tuple[str, str], type[UnitQuantity]]
-    ] = {}
+    _dimension_registry: ClassVar[dict[tuple[str, str], type[UnitQuantity]]] = {}
 
     _value_pattern = re.compile(
         r"\s*([-+]?(?:\d+(?:\.\d*)?|\.\d+)"
@@ -38,17 +36,13 @@ class UnitQuantity(float):
 
         if register:
             if dimension in UnitQuantity._dimension_registry:
-                raise ValueError(
-                    f"A quantity is already registered for {dimension}."
-                )
+                raise ValueError(f"A quantity is already registered for {dimension}.")
             UnitQuantity._dimension_registry[dimension] = cls
 
     def __new__(cls, quantity: str | float) -> Self:
         if isinstance(quantity, UnitQuantity):
             if quantity.DIMENSIONAL_QUANTITY != cls.DIMENSIONAL_QUANTITY:
-                raise TypeError(
-                    "Cannot convert between incompatible dimensions."
-                )
+                raise TypeError("Cannot convert between incompatible dimensions.")
             value = float(quantity)
 
         elif isinstance(quantity, str):
@@ -57,25 +51,18 @@ class UnitQuantity(float):
                 raise ValueError(f"Invalid quantity: {quantity!r}.")
 
             number, unit = match.groups()
-            unit = unit.replace("µ", "μ")
+            unit = unit.replace("µ", "μ")  # ruff: ignore[ambiguous-unicode-character-string]
 
             if unit not in cls.ALLOWED_UNITS_AND_MULTIPLIERS:
-                raise ValueError(
-                    f"Invalid unit {unit!r} for {cls.__name__}."
-                )
+                raise ValueError(f"Invalid unit {unit!r} for {cls.__name__}.")
 
-            value = (
-                float(number)
-                * cls.ALLOWED_UNITS_AND_MULTIPLIERS[unit]
-            )
+            value = float(number) * cls.ALLOWED_UNITS_AND_MULTIPLIERS[unit]
 
         elif isinstance(quantity, (int, float)):
             value = float(quantity)
 
         else:
-            raise TypeError(
-                "Expected a unit string or a numeric base-unit value."
-            )
+            raise TypeError("Expected a unit string or a numeric base-unit value.")
 
         return super().__new__(cls, value)
 
@@ -111,24 +98,17 @@ class UnitQuantity(float):
         return f"{type(self).__name__}({str(self)!r})"
 
     def with_unit(self, unit: str, sig_figs: int = 3) -> str:
-        unit = unit.replace("µ", "μ")
+        unit = unit.replace("µ", "μ")  # ruff: ignore[ambiguous-unicode-character-string]
 
         if unit not in self.ALLOWED_UNITS_AND_MULTIPLIERS:
-            raise ValueError(
-                f"Invalid unit {unit!r} for {type(self).__name__}."
-            )
+            raise ValueError(f"Invalid unit {unit!r} for {type(self).__name__}.")
 
         value = float(self) / self.ALLOWED_UNITS_AND_MULTIPLIERS[unit]
         return f"{value:.{sig_figs}g} {unit}".rstrip()
 
     def _same_type(self, other: object) -> UnitQuantity:
-        if (
-            not isinstance(other, UnitQuantity)
-            or type(other) is not type(self)
-        ):
-            raise TypeError(
-                "Addition and subtraction require the same quantity type."
-            )
+        if not isinstance(other, UnitQuantity) or type(other) is not type(self):
+            raise TypeError("Addition and subtraction require the same quantity type.")
         return other
 
     def __add__(self, other: object) -> Self:
@@ -209,14 +189,10 @@ class UnitQuantity(float):
         )
 
         return (
-            "".join(
-                symbol * count
-                for symbol, count in sorted(numerator.items())
-            ) or "1",
-            "".join(
-                symbol * count
-                for symbol, count in sorted(denominator.items())
-            ) or "1",
+            "".join(symbol * count for symbol, count in sorted(numerator.items()))
+            or "1",
+            "".join(symbol * count for symbol, count in sorted(denominator.items()))
+            or "1",
         )
 
     @staticmethod
@@ -236,9 +212,7 @@ class UnitQuantity(float):
         target = UnitQuantity._dimension_registry.get(dimension)
 
         if target is None:
-            raise TypeError(
-                f"No quantity type registered for dimensions {dimension}."
-            )
+            raise TypeError(f"No quantity type registered for dimensions {dimension}.")
 
         return target(value)
 
@@ -268,9 +242,7 @@ class UnitQuantity(float):
             raise TypeError("Ordering requires another quantity.")
 
         if self.DIMENSIONAL_QUANTITY != other.DIMENSIONAL_QUANTITY:
-            raise TypeError(
-                "Cannot order quantities with incompatible dimensions."
-            )
+            raise TypeError("Cannot order quantities with incompatible dimensions.")
 
         return float(other)
 
@@ -288,8 +260,7 @@ class UnitQuantity(float):
 
     def _unsupported(self, *_operands: object) -> Never:
         raise TypeError(
-            "Unsupported quantity operation; "
-            "convert with float() explicitly."
+            "Unsupported quantity operation; convert with float() explicitly."
         )
 
     __floordiv__ = __rfloordiv__ = _unsupported
@@ -301,90 +272,130 @@ class UnitQuantity(float):
 class Voltage(UnitQuantity):
     DIMENSIONAL_QUANTITY = ("MLL", "TTTI")
     ALLOWED_UNITS_AND_MULTIPLIERS: ClassVar[dict[str, float]] = {
-        "V": 1.0, "mV": 1e-3, "μV": 1e-6, "uV": 1e-6,
-        "nV": 1e-9, "kV": 1e3,
+        "V": 1.0,
+        "mV": 1e-3,
+        "μV": 1e-6,
+        "uV": 1e-6,
+        "nV": 1e-9,
+        "kV": 1e3,
     }
 
 
 class Resistance(UnitQuantity):
     DIMENSIONAL_QUANTITY = ("MLL", "TTTII")
     ALLOWED_UNITS_AND_MULTIPLIERS: ClassVar[dict[str, float]] = {
-        "Ω": 1.0, "ohm": 1.0, "kΩ": 1e3, "kohm": 1e3,
-        "MΩ": 1e6, "Mohm": 1e6, "GΩ": 1e9, "Gohm": 1e9,
+        "Ω": 1.0,
+        "ohm": 1.0,
+        "kΩ": 1e3,
+        "kohm": 1e3,
+        "MΩ": 1e6,
+        "Mohm": 1e6,
+        "GΩ": 1e9,
+        "Gohm": 1e9,
     }
 
 
 class Angle(UnitQuantity):
     DIMENSIONAL_QUANTITY = ("Θ", "1")
     ALLOWED_UNITS_AND_MULTIPLIERS: ClassVar[dict[str, float]] = {
-        "rad": 1.0, "mrad": 1e-3, "deg": math.pi / 180,
+        "rad": 1.0,
+        "mrad": 1e-3,
+        "deg": math.pi / 180,
     }
 
 
 class Frequency(UnitQuantity):
     DIMENSIONAL_QUANTITY = ("1", "T")
     ALLOWED_UNITS_AND_MULTIPLIERS: ClassVar[dict[str, float]] = {
-        "Hz": 1.0, "kHz": 1e3, "MHz": 1e6, "GHz": 1e9,
+        "Hz": 1.0,
+        "kHz": 1e3,
+        "MHz": 1e6,
+        "GHz": 1e9,
     }
 
 
 class SampleRate(Frequency, register=False):
     ALLOWED_UNITS_AND_MULTIPLIERS: ClassVar[dict[str, float]] = {
-        "S/s": 1.0, "kS/s": 1e3, "MS/s": 1e6, "GS/s": 1e9,
+        "S/s": 1.0,
+        "kS/s": 1e3,
+        "MS/s": 1e6,
+        "GS/s": 1e9,
     }
 
 
 class Time(UnitQuantity):
     DIMENSIONAL_QUANTITY = ("T", "1")
     ALLOWED_UNITS_AND_MULTIPLIERS: ClassVar[dict[str, float]] = {
-        "s": 1.0, "ms": 1e-3, "μs": 1e-6, "us": 1e-6,
-        "ns": 1e-9, "min": 60.0, "hr": 3600.0, "days": 86400.0,
+        "s": 1.0,
+        "ms": 1e-3,
+        "μs": 1e-6,
+        "us": 1e-6,
+        "ns": 1e-9,
+        "min": 60.0,
+        "hr": 3600.0,
+        "days": 86400.0,
     }
 
 
 class Position(UnitQuantity):
     DIMENSIONAL_QUANTITY = ("L", "1")
     ALLOWED_UNITS_AND_MULTIPLIERS: ClassVar[dict[str, float]] = {
-        "m": 1.0, "cm": 1e-2, "mm": 1e-3, "μm": 1e-6,
-        "um": 1e-6, "nm": 1e-9, "km": 1e3,
+        "m": 1.0,
+        "cm": 1e-2,
+        "mm": 1e-3,
+        "μm": 1e-6,
+        "um": 1e-6,
+        "nm": 1e-9,
+        "km": 1e3,
     }
 
 
 class SpatialFrequency(UnitQuantity):
     DIMENSIONAL_QUANTITY = ("1", "L")
     ALLOWED_UNITS_AND_MULTIPLIERS: ClassVar[dict[str, float]] = {
-        "m⁻¹": 1.0, "1/m": 1.0, "cm⁻¹": 1e2, "1/cm": 1e2,
-        "mm⁻¹": 1e3, "1/mm": 1e3,
+        "m⁻¹": 1.0,
+        "1/m": 1.0,
+        "cm⁻¹": 1e2,
+        "1/cm": 1e2,
+        "mm⁻¹": 1e3,
+        "1/mm": 1e3,
     }
 
 
 class Velocity(UnitQuantity):
     DIMENSIONAL_QUANTITY = ("L", "T")
     ALLOWED_UNITS_AND_MULTIPLIERS: ClassVar[dict[str, float]] = {
-        "m/s": 1.0, "cm/s": 1e-2, "mm/s": 1e-3,
-        "μm/s": 1e-6, "um/s": 1e-6,
+        "m/s": 1.0,
+        "cm/s": 1e-2,
+        "mm/s": 1e-3,
+        "μm/s": 1e-6,
+        "um/s": 1e-6,
     }
 
 
 class AngularVelocity(UnitQuantity):
     DIMENSIONAL_QUANTITY = ("Θ", "T")
     ALLOWED_UNITS_AND_MULTIPLIERS: ClassVar[dict[str, float]] = {
-        "rad/s": 1.0, "deg/s": math.pi / 180,
+        "rad/s": 1.0,
+        "deg/s": math.pi / 180,
     }
 
 
 class Acceleration(UnitQuantity):
     DIMENSIONAL_QUANTITY = ("L", "TT")
     ALLOWED_UNITS_AND_MULTIPLIERS: ClassVar[dict[str, float]] = {
-        "m/s^2": 1.0, "mm/s^2": 1e-3,
-        "μm/s^2": 1e-6, "um/s^2": 1e-6,
+        "m/s^2": 1.0,
+        "mm/s^2": 1e-3,
+        "μm/s^2": 1e-6,
+        "um/s^2": 1e-6,
     }
 
 
 class AngularAcceleration(UnitQuantity):
     DIMENSIONAL_QUANTITY = ("Θ", "TT")
     ALLOWED_UNITS_AND_MULTIPLIERS: ClassVar[dict[str, float]] = {
-        "rad/s^2": 1.0, "deg/s^2": math.pi / 180,
+        "rad/s^2": 1.0,
+        "deg/s^2": math.pi / 180,
     }
 
 
@@ -410,13 +421,8 @@ class RangeWithUnits[T: UnitQuantity]:
         quantity_type = self.UNIT_QUANTITY_CLASS
 
         if max is None:
-            if (
-                not isinstance(min, str)
-                or not min.strip().startswith("±")
-            ):
-                raise ValueError(
-                    "Provide two endpoints or a symmetric ± quantity."
-                )
+            if not isinstance(min, str) or not min.strip().startswith("±"):
+                raise ValueError("Provide two endpoints or a symmetric ± quantity.")
 
             upper = cast(
                 T,
@@ -453,9 +459,7 @@ class RangeWithUnits[T: UnitQuantity]:
     def within_range(self, value: UnitQuantity) -> bool:
         """Check inclusive membership, rejecting incompatible dimensions."""
         if not isinstance(value, UnitQuantity):
-            raise TypeError(
-                "Range membership requires a UnitQuantity."
-            )
+            raise TypeError("Range membership requires a UnitQuantity.")
 
         return self._min <= value <= self._max
 
@@ -463,10 +467,7 @@ class RangeWithUnits[T: UnitQuantity]:
         return f"{self._min} to {self._max}"
 
     def __repr__(self) -> str:
-        return (
-            f"{type(self).__name__}"
-            f"({self._min!r}, {self._max!r})"
-        )
+        return f"{type(self).__name__}({self._min!r}, {self._max!r})"
 
 
 @dataclass(frozen=True, init=False, repr=False)

@@ -68,9 +68,7 @@ class TiffBenchmarkConfig:
         return math.ceil(self.duration * self.fps)
 
 
-def due_slot(
-    index: int, elapsed: float, fps: float, count: int
-) -> tuple[int, int]:
+def due_slot(index: int, elapsed: float, fps: float, count: int) -> tuple[int, int]:
     """Skip expired frame intervals instead of publishing a catch-up burst.
 
     The current interval may be serviced late. Whole missed intervals are

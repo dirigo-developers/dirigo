@@ -199,6 +199,7 @@ def test_cleanup_failure_after_cancellation_is_reported(
     is itself OperationCancelled. Cancellation suppression applies to work,
     not to errors encountered while releasing resources.
     """
+
     class CleanupFailureWorker(StubWorker):
         def _work(self) -> None:
             self._abort_requested.wait()

@@ -133,8 +133,7 @@ def test_display_limits_normalize_and_clip_input_values() -> None:
 
     np.testing.assert_array_equal(
         output,
-        [[[0, 0, 0], [0, 0, 0], [128, 128, 128],
-          [255, 255, 255], [255, 255, 255]]],
+        [[[0, 0, 0], [0, 0, 0], [128, 128, 128], [255, 255, 255], [255, 255, 255]]],
     )
 
 
@@ -239,7 +238,7 @@ def test_transfer_function_controls_domain_and_zero_signal_color(
     enabled: bool,
     expected: list[int],
 ) -> None:
-    """Support accumulation above one and map zero contributions through the transfer."""
+    """Support accumulation >1.0 and map zero contributions through the transfer."""
     channel = ChannelSettings(
         limits=IntRange(0, 255),
         color=ColorVector((1.0, 0.0, 0.0)),
@@ -302,7 +301,7 @@ def test_renderer_rejects_unsupported_dtypes(
 )
 def test_invalid_input_is_rejected_before_writing_output(
     settings: DisplaySettings,
-    frame: Any,
+    frame,  # ruff: ignore[missing-type-function-argument]
     error: type[Exception],
 ) -> None:
     """Reject invalid input layout, dtype, or channel count without writing pixels."""
@@ -347,7 +346,7 @@ def test_invalid_output_storage_is_rejected(
         output = np.full((1, 4, 3), 23, dtype=np.uint8)[:, ::2, :]
 
     with pytest.raises(error):
-        renderer.render_into(frame, output) # ty: ignore[invalid-argument-type]
+        renderer.render_into(frame, output)  # ty: ignore[invalid-argument-type]
 
     if isinstance(output, np.ndarray):
         assert (output == 23).all()

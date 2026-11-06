@@ -101,7 +101,7 @@ class Pool[T]:
     def _acquire(
         self,
         timeout: float | None,
-    ) -> Generator[Lease[T], None, None]:
+    ) -> Generator[Lease[T]]:
         if timeout is not None and timeout < 0:
             raise ValueError("timeout must be nonnegative or None.")
 
@@ -143,4 +143,3 @@ class Pool[T]:
 
             self._aborted = True
             self._condition.notify_all()
-

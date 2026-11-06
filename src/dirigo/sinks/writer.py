@@ -43,4 +43,4 @@ class Writer[InputT = object](Sink[InputT]):
         after preparation or execution fails.
         """
         self._path.parent.mkdir(parents=True, exist_ok=True)
-        return self._path.open("xb") # x=exclusive
+        return self._path.open("xb")  # x=exclusive
