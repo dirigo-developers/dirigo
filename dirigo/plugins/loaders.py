@@ -71,7 +71,7 @@ class RawRasterFrameLoader(Loader):
             raise ValueError("strips must be an integer or list of integers (or None)")
 
         if depths is None:
-            self._selected_depths = list(set(self._depths_indices))
+            self._selected_depths = list(set(self._depth_indices))
         elif isinstance(depths, list):
             self._selected_depths = depths
         elif isinstance(depths, int):
