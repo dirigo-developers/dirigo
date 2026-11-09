@@ -7,11 +7,10 @@ from types import MappingProxyType
 from copy import deepcopy
 
 import numpy as np
-from numpy.polynomial.polynomial import Polynomial
 import platformdirs as pd
 
 from dirigo.components import units
-from dirigo.plugins.acquisitions import LineDistortion
+#from dirigo.plugins.acquisitions import LineDistortion
 
 
 
@@ -63,11 +62,7 @@ def load_line_distortion_calibration(
     amplitudes = data[:,0]
     coefs = data[:,1:]
 
-    return LineDistortion(
-        magnification=coefs[0],
-        distortion=coefs[2],
-    )
-
+    return (coefs[0], coefs[2])
 
 def update_distortion_table(
     scanner_ampl: units.Angle,

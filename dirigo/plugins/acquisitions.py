@@ -72,6 +72,15 @@ class LineAcquisitionRuntimeInfo:
 
     @classmethod
     def from_acquisition(cls, acquisition: "LineAcquisition"):
+        try:
+            mag, distortion = io.load_line_distortion_calibration(
+                line_width=acquisition.spec.line_width,
+                name="raster"
+            )
+        except:
+            mag = 1.0
+            distortion = 0.0
+        
         return cls(
             line_rate=acquisition.hw.fast_raster_scanner.frequency,
             scanner_amplitude=acquisition.hw.fast_raster_scanner.amplitude,
@@ -79,10 +88,7 @@ class LineAcquisitionRuntimeInfo:
             digitizer_trigger_offset=acquisition.hw.digitizer.acquire.trigger_delay,
             n_channels=sum([c.enabled for c in acquisition.hw.digitizer.channels]),
             stage_scanner_angle=acquisition.hw.laser_scanning_optics.stage_scanner_angle,
-            line_distortion=io.load_line_distortion_calibration(
-                line_width=acquisition.spec.line_width,
-                name="raster"
-            ),
+            line_distortion=LineDistortion(mag, distortion)
         )
     
     @classmethod
