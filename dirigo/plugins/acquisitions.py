@@ -79,7 +79,10 @@ class LineAcquisitionRuntimeInfo:
             digitizer_trigger_offset=acquisition.hw.digitizer.acquire.trigger_delay,
             n_channels=sum([c.enabled for c in acquisition.hw.digitizer.channels]),
             stage_scanner_angle=acquisition.hw.laser_scanning_optics.stage_scanner_angle,
-            # TODO add a way to get the stored line distortion info
+            line_distortion=io.load_line_distortion_calibration(
+                line_width=acquisition.spec.line_width,
+                name="raster"
+            ),
         )
     
     @classmethod

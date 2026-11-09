@@ -11,6 +11,7 @@ from numpy.polynomial.polynomial import Polynomial
 import platformdirs as pd
 
 from dirigo.components import units
+from dirigo.plugins.acquisitions import LineDistortion
 
 
 
@@ -62,11 +63,10 @@ def load_line_distortion_calibration(
     amplitudes = data[:,0]
     coefs = data[:,1:]
 
-    for i,a in enumerate(amplitudes):
-        if abs(a - line_width)/line_width < 0.001:
-            return Polynomial(coefs[i])
-    
-    raise RuntimeError("Could not find distortion calibration")
+    return LineDistortion(
+        magnification=coefs[0],
+        distortion=coefs[2],
+    )
 
 
 def update_distortion_table(
