@@ -4,7 +4,7 @@ from typing import Any
 
 from dirigo.hardware.hardware import Hardware
 
-from .source import HardwareSource
+from .hardware_worker import HardwareWorker
 from .worker import Worker
 
 type _AnyWorker = Worker[Any, Any]
@@ -122,7 +122,7 @@ class Pipeline:
         attempted: list[Worker] = []
 
         try:
-            self._bind_hardware_sources()
+            self._bind_hardware_workers()
 
             for worker in self._workers:
                 attempted.append(worker)
@@ -266,20 +266,20 @@ class Pipeline:
                     "with Pipeline.add() before starting."
                 )
 
-    def _bind_hardware_sources(self) -> None:
-        """Bind all hardware sources before any worker prepares."""
-        sources = [
-            worker for worker in self._workers if isinstance(worker, HardwareSource)
+    def _bind_hardware_workers(self) -> None:
+        """Bind all hardware workers before any worker prepares."""
+        hardware_workers = [
+            worker for worker in self._workers if isinstance(worker, HardwareWorker)
         ]
 
-        if not sources:
+        if not hardware_workers:
             return
 
         hardware = self._hardware
 
         if hardware is None:
-            names = ", ".join(repr(source.name) for source in sources)
-            raise RuntimeError(f"Hardware collection required by source(s): {names}.")
+            names = ", ".join(repr(worker.name) for worker in hardware_workers)
+            raise RuntimeError(f"Hardware collection required by worker(s): {names}.")
 
-        for source in sources:
-            source._bind_hardware(hardware)
+        for worker in hardware_workers:
+            worker._bind_hardware(hardware)

@@ -1,11 +1,10 @@
 """Test source contracts and hardware binding by pipelines.
 
-Sources originate products without upstream dependencies. Hardware sources
-borrow the caller's Hardware collection, which must be bound before any worker
-begins preparation.
+Sources originate products without upstream dependencies. Hardware workers
+may have upstream dependencies and borrow the caller's Hardware collection.
 
-Verify binding validation, cleanup after preparation and execution failures,
-and preservation of hardware for reuse across successive pipelines.
+Verify binding before preparation, cleanup after failures, and preservation
+of hardware for reuse across successive pipelines.
 """
 
 from typing import Any, Never, cast
@@ -13,7 +12,7 @@ from typing import Any, Never, cast
 import pytest
 
 from dirigo.hardware import Device, Hardware
-from dirigo.pipeline import HardwareSource, Pipeline, Source, Worker
+from dirigo.pipeline import HardwareWorker, Pipeline, Source, Worker
 
 from .stubs import StubWorker
 
@@ -45,17 +44,18 @@ class NumberSource(Source[int]):
         pass
 
 
-class DeviceSource(HardwareSource[int]):
-    """Look up a borrowed device and record source lifecycle activity."""
+class DeviceWorker(HardwareWorker[int, int]):
+    """Use borrowed hardware and optionally forward an upstream product."""
 
     def __init__(
         self,
         *,
+        upstream: Worker[Any, int] | None = None,
         device_name: str = "digitizer",
         fail_work: bool = False,
         name: str | None = None,
     ) -> None:
-        super().__init__(name=name)
+        super().__init__(upstream=upstream, name=name)
         self.device_name = device_name
         self.fail_work = fail_work
         self.prepared = False
@@ -75,7 +75,11 @@ class DeviceSource(HardwareSource[int]):
         if self.fail_work:
             raise RuntimeError("Acquisition failed.")
 
-        self._publish(7, timeout=2.0)
+        if self.upstream is None:
+            self._publish(7, timeout=2.0)
+        else:
+            with self._receive(timeout=2.0) as product:
+                self._publish(product, timeout=2.0)
 
     def _close(self) -> None:
         self.closed = True
@@ -127,12 +131,9 @@ def test_source_runs_without_hardware() -> None:
         _abort_and_join(pipeline)
 
 
-@pytest.mark.parametrize("source_type", [NumberSource, DeviceSource])
-def test_sources_do_not_accept_upstream(
-    source_type: type[Source[int]],
-) -> None:
-    """Both synthetic and hardware sources reject an upstream argument."""
-    untyped_source = cast(Any, source_type)
+def test_sources_do_not_accept_upstream() -> None:
+    """The Source convenience base does not accept an upstream."""
+    untyped_source = cast(Any, NumberSource)
 
     with pytest.raises(TypeError, match="upstream"):
         untyped_source(upstream=NumberSource())
@@ -140,7 +141,7 @@ def test_sources_do_not_accept_upstream(
 
 def test_hardware_access_before_binding_raises() -> None:
     """A hardware source cannot access a collection before it has been bound."""
-    source = DeviceSource()
+    source = DeviceWorker()
 
     with pytest.raises(RuntimeError, match="bound"):
         _ = source._hardware
@@ -149,7 +150,7 @@ def test_hardware_access_before_binding_raises() -> None:
 def test_binding_is_allowed_once() -> None:
     """A second binding attempt fails without replacing the original collection."""
     first = Hardware({})
-    source = DeviceSource()
+    source = DeviceWorker()
 
     source._bind_hardware(first)
 
@@ -167,30 +168,32 @@ def test_pipeline_rejects_invalid_hardware() -> None:
         Pipeline(NumberSource(), hardware=invalid_hardware)
 
 
-def test_pipeline_binds_upstream_source_before_preparation() -> None:
-    """An automatically included upstream source receives hardware before preparing.
-
-    Construct the pipeline from its sink alone. The source must see the supplied
-    collection during preparation and execution, and clean up after completion.
-
-    Source cleanup must leave the device and its Hardware collection open.
-    """
+@pytest.mark.parametrize("with_upstream", [False, True])
+def test_pipeline_binds_hardware_worker_before_preparation(
+    with_upstream: bool,
+) -> None:
+    """Bind an automatically included hardware worker in either graph role."""
     device = FakeDevice()
     hardware = Hardware({"digitizer": device})
-    source = DeviceSource()
-    sink = Collector(source)
+    upstream = NumberSource() if with_upstream else None
+    worker = DeviceWorker(upstream=upstream, name="device")
+    sink = Collector(worker)
     pipeline = Pipeline(sink, hardware=hardware)
 
     try:
         pipeline.start()
         pipeline.wait(timeout=2.0)
 
-        assert source.hardware_seen is hardware
-        assert source.worked
-        assert source.closed
-        assert sink.values == [7]
+        assert worker.upstream is upstream
+        assert worker.name == "device"
+        assert worker.prepared
+        assert worker.hardware_seen is hardware
+        assert worker.worked
+        assert worker.closed
+        assert sink.values == ([36] if with_upstream else [7])
         assert pipeline.done
         assert pipeline.exception is None
+
         assert device.close_calls == 0
         assert hardware.require("digitizer", FakeDevice) is device
     finally:
@@ -198,23 +201,20 @@ def test_pipeline_binds_upstream_source_before_preparation() -> None:
         hardware.close()
 
 
-def test_all_hardware_sources_are_bound_before_any_preparation() -> None:
-    """Hardware binding for the whole graph precedes the first preparation hook.
-
-    The first source checks the second source's hardware during its own
-    preparation. This rejects an implementation that binds and prepares each
-    source individually before moving to the next.
-    """
+def test_all_hardware_workers_are_bound_before_any_preparation() -> None:
+    """Bind downstream hardware before even the first preparation hook."""
     hardware = Hardware({"digitizer": FakeDevice()})
-    second = DeviceSource(name="second")
+    upstream = NumberSource()
+    second = DeviceWorker(upstream=upstream, name="second")
 
-    class FirstSource(DeviceSource):
+    class FirstWorker(DeviceWorker):
         def _prepare(self) -> None:
             assert second._hardware is hardware
             super()._prepare()
 
-    first = FirstSource(name="first")
-    pipeline = Pipeline(first, second, hardware=hardware)
+    first = FirstWorker(name="first")
+    sink = Collector(second)
+    pipeline = Pipeline(first, sink, hardware=hardware)
 
     try:
         pipeline.start()
@@ -222,6 +222,11 @@ def test_all_hardware_sources_are_bound_before_any_preparation() -> None:
 
         assert first.hardware_seen is hardware
         assert second.hardware_seen is hardware
+        assert first.worked
+        assert second.worked
+        assert first.closed
+        assert second.closed
+        assert sink.values == [36]
         assert pipeline.done
         assert pipeline.exception is None
     finally:
@@ -229,21 +234,19 @@ def test_all_hardware_sources_are_bound_before_any_preparation() -> None:
         hardware.close()
 
 
-def test_missing_hardware_fails_before_any_worker_prepares() -> None:
-    """Missing required hardware fails startup before any preparation occurs.
-
-    Include a synthetic source before the hardware source to verify that even
-    unrelated preparation has not begun when the missing collection is detected.
-
-    The pipeline must record the startup failure and report that same exception
-    when waited on, without invoking source cleanup for unprepared workers.
-    """
+@pytest.mark.parametrize("with_upstream", [False, True])
+def test_missing_hardware_fails_before_any_worker_prepares(
+    with_upstream: bool,
+) -> None:
+    """Reject missing hardware before preparing any part of the graph."""
     synthetic = NumberSource()
-    live = DeviceSource(name="live")
+    live = DeviceWorker(
+        upstream=synthetic if with_upstream else None,
+        name="live",
+    )
     pipeline = Pipeline(synthetic, live)
 
     try:
-        # expect RuntimeError(f"Hardware collection required by source(s): {names}.")
         with pytest.raises(RuntimeError, match="live") as caught:
             pipeline.start()
 
@@ -272,7 +275,7 @@ def test_device_lookup_failure_cleans_source_but_preserves_hardware() -> None:
     """
     device = FakeDevice()
     hardware = Hardware({"digitizer": device})
-    source = DeviceSource(device_name="missing")
+    source = DeviceWorker(device_name="missing")
     pipeline = Pipeline(source, hardware=hardware)
 
     try:
@@ -303,7 +306,7 @@ def test_downstream_preparation_failure_preserves_hardware() -> None:
 
     device = FakeDevice()
     hardware = Hardware({"digitizer": device})
-    source = DeviceSource()
+    source = DeviceWorker()
     pipeline = Pipeline(FailingCollector(source), hardware=hardware)
 
     try:
@@ -327,7 +330,7 @@ def test_execution_failure_preserves_hardware() -> None:
     """
     device = FakeDevice()
     hardware = Hardware({"digitizer": device})
-    source = DeviceSource(fail_work=True)
+    source = DeviceWorker(fail_work=True)
     pipeline = Pipeline(source, hardware=hardware)
 
     try:
@@ -356,7 +359,7 @@ def test_hardware_can_be_reused_across_successive_pipelines() -> None:
 
     try:
         for _ in range(2):
-            source = DeviceSource()
+            source = DeviceWorker()
             sink = Collector(source)
             pipeline = Pipeline(sink, hardware=hardware)
 
