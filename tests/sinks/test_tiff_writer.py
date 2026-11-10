@@ -484,8 +484,8 @@ def test_spatial_calibration_matches_configuration(
         upstream=FrameSource(frames),
         path=path,
         interpretation=interpretation,
-        pixel_size_x=units.Position("0.5 um") if calibrated else None,
-        pixel_size_y=units.Position("1.25 um") if calibrated else None,
+        pixel_size_x=units.Length("0.5 um") if calibrated else None,
+        pixel_size_y=units.Length("1.25 um") if calibrated else None,
     )
 
     _run_writer(writer)
@@ -521,14 +521,14 @@ def test_spatial_calibration_matches_configuration(
 @pytest.mark.parametrize(
     ("pixel_size_x", "pixel_size_y"),
     [
-        (units.Position("1 um"), None),
-        (None, units.Position("1 um")),
+        (units.Length("1 um"), None),
+        (None, units.Length("1 um")),
     ],
 )
 def test_spatial_calibration_requires_both_axes(
     tmp_path: Path,
-    pixel_size_x: units.Position | None,
-    pixel_size_y: units.Position | None,
+    pixel_size_x: units.Length | None,
+    pixel_size_y: units.Length | None,
 ) -> None:
     """Reject calibration with only one axis specified during construction."""
     with pytest.raises(ValueError, match="both"):
@@ -544,20 +544,20 @@ def test_spatial_calibration_requires_both_axes(
 @pytest.mark.parametrize(
     "size",
     [
-        units.Position(0),
-        units.Position(-1e-6),
-        units.Position(float("nan")),
-        units.Position(float("inf")),
+        units.Length(0),
+        units.Length(-1e-6),
+        units.Length(float("nan")),
+        units.Length(float("inf")),
     ],
     ids=["zero", "negative", "nan", "infinite"],
 )
 def test_pixel_sizes_must_be_finite_and_positive(
     tmp_path: Path,
     axis: str,
-    size: units.Position,
+    size: units.Length,
 ) -> None:
     """Reject zero, negative, and nonfinite spacing on either axis."""
-    valid = units.Position("1 um")
+    valid = units.Length("1 um")
 
     with pytest.raises(ValueError, match=f"pixel_size_{axis}"):
         TiffWriter(
@@ -587,7 +587,7 @@ def test_pixel_sizes_require_position_quantities(
             upstream=FrameSource(()),
             path=tmp_path / "frames.tif",
             pixel_size_x=size,  # ty: ignore[invalid-argument-type]
-            pixel_size_y=units.Position("1 um"),
+            pixel_size_y=units.Length("1 um"),
         )
 
 
@@ -766,8 +766,8 @@ def test_tiff_layout_preserves_pixels_metadata_and_calibration(
         path=path,
         interpretation=interpretation,
         contiguous=contiguous,
-        pixel_size_x=units.Position("0.5 um"),
-        pixel_size_y=units.Position("1.25 um"),
+        pixel_size_x=units.Length("0.5 um"),
+        pixel_size_y=units.Length("1.25 um"),
     )
     handles = _track_tiff_output(writer, monkeypatch)
 

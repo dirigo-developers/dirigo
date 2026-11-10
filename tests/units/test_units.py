@@ -9,12 +9,12 @@ from dirigo.units import (
     AngularAcceleration,
     AngularVelocity,
     Frequency,
-    Position,
+    Length,
+    Quantity,
     Resistance,
     SampleRate,
     SpatialFrequency,
     Time,
-    UnitQuantity,
     Velocity,
     Voltage,
 )
@@ -28,7 +28,7 @@ def test_quantity_types_parse_into_base_units() -> None:
         (Frequency, "2 MHz", 2e6, "Hz"),
         (SampleRate, "2 MS/s", 2e6, "S/s"),
         (Time, "3 ms", 0.003, "s"),
-        (Position, "7 µm", 7e-6, "m"),  # ruff: ignore[ambiguous-unicode-character-string]
+        (Length, "7 µm", 7e-6, "m"),  # ruff: ignore[ambiguous-unicode-character-string]
         (SpatialFrequency, "2 1/mm", 2000.0, "m⁻¹"),
         (Velocity, "3 mm/s", 0.003, "m/s"),
         (AngularVelocity, "180 deg/s", math.pi, "rad/s"),
@@ -41,7 +41,7 @@ def test_quantity_types_parse_into_base_units() -> None:
 
         assert isinstance(quantity, float)
         assert math.isclose(float(quantity), expected)
-        assert quantity.unit == unit
+        assert quantity.base_unit == unit
 
 
 def test_numeric_inputs_always_use_base_units() -> None:
@@ -78,14 +78,14 @@ def test_constructor_rejects_invalid_values_and_dimensions(text: str, m: str) ->
 def test_formatting_and_base_unit_property() -> None:
     voltage = Voltage("250 mV")
 
-    assert voltage.unit == "V"
+    assert voltage.base_unit == "V"
     assert str(voltage) == "250 mV"
-    assert voltage.with_unit("V") == "0.25 V"
+    assert voltage.format_in("V") == "0.25 V"
     assert str(Time(0)) == "0 s"
     assert repr(voltage) == "Voltage('250 mV')"
 
     with pytest.raises(ValueError, match="Invalid unit"):
-        voltage.with_unit("s")
+        voltage.format_in("s")
 
 
 def test_same_type_addition_and_subtraction() -> None:
@@ -123,8 +123,8 @@ def test_scalar_and_unary_operations_preserve_concrete_type() -> None:
 
 def test_registered_dimensional_arithmetic() -> None:
     cases = [
-        (Position("2 mm") / Time("2 ms"), Velocity, 1.0),
-        (Velocity("2 m/s") * Time("3 s"), Position, 6.0),
+        (Length("2 mm") / Time("2 ms"), Velocity, 1.0),
+        (Velocity("2 m/s") * Time("3 s"), Length, 6.0),
         (Angle("2 rad") / Time("2 s"), AngularVelocity, 1.0),
         (Acceleration("2 m/s^2") * Time("3 s"), Velocity, 6.0),
         (
@@ -134,8 +134,8 @@ def test_registered_dimensional_arithmetic() -> None:
         ),
         (1 / Time("2 ms"), Frequency, 500.0),
         (1 / SampleRate("2 kS/s"), Time, 0.0005),
-        (Voltage(2) * UnitQuantity(3), Voltage, 6.0),
-        (Resistance(2) / UnitQuantity(2), Resistance, 1.0),
+        (Voltage(2) * Quantity(3), Voltage, 6.0),
+        (Resistance(2) / Quantity(2), Resistance, 1.0),
     ]
 
     for result, expected_type, expected_value in cases:
@@ -146,7 +146,7 @@ def test_registered_dimensional_arithmetic() -> None:
 def test_dimensionless_results_are_plain_floats() -> None:
     results = [
         Frequency("2 kHz") * Time("1 ms"),
-        Position("2 mm") * SpatialFrequency("1 1/mm"),
+        Length("2 mm") * SpatialFrequency("1 1/mm"),
         Voltage("2 V") / Voltage("1 V"),
     ]
 
@@ -220,7 +220,7 @@ def test_duplicate_dimension_registration_is_rejected() -> None:
             pass
 
     # Failed registration must leave the existing canonical type intact.
-    result = Voltage(2) * UnitQuantity(3)
+    result = Voltage(2) * Quantity(3)
     assert type(result) is Voltage
 
 
@@ -250,7 +250,7 @@ def test_division_by_scalar_preserves_concrete_type() -> None:
 
 
 def test_reflected_division_accepts_quantity_numerator() -> None:
-    result = Time("2 s").__rtruediv__(Position("6 m"))
+    result = Time("2 s").__rtruediv__(Length("6 m"))
 
     assert type(result) is Velocity
     assert result == Velocity("3 m/s")

@@ -31,7 +31,7 @@ def test_range_counts_inclusive_integers(
 
     assert bounds.min == minimum
     assert bounds.max == maximum
-    assert bounds.range == expected_count
+    assert bounds.count == expected_count
 
 
 @pytest.mark.parametrize(
@@ -117,7 +117,7 @@ def test_membership_includes_both_endpoints(
     """Include endpoints and interior values while excluding values outside bounds."""
     bounds = IntRange(minimum, maximum)
 
-    assert bounds.within_range(value) is expected
+    assert (value in bounds) is expected
 
 
 @pytest.mark.parametrize("endpoint", ["min", "max"])
@@ -130,3 +130,11 @@ def test_endpoints_are_immutable(endpoint: str) -> None:
 
     assert bounds.min == 2
     assert bounds.max == 5
+
+
+@pytest.mark.parametrize("value", ["1", object(), True, False])
+def test_membership_rejects_nonintegers_and_bools(value: int) -> None:
+    bounds = IntRange(2, 6)
+
+    with pytest.raises(TypeError, match="membership requires an integer"):
+        value in bounds  # ruff: ignore[useless-comparison]

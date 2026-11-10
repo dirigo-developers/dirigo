@@ -137,9 +137,9 @@ def test_stack_round_trip_with_reused_input_buffer(
         path=path,
         z_planes=z_planes,
         interpretation=interpretation,
-        pixel_size_x=units.Position("0.5 um") if calibrated else None,
-        pixel_size_y=units.Position("1.25 um") if calibrated else None,
-        z_spacing=units.Position("2 um") if calibrated else None,
+        pixel_size_x=units.Length("0.5 um") if calibrated else None,
+        pixel_size_y=units.Length("1.25 um") if calibrated else None,
+        z_spacing=units.Length("2 um") if calibrated else None,
     )
     handles = _track_output(writer, monkeypatch)
 
@@ -210,10 +210,10 @@ def test_stack_round_trip_with_reused_input_buffer(
         ({"z_planes": True}, TypeError),
         ({"z_planes": 1.5}, TypeError),
         ({"interpretation": "rgb"}, ValueError),
-        ({"z_spacing": units.Position(0)}, ValueError),
-        ({"z_spacing": units.Position(-1e-6)}, ValueError),
-        ({"z_spacing": units.Position(float("nan"))}, ValueError),
-        ({"z_spacing": units.Position(float("inf"))}, ValueError),
+        ({"z_spacing": units.Length(0)}, ValueError),
+        ({"z_spacing": units.Length(-1e-6)}, ValueError),
+        ({"z_spacing": units.Length(float("nan"))}, ValueError),
+        ({"z_spacing": units.Length(float("inf"))}, ValueError),
         ({"z_spacing": 1e-6}, TypeError),
     ],
 )

@@ -33,9 +33,9 @@ class OmeTiffWriter(TiffWriter):
         path: str | PathLike[str],
         z_planes: int,
         interpretation: FrameInterpretation = "monochrome",
-        pixel_size_x: units.Position | None = None,
-        pixel_size_y: units.Position | None = None,
-        z_spacing: units.Position | None = None,
+        pixel_size_x: units.Length | None = None,
+        pixel_size_y: units.Length | None = None,
+        z_spacing: units.Length | None = None,
         name: str | None = None,
     ) -> None:
         if not isinstance(z_planes, int) or isinstance(z_planes, bool):
@@ -45,7 +45,7 @@ class OmeTiffWriter(TiffWriter):
         if interpretation not in ("monochrome", "multichannel"):
             raise ValueError("interpretation must be 'monochrome' or 'multichannel'.")
         if z_spacing is not None:
-            if not isinstance(z_spacing, units.Position):
+            if not isinstance(z_spacing, units.Length):
                 raise TypeError("z_spacing must be a Position.")
             if not math.isfinite(float(z_spacing)) or float(z_spacing) <= 0:
                 raise ValueError("z_spacing must be finite and positive.")

@@ -37,8 +37,8 @@ class TiffWriter(Writer[FrameArray]):
         path: str | PathLike[str],
         interpretation: FrameInterpretation = "monochrome",
         contiguous: bool = False,
-        pixel_size_x: units.Position | None = None,
-        pixel_size_y: units.Position | None = None,
+        pixel_size_x: units.Length | None = None,
+        pixel_size_y: units.Length | None = None,
         name: str | None = None,
     ) -> None:
         if interpretation not in ("monochrome", "multichannel", "rgb"):
@@ -56,7 +56,7 @@ class TiffWriter(Writer[FrameArray]):
                 ("pixel_size_x", pixel_size_x),
                 ("pixel_size_y", pixel_size_y),
             ):
-                if not isinstance(size, units.Position):
+                if not isinstance(size, units.Length):
                     raise TypeError(f"{label} must be a Position.")
                 meters = float(size)
                 if not math.isfinite(meters) or meters <= 0:

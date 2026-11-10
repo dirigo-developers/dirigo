@@ -9,13 +9,13 @@ from dirigo.units import (
     AngleRange,
     Frequency,
     FrequencyRange,
-    Position,
-    PositionRange,
+    Length,
+    LengthRange,
+    Quantity,
     SampleRate,
     SampleRateRange,
     Time,
     TimeRange,
-    UnitQuantity,
     Voltage,
     VoltageRange,
 )
@@ -28,8 +28,8 @@ def test_endpoints_are_normalized_to_the_range_quantity_type() -> None:
     assert type(limits.max) is Voltage
     assert limits.min == Voltage("-5 V")
     assert limits.max == Voltage("5 V")
-    assert limits.unit == "V"
-    assert limits.range == Voltage("10 V")
+    assert limits.base_unit == "V"
+    assert limits.span == Voltage("10 V")
     assert limits == VoltageRange(Voltage(-5), Voltage(5))
 
 
@@ -37,7 +37,7 @@ def test_all_concrete_range_types_preserve_quantity_types() -> None:
     cases = [
         (AngleRange("-90 deg", "90 deg"), Angle, math.pi),
         (VoltageRange("-5 V", "5 V"), Voltage, 10.0),
-        (PositionRange("0 um", "1 mm"), Position, 0.001),
+        (LengthRange("0 um", "1 mm"), Length, 0.001),
         (TimeRange("0 ms", "2 s"), Time, 2.0),
         (FrequencyRange("1 kHz", "2 kHz"), Frequency, 1000.0),
         (
@@ -50,8 +50,8 @@ def test_all_concrete_range_types_preserve_quantity_types() -> None:
     for limits, quantity_type, span in cases:
         assert type(limits.min) is quantity_type
         assert type(limits.max) is quantity_type
-        assert type(limits.range) is quantity_type
-        assert math.isclose(float(limits.range), span)
+        assert type(limits.span) is quantity_type
+        assert math.isclose(float(limits.span), span)
 
 
 def test_symmetric_ranges_reuse_quantity_parsing() -> None:
@@ -103,22 +103,22 @@ def test_endpoint_quantities_must_have_compatible_dimensions() -> None:
 def test_membership_includes_endpoints() -> None:
     limits = VoltageRange("±5 V")
 
-    assert limits.within_range(Voltage("-5 V"))
-    assert limits.within_range(Voltage("250 mV"))
-    assert limits.within_range(Voltage("5 V"))
-    assert not limits.within_range(Voltage("-6 V"))
-    assert not limits.within_range(Voltage("6 V"))
+    assert Voltage("-5 V") in limits
+    assert Voltage("250 mV") in limits
+    assert Voltage("5 V") in limits
+    assert Voltage("-6 V") not in limits
+    assert Voltage("6 V") not in limits
 
 
 def test_membership_requires_a_compatible_quantity() -> None:
     limits = VoltageRange("±5 V")
 
     with pytest.raises(TypeError):
-        limits.within_range(Time(1))
+        Time(1) in limits  # ruff: ignore[useless-comparison]
 
-    for invalid in (1, "1 V", object()):
+    for invalid in (1, "1 V", object(), False, True):
         with pytest.raises(TypeError):
-            limits.within_range(cast(UnitQuantity, invalid))
+            cast(Quantity, invalid) in limits  # ruff: ignore[useless-comparison]
 
 
 def test_dimensionally_equivalent_quantities_are_accepted() -> None:
@@ -129,14 +129,14 @@ def test_dimensionally_equivalent_quantities_are_accepted() -> None:
 
     assert type(limits.min) is Frequency
     assert type(limits.max) is Frequency
-    assert limits.within_range(SampleRate("1.5 kS/s"))
+    assert SampleRate("1.5 kS/s") in limits
 
 
 def test_span_calculation_preserves_precision() -> None:
     limits = VoltageRange("1.234567891 V", "2.345678912 V")
 
     assert math.isclose(
-        float(limits.range),
+        float(limits.span),
         2.345678912 - 1.234567891,
         rel_tol=1e-15,
     )
