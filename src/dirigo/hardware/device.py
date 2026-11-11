@@ -1,4 +1,12 @@
 from abc import ABC, abstractmethod
+from dataclasses import asdict
+
+from dirigo.hardware.metadata import (
+    DeviceIdentity,
+    DeviceSnapshot,
+    DriverIdentity,
+    encode_metadata,
+)
 
 
 class Device(ABC):
@@ -33,3 +41,51 @@ class Device(ABC):
 
         The caller must ensure that device use has finished before closing.
         """
+
+    @property
+    def identity(self) -> DeviceIdentity:
+        """Driver-declared physical identity, with unknown fields left empty.
+
+        Override to provide information from configuration or hardware.
+        """
+        return DeviceIdentity()
+
+    @property
+    def driver_identity(self) -> DriverIdentity:
+        """Concrete implementation identity, without guessing its distribution.
+
+        Drivers may override this to supply a known distribution and version.
+        """
+        cls = type(self)
+        return DriverIdentity(implementation=f"{cls.__module__}.{cls.__qualname__}")
+
+    def snapshot(self) -> DeviceSnapshot:
+        """Return a detached JSON-compatible identity and settings record.
+
+        Capture only the fields explicitly supplied by identity properties and
+        _snapshot_settings(). Quantities retain explicit base-unit labels.
+
+        Returned dictionaries and lists may be modified by the caller without
+        changing device state. Later device changes do not alter earlier
+        snapshots.
+
+        Calls must follow the device's threading and lifecycle requirements.
+        This operation does not coordinate concurrent device changes.
+
+        Raises:
+            TypeError: A selected metadata value has an unsupported type.
+            ValueError: A selected numeric value is nonfinite.
+        """
+        return {
+            "identity": encode_metadata(asdict(self.identity)),
+            "driver": encode_metadata(asdict(self.driver_identity)),
+            "settings": encode_metadata(self._snapshot_settings()),
+        }
+
+    def _snapshot_settings(self) -> dict[str, object]:
+        """Select scientific settings for snapshot(); defaults to no settings.
+
+        Return supported scalar values, quantities, mappings, lists, or tuples.
+        The returned containers may be borrowed: snapshot() copies them.
+        """
+        return {}

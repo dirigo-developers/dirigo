@@ -1,198 +1,180 @@
-"""Test loading named hardware devices from TOML configuration.
+"""Test typed hardware initialization and cleanup after construction failure."""
 
-Verify driver selection, keyword configuration, defaults, and validation before
-device construction. Registry entries may be classes or factory functions.
-
-Construction failures must close previously returned devices in reverse order.
-Rollback failures must not replace the original construction exception.
-"""
-
+from dataclasses import dataclass
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 
 import pytest
 
+from dirigo import units
 from dirigo.hardware import Device
-from dirigo.hardware.config import DeviceFactory, load_hardware
+from dirigo.hardware.config import DeviceDriver, load_hardware
+
+_DEFAULT_TIMEOUT = units.Time("100 ms")
+
+
+@dataclass(frozen=True, kw_only=True)
+class FakeConfig:
+    """Provide defaults, quantity parsing, and a physical constraint."""
+
+    channel: str = "default"
+    gain: float = 1.0
+    timeout: units.Time = _DEFAULT_TIMEOUT
+
+    def __post_init__(self) -> None:
+        """Reject negative timeout values after parsing."""
+        if float(self.timeout) < 0:
+            raise ValueError("timeout must be nonnegative.")
 
 
 class FakeDevice(Device):
-    """Store constructor configuration and count cleanup calls."""
+    """Accept typed configuration and count cleanup attempts."""
 
-    def __init__(
-        self,
-        *,
-        channel: str = "default",
-        gain: float = 1.0,
-    ) -> None:
-        self.channel = channel
-        self.gain = gain
+    config_type = FakeConfig
+
+    def __init__(self, config: FakeConfig) -> None:
+        self.config = config
         self.close_calls = 0
 
     def close(self) -> None:
         self.close_calls += 1
 
 
+class FixedDriver:
+    """A callable factory object declaring the configuration it accepts."""
+
+    config_type = FakeConfig
+
+    def __init__(self, device: Device) -> None:
+        self.device = device
+        self.received: FakeConfig | None = None
+
+    def __call__(self, config: FakeConfig) -> Device:
+        self.received = config
+        return self.device
+
+
 def _write_config(tmp_path: Path, text: str) -> Path:
-    """Write a UTF-8 configuration file in the test's temporary directory."""
+    """Write a configuration document in the test's temporary directory."""
     path = tmp_path / "system_config.toml"
     path.write_text(text, encoding="utf-8")
     return path
 
 
-def test_loads_named_instances_and_passes_configuration(
-    tmp_path: Path,
-) -> None:
-    """Construct distinct named devices using their configured keyword arguments.
-
-    Both entries select the same driver but supply different channels. Omitted
-    constructor arguments must retain their defaults, and closing the returned
-    collection must close both devices.
-    """
+def test_loads_named_instances_with_typed_configuration(tmp_path: Path) -> None:
+    """Convert quantities and apply defaults before passing models to drivers."""
     path = _write_config(
         tmp_path,
         """
         [devices.x]
         driver = "demo"
-        [devices.x.config]
-        channel = "ao0"
-        gain = 2.5
+        config = {channel = "ao0", gain = 2.5, timeout = "25 ms"}
 
         [devices.y]
         driver = "demo"
-        [devices.y.config]
-        channel = "ao1"
+        config = {channel = "ao1"}
         """,
     )
-
     hardware = load_hardware(path, drivers={"demo": FakeDevice})
-    x = hardware.require("x", FakeDevice)
-    y = hardware.require("y", FakeDevice)
 
     try:
+        x = hardware.require("x", FakeDevice)
+        y = hardware.require("y", FakeDevice)
         assert hardware.names == ("x", "y")
         assert x is not y
-        assert (x.channel, x.gain) == ("ao0", 2.5)
-        assert (y.channel, y.gain) == ("ao1", 1.0)
-        assert x.close_calls == y.close_calls == 0
+        assert x.config == FakeConfig(
+            channel="ao0", gain=2.5, timeout=units.Time("25 ms")
+        )
+        assert y.config == FakeConfig(channel="ao1")
     finally:
         hardware.close()
 
     assert x.close_calls == y.close_calls == 1
 
 
-def test_config_is_optional_and_string_paths_are_accepted(
-    tmp_path: Path,
-) -> None:
-    """A string path and an omitted config table use the driver's defaults."""
-    path = _write_config(
-        tmp_path,
-        """
-        [devices.board]
-        driver = "demo"
-        """,
-    )
-
-    hardware = load_hardware(
-        str(path),
-        drivers={"demo": FakeDevice},
-    )
+def test_config_is_optional_and_string_paths_are_accepted(tmp_path: Path) -> None:
+    """An omitted table constructs the model using its defaults."""
+    path = _write_config(tmp_path, '[devices.board]\ndriver = "demo"')
+    hardware = load_hardware(str(path), drivers={"demo": FakeDevice})
 
     try:
-        assert hardware.require("board", FakeDevice).channel == "default"
+        assert hardware.require("board", FakeDevice).config == FakeConfig()
     finally:
         hardware.close()
 
 
-def test_registry_accepts_factory_functions(tmp_path: Path) -> None:
-    """A registered function can supply the device owned by the collection."""
-    device = FakeDevice()
-
-    def factory() -> Device:
-        return device
-
-    path = _write_config(
-        tmp_path,
-        """
-        [devices.board]
-        driver = "demo"
-        """,
-    )
-
-    hardware = load_hardware(path, drivers={"demo": factory})
+def test_registry_accepts_callable_factory_objects(tmp_path: Path) -> None:
+    """Factory objects receive the same parsed model as driver constructors."""
+    device = FakeDevice(FakeConfig())
+    driver = FixedDriver(device)
+    path = _write_config(tmp_path, '[devices.board]\ndriver = "demo"')
+    hardware = load_hardware(path, drivers={"demo": driver})
 
     try:
         assert hardware.require("board", FakeDevice) is device
+        assert driver.received == FakeConfig()
     finally:
         hardware.close()
 
     assert device.close_calls == 1
 
 
-def test_empty_devices_table_is_valid(tmp_path: Path) -> None:
-    """An empty devices table produces a valid empty Hardware collection."""
-    path = _write_config(tmp_path, "[devices]")
-    hardware = load_hardware(path, drivers={})
+@pytest.mark.parametrize(
+    ("invalid_config", "error", "field_name"),
+    [
+        ('gain = "wrong"', TypeError, "gain"),
+        ('timeout = "1 V"', ValueError, "timeout"),
+        ('timeout = "-1 ms"', ValueError, "timeout"),
+        ("typo = 1", ValueError, "typo"),
+    ],
+)
+def test_validates_all_configs_before_constructing_devices(
+    tmp_path: Path,
+    invalid_config: str,
+    error: type[Exception],
+    field_name: str,
+) -> None:
+    """A later parsing or model-validation failure prevents all construction."""
+    created: list[FakeDevice] = []
 
-    try:
-        assert hardware.names == ()
-    finally:
-        hardware.close()
+    class RecordingDevice(FakeDevice):
+        def __init__(self, config: FakeConfig) -> None:
+            super().__init__(config)
+            created.append(self)
+
+    path = _write_config(
+        tmp_path,
+        f"""
+        [devices.good]
+        driver = "demo"
+
+        [devices.bad]
+        driver = "demo"
+        [devices.bad.config]
+        {invalid_config}
+        """,
+    )
+
+    with pytest.raises(error, match=field_name) as caught:
+        load_hardware(path, drivers={"demo": RecordingDevice})
+
+    assert created == []
+    assert any("bad" in note and "demo" in note for note in caught.value.__notes__)
 
 
 @pytest.mark.parametrize(
     ("document", "message"),
     [
-        pytest.param(
-            "[other]",
-            "must contain a",
-            id="missing-devices-table",
-        ),
-        pytest.param(
-            "devices = 3",
-            "must contain a",
-            id="devices-is-not-a-table",
-        ),
-        pytest.param(
-            "[devices]\nboard = 3",
-            "must be a table",
-            id="device-is-not-a-table",
-        ),
-        pytest.param(
-            '[devices.""]\ndriver = "demo"',
-            "names must not be empty",
-            id="empty-device-name",
-        ),
-        pytest.param(
-            "[devices.board]",
-            "requires a nonempty string driver name",
-            id="missing-driver",
-        ),
-        pytest.param(
-            "[devices.board]\ndriver = 3",
-            "requires a nonempty string driver name",
-            id="nonstring-driver",
-        ),
-        pytest.param(
-            '[devices.board]\ndriver = ""',
-            "requires a nonempty string driver name",
-            id="empty-driver",
-        ),
-        pytest.param(
-            '[devices.board]\ndriver = "demo"\nconfig = 3',
-            "config must be a table",
-            id="config-is-not-a-table",
-        ),
-        pytest.param(
-            '[devices.board]\ndriver = "demo"\nconfgi = {}',
-            "unsupported fields",
-            id="unknown-field",
-        ),
-        pytest.param(
-            '[devices.board]\ndriver = "unknown"',
-            "unknown driver",
-            id="unregistered-driver",
-        ),
+        ("[other]", "must contain"),
+        ("devices = 3", "must contain"),
+        ("[devices]\nboard = 3", "must be a table"),
+        ('[devices.""]\ndriver = "demo"', "names must not be empty"),
+        ("[devices.board]", "requires a nonempty string"),
+        ("[devices.board]\ndriver = 3", "requires a nonempty string"),
+        ('[devices.board]\ndriver = ""', "requires a nonempty string"),
+        ('[devices.board]\ndriver = "demo"\nconfig = 3', "config must be a table"),
+        ('[devices.board]\ndriver = "demo"\nconfgi = {}', "unsupported fields"),
+        ('[devices.board]\ndriver = "unknown"', "unknown driver"),
     ],
 )
 def test_invalid_definitions_are_rejected(
@@ -200,86 +182,47 @@ def test_invalid_definitions_are_rejected(
     document: str,
     message: str,
 ) -> None:
-    """Reject malformed device definitions and unregistered driver selections."""
+    """Retain structural validation of the configuration document."""
     path = _write_config(tmp_path, document)
 
     with pytest.raises(ValueError, match=message):
         load_hardware(path, drivers={"demo": FakeDevice})
 
 
-def test_validates_all_entries_before_constructing_any_device(
+@pytest.mark.parametrize("driver", [object(), int])
+def test_invalid_driver_declarations_are_rejected(
     tmp_path: Path,
+    driver: object,
 ) -> None:
-    """An invalid later entry prevents construction of an earlier valid device.
-
-    Record factory calls for the first entry, then select an unknown driver in
-    the second. Validation must reject the document before invoking the factory.
-    """
-    calls: list[str] = []
-
-    def factory() -> Device:
-        calls.append("constructed")
-        return FakeDevice()
-
-    path = _write_config(
-        tmp_path,
-        """
-        [devices.good]
-        driver = "demo"
-
-        [devices.bad]
-        driver = "unknown"
-        """,
-    )
-
-    with pytest.raises(ValueError, match="bad.*unknown"):  # ruff: ignore[pytest-raises-ambiguous-pattern]
-        load_hardware(path, drivers={"demo": factory})
-
-    assert calls == []
-
-
-def test_noncallable_driver_is_rejected_before_construction(
-    tmp_path: Path,
-) -> None:
-    """Selecting registry entry that is not callable raises a driver-specific error."""
-    path = _write_config(
-        tmp_path,
-        """
-        [devices.board]
-        driver = "demo"
-        """,
-    )
-    invalid_factory = cast(DeviceFactory, object())
+    """Require both a callable and a declared initialization model."""
+    path = _write_config(tmp_path, '[devices.board]\ndriver = "demo"')
 
     with pytest.raises(TypeError, match="demo"):
-        load_hardware(path, drivers={"demo": invalid_factory})
+        load_hardware(path, drivers={"demo": cast(DeviceDriver[Any], driver)})
 
 
-def test_constructor_failure_rolls_back_in_reverse_order(
+@pytest.mark.parametrize("cleanup_fails", [False, True])
+def test_construction_failure_rolls_back_in_reverse_order(
     tmp_path: Path,
+    cleanup_fails: bool,
 ) -> None:
-    """A construction failure closes previously created devices in reverse order.
-
-    Construct two devices successfully before a third factory raises. Both
-    earlier devices must be closed exactly once, and the original exception
-    must identify the device whose construction failed through an added note.
-    """
+    """Attempt all cleanup and preserve the original construction exception."""
     events: list[str] = []
     created: list[FakeDevice] = []
     failure = RuntimeError("Connection failed.")
 
     class RecordingDevice(FakeDevice):
+        def __init__(self, config: FakeConfig) -> None:
+            if config.channel == "fail":
+                raise failure
+            super().__init__(config)
+            created.append(self)
+
         def close(self) -> None:
             super().close()
-            events.append(self.channel)
-
-    def factory(*, channel: str) -> Device:
-        device = RecordingDevice(channel=channel)
-        created.append(device)
-        return device
-
-    def fail() -> Device:
-        raise failure
+            events.append(self.config.channel)
+            if cleanup_fails and self.config.channel == "second":
+                raise RuntimeError("Disconnect failed.")
 
     path = _write_config(
         tmp_path,
@@ -293,39 +236,27 @@ def test_constructor_failure_rolls_back_in_reverse_order(
         config = {channel = "second"}
 
         [devices.broken]
-        driver = "fail"
+        driver = "demo"
+        config = {channel = "fail"}
         """,
     )
 
     with pytest.raises(RuntimeError) as caught:
-        load_hardware(
-            path,
-            drivers={"demo": factory, "fail": fail},
-        )
+        load_hardware(path, drivers={"demo": RecordingDevice})
 
     assert caught.value is failure
     assert events == ["second", "first"]
+    assert len(created) == 2
     assert all(device.close_calls == 1 for device in created)
     assert any("broken" in note for note in failure.__notes__)
 
+    if cleanup_fails:
+        assert any("Disconnect failed" in note for note in failure.__notes__)
 
-def test_invalid_factory_result_rolls_back_previous_devices(
-    tmp_path: Path,
-) -> None:
-    """Returning a non-Device fails construction and closes earlier devices.
 
-    A callable registry entry is not sufficient: its result must implement
-    Device. Reject the invalid result while releasing the device already
-    returned by the preceding factory.
-    """
-    device = FakeDevice()
-
-    def good() -> Device:
-        return device
-
-    def bad() -> Device:
-        return cast(Device, object())
-
+def test_invalid_factory_result_rolls_back_previous_devices(tmp_path: Path) -> None:
+    """Reject a non-Device result while closing earlier devices."""
+    device = FakeDevice(FakeConfig())
     path = _write_config(
         tmp_path,
         """
@@ -338,65 +269,26 @@ def test_invalid_factory_result_rolls_back_previous_devices(
     )
 
     with pytest.raises(TypeError, match="bad"):
-        load_hardware(path, drivers={"good": good, "bad": bad})
+        load_hardware(
+            path,
+            drivers={
+                "good": FixedDriver(device),
+                "bad": FixedDriver(cast(Device, object())),
+            },
+        )
 
     assert device.close_calls == 1
 
 
-def test_rollback_failure_does_not_hide_construction_failure(
-    tmp_path: Path,
-) -> None:
-    """Rollback continues after cleanup failure and preserves the construction error.
+def test_empty_devices_table_is_valid(tmp_path: Path) -> None:
+    """Allow a configuration with no devices."""
+    hardware = load_hardware(_write_config(tmp_path, "[devices]"), drivers={})
 
-    After two devices are created, a third factory fails. The first rollback
-    cleanup also raises, but the remaining healthy device must still be closed.
-
-    The original construction exception must be re-raised with a note describing
-    the additional cleanup failure.
-    """
-    failure = RuntimeError("Connection failed.")
-
-    class FailingCloseDevice(FakeDevice):
-        def close(self) -> None:
-            super().close()
-            raise RuntimeError("Disconnect failed.")
-
-    healthy = FakeDevice()
-    broken = FailingCloseDevice()
-
-    def fail() -> Device:
-        raise failure
-
-    path = _write_config(
-        tmp_path,
-        """
-        [devices.healthy]
-        driver = "healthy"
-
-        [devices.broken_close]
-        driver = "broken_close"
-
-        [devices.broken_constructor]
-        driver = "fail"
-        """,
-    )
-
-    with pytest.raises(RuntimeError) as caught:
-        load_hardware(
-            path,
-            drivers={
-                "healthy": lambda: healthy,
-                "broken_close": lambda: broken,
-                "fail": fail,
-            },
-        )
-
-    assert caught.value is failure
-    assert healthy.close_calls == broken.close_calls == 1
-    assert any("Disconnect failed" in note for note in failure.__notes__)
+    assert hardware.names == ()
+    hardware.close()
 
 
 def test_missing_file_is_reported(tmp_path: Path) -> None:
-    """Loading a nonexistent configuration file raises FileNotFoundError."""
+    """Preserve the file-opening exception."""
     with pytest.raises(FileNotFoundError):
         load_hardware(tmp_path / "missing.toml", drivers={})
