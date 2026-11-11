@@ -20,7 +20,7 @@ class ResonantScannerConfig:
 
     Attributes:
         nominal_frequency: Declared oscillation frequency, not a measurement.
-        max_amplitude: Maximum permitted peak-to-peak optical amplitude.
+        max_amplitude: Vendor-specified maximum peak-to-peak optical amplitude.
         settling_time: Declared wait after applying a new amplitude before
             acquisition may assume the scanner is ready; not measured feedback.
         frequency_tolerance: Maximum expected fractional deviation from nominal
@@ -40,7 +40,7 @@ class ResonantScannerConfig:
     )
     max_amplitude: units.Angle = field(
         metadata={
-            "description": "Maximum permitted peak-to-peak optical scan angle.",
+            "description": "Vendor-specified maximum peak-to-peak optical amplitude.",
             "display_unit": "deg",
         }
     )

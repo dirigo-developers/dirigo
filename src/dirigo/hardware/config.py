@@ -201,10 +201,13 @@ def load_hardware(
 def parse_config[T](model_type: type[T], values: Mapping[str, object]) -> T:
     """Parse a configuration table into a validated dataclass instance.
 
-    Support initialization fields annotated as str, bool, int, float, or a
-    Quantity subclass. Quantity inputs must be strings containing units.
-    Float fields accept plain integers or floats; other scalar fields require
-    their exact type. Booleans are not accepted as numbers.
+    Support initialization fields annotated as str, bool, int, float, a Quantity
+    subclass, or a concrete QuantityRange subclass.
+
+    Quantity inputs must be strings containing units. Range inputs must be tables
+    containing exactly min and max, each a string containing units. Float fields
+    accept plain integers or floats; other scalar fields require their exact type.
+    Booleans are not accepted as numbers.
 
     Omitted fields retain their declared defaults or default factories.
     Fields excluded from dataclass initialization cannot be supplied.
@@ -262,7 +265,7 @@ def parse_config[T](model_type: type[T], values: Mapping[str, object]) -> T:
         expected_type = annotations[name]
         if not isinstance(expected_type, type) or not (
             expected_type in (str, bool, int, float)
-            or issubclass(expected_type, units.Quantity)
+            or issubclass(expected_type, (units.Quantity, units.QuantityRange))
         ):
             raise TypeError(f"Unsupported annotation for configuration field {name!r}.")
 
@@ -281,6 +284,9 @@ def parse_config[T](model_type: type[T], values: Mapping[str, object]) -> T:
 
 def _parse_config_value(expected_type: type[object], value: object) -> object:
     """Convert one value after its field annotation has been checked."""
+    if issubclass(expected_type, units.QuantityRange):
+        return _parse_quantity_range(expected_type, value)
+
     if issubclass(expected_type, units.Quantity):
         if not isinstance(value, str):
             raise TypeError("Expected a quantity string containing units.")
@@ -295,3 +301,25 @@ def _parse_config_value(expected_type: type[object], value: object) -> object:
         raise TypeError(f"Expected {expected_type.__name__}.")
 
     return value
+
+
+def _parse_quantity_range(
+    range_type: type[units.QuantityRange[Any]],
+    value: object,
+) -> units.QuantityRange[Any]:
+    """Parse a range table through its concrete quantity-range constructor."""
+    if not isinstance(value, Mapping):
+        raise TypeError("Expected a range table containing min and max.")
+
+    if value.keys() != {"min", "max"}:
+        raise ValueError("Range table must contain exactly min and max.")
+
+    minimum = value["min"]
+    maximum = value["max"]
+
+    if not isinstance(minimum, str):
+        raise TypeError("Range min must be a quantity string containing units.")
+    if not isinstance(maximum, str):
+        raise TypeError("Range max must be a quantity string containing units.")
+
+    return range_type(minimum, maximum)
