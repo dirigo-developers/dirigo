@@ -1,31 +1,44 @@
-from abc import ABC, abstractmethod
 from collections.abc import Mapping
 
-
-class Device(ABC):
-    """A hardware component whose lifetime is owned by Hardware."""
-
-    @abstractmethod
-    def close(self) -> None:
-        """Stop activity and release this device's owned resources.
-
-        Repeated calls must be safe.
-
-        Support cleanup after partial acquisition preparation or a failed
-        start. Attempt remaining cleanup even if an earlier step fails.
-
-        Do not release resources borrowed from another Device.
-        """
+from .device import Device
 
 
 class Hardware:
-    """A fixed collection that owns its named devices.
+    """Own a fixed collection of named device instances.
 
-    Workers borrow references. The collection must remain open until
-    all users of its devices have finished.
+    Construction copies the supplied mapping without copying its devices.
+    Names can identify instrument roles or individual components. Multiple
+    names may refer to the same device instance.
+
+    Successful construction transfers responsibility for closing the devices
+    to this collection. Failed construction leaves that responsibility with
+    the caller.
+
+    Lookups return borrowed references. The collection must remain open until
+    every user, including pipeline workers, has finished using its devices.
+    Lookup does not reserve a device or coordinate access between users.
+
+    Devices are closed in reverse mapping order, skipping instances already
+    encountered. When one device borrows another, place the resource owner
+    before its borrower so the borrower closes first.
+
+    Closing must not overlap lookup or device use. Device operations otherwise
+    follow the threading contract of their particular interface.
     """
 
     def __init__(self, devices: Mapping[str, Device]) -> None:
+        """Take ownership of the supplied devices after validating the mapping.
+
+        Args:
+            devices: Device instances keyed by nonempty names. An empty mapping
+                is valid. Mapping order determines cleanup order.
+
+        Raises:
+            TypeError: A name is not a string or a value is not a Device.
+            ValueError: A name is empty.
+
+        No supplied device is closed if validation fails.
+        """
         configured = dict(devices)
 
         for name, device in configured.items():
@@ -43,7 +56,10 @@ class Hardware:
 
     @property
     def names(self) -> tuple[str, ...]:
-        """Configured names in insertion order, including after closure."""
+        """Configured names in mapping order, including aliases.
+
+        Names remain available after closure.
+        """
         return tuple(self._devices)
 
     def require[T: Device](
@@ -51,12 +67,22 @@ class Hardware:
         name: str,
         interface: type[T],
     ) -> T:
-        """Return the named device after checking its interface.
+        """Borrow a named device implementing the requested interface.
+
+        Repeated lookups return the same instance. The caller must not close
+        the returned device; its lifetime belongs to this collection.
+
+        Args:
+            name: Configured device name.
+            interface: Required Device subclass or device interface ABC.
+
+        Returns:
+            The configured device, checked against interface with isinstance().
 
         Raises:
-            RuntimeError: If the collection is closed.
-            KeyError: If the name is not configured.
-            TypeError: If the device does not implement the interface.
+            RuntimeError: The collection is closed.
+            KeyError: The name is not configured.
+            TypeError: The device does not implement the requested interface.
         """
         if self._closed:
             raise RuntimeError("Hardware collection is closed.")
@@ -72,14 +98,25 @@ class Hardware:
         return device
 
     def close(self) -> None:
-        """Close distinct devices in reverse insertion order.
+        """End collection access and attempt cleanup of every distinct device.
 
-        Attempt every device before reporting collected failures.
-        The collection remains closed even if cleanup fails.
-        Repeated calls do nothing.
+        Close devices in reverse mapping order. Aliases do not cause repeated
+        cleanup of the same instance.
 
-        All users must have finished before calling this method.
-        Must not run concurrently with lookup or device use.
+        Mark the collection closed before beginning cleanup, and attempt every
+        device even if an earlier device raises. Report collected failures
+        after all cleanup attempts.
+
+        The collection remains closed when cleanup fails. Subsequent calls do
+        nothing: they neither retry cleanup nor repeat a previous exception.
+        A closed collection therefore does not establish that every underlying
+        resource was successfully released.
+
+        All users must have finished before this method is called. Closure
+        cannot revoke device references that have already been borrowed.
+
+        Raises:
+            BaseExceptionGroup: One or more devices raised during cleanup.
         """
         if self._closed:
             return

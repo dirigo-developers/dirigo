@@ -13,15 +13,40 @@ def load_hardware(
     *,
     drivers: Mapping[str, DeviceFactory],
 ) -> Hardware:
-    """Construct a hardware collection from a TOML devices table.
+    """Construct an owned hardware collection from a TOML devices table.
 
-    Each entry selects a registered driver and optionally supplies a config
-    table, passed as keyword arguments to the driver factory.
+    Each entry in [devices] selects a driver from the supplied registry.
+    Its optional config table is passed as keyword arguments to that driver's
+    factory.
 
-    Validate every definition before construction. On construction failure,
-    close devices already returned by factories and re-raise the original
-    error. Factories must clean up their own resources if they fail before
-    returning a device.
+    Validate the structure of every device definition and resolve every driver
+    before constructing any devices. Driver-specific configuration values are
+    currently validated by the factories during construction.
+
+    Construct devices in TOML table order. If construction fails, close
+    previously returned devices in reverse order and re-raise the original
+    error. Any rollback failure is recorded in an exception note.
+
+    A factory that fails before returning a device must release its own
+    partially acquired resources.
+
+    Args:
+        path: Path to the TOML configuration file.
+        drivers: Registry mapping driver names to callable device factories.
+
+    Returns:
+        A Hardware collection owning the constructed devices.
+
+    Raises:
+        OSError: The configuration file cannot be read.
+        tomllib.TOMLDecodeError: The file is not valid TOML.
+        ValueError: The device definitions are invalid or select an unknown
+            driver.
+        TypeError: A selected factory is not callable or returns a value
+            that is not a Device.
+
+    Exceptions raised by factories propagate with a note identifying the
+    device being constructed.
     """
     with Path(path).open("rb") as stream:
         document = tomllib.load(stream)
