@@ -12,6 +12,7 @@ from dirigo.hardware.scanner import (
     ResonantScanner,
     ResonantScannerConfig,
 )
+from dirigo.hardware.timing import ExternalSampleClock
 from dirigo.hardware.waveform import AngularWaveform
 
 
@@ -50,7 +51,10 @@ class SimulatedGalvoScanner(GalvoScanner):
 class SimulatedGalvoOutputSession(GalvoOutputSession):
     """Simulate one finite run using elapsed monotonic time.
 
-    Supports simulated galvo axes only. No background thread is created.
+    Supports simulated galvo axes with internal timing only. External sample
+    clocks are rejected because no incoming-edge simulation is provided.
+    No background thread is created.
+
     wait() observes completion after sample_count / sample_rate seconds;
     it does not simulate mirror motion or update static-angle history.
     """
@@ -58,11 +62,17 @@ class SimulatedGalvoOutputSession(GalvoOutputSession):
     def __init__(
         self,
         waveforms: Mapping[GalvoScanner, AngularWaveform],
+        *,
+        external_clock: ExternalSampleClock | None = None,
     ) -> None:
-        """Validate bindings and require simulated axes."""
-        super().__init__(waveforms)
+        """Require simulated axes and reject unsupported external timing."""
+        super().__init__(waveforms, external_clock=external_clock)
         if any(not isinstance(axis, SimulatedGalvoScanner) for axis in self._waveforms):
             raise TypeError("Simulation requires SimulatedGalvoScanner axes.")
+        if self.external_clock is not None:
+            raise NotImplementedError(
+                "Elapsed-time simulation does not support external sample clocks."
+            )
         self._deadline: float | None = None
 
     def _prepare_output(self) -> None:

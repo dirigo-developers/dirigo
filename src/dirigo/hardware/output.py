@@ -7,6 +7,7 @@ from enum import StrEnum
 from types import MappingProxyType
 
 from dirigo.hardware.scanner import GalvoScanner
+from dirigo.hardware.timing import ExternalSampleClock
 from dirigo.hardware.waveform import AngularWaveform
 
 
@@ -28,20 +29,27 @@ class GalvoOutputSession(ABC):
     or accessing hardware. Waveforms must have identical nominal sample rates
     and sample counts.
 
+    external_clock=None requests internal timing. Otherwise the backend must
+    honor the supplied clock or reject unsupported timing during construction.
+    Waveform sample rates remain nominal with external timing.
+
     prepare() reserves the axes until close(), including after completion or
     stop(). Session methods must be called serially. For cooperative
     cancellation, use bounded wait() calls before calling stop().
 
-    Subclasses implement output hooks using _waveforms, _sample_rate, and
-    _sample_count. Constructors must remain free of hardware operations.
+    Subclasses must accept and forward external_clock to the base constructor.
+    Output hooks use _waveforms, _sample_rate, _sample_count, and external_clock.
+    Constructors must remain free of hardware operations.
     Hardware devices must outlive their sessions.
     """
 
     def __init__(
         self,
         waveforms: Mapping[GalvoScanner, AngularWaveform],
+        *,
+        external_clock: ExternalSampleClock | None = None,
     ) -> None:
-        """Validate the complete group without changing device state."""
+        """Validate waveform bindings and clock selection without hardware I/O."""
         if not isinstance(waveforms, Mapping):
             raise TypeError("waveforms must be a mapping.")
         bindings = dict(waveforms)
@@ -62,6 +70,17 @@ class GalvoOutputSession(ABC):
             if waveform.samples.size != self._sample_count:
                 raise ValueError("Waveforms must have the same sample count.")
 
+        if external_clock is not None:
+            if not isinstance(external_clock, ExternalSampleClock):
+                raise TypeError(
+                    "external_clock must be an ExternalSampleClock or None."
+                )
+            if float(external_clock.max_rate) < float(self._sample_rate):
+                raise ValueError(
+                    "External clock max_rate must be at least the waveform sample_rate."
+                )
+
+        self._external_clock = external_clock
         self._waveforms = MappingProxyType(bindings)
         self._reserved: list[GalvoScanner] = []
         self._state = OutputState.NEW
@@ -70,6 +89,11 @@ class GalvoOutputSession(ABC):
     def state(self) -> OutputState:
         """Last observed lifecycle state; wait() observes finite completion."""
         return self._state
+
+    @property
+    def external_clock(self) -> ExternalSampleClock | None:
+        """Requested external clock, or None for internally clocked output."""
+        return self._external_clock
 
     def prepare(self) -> None:
         """Reserve every axis and prepare output without starting the run.

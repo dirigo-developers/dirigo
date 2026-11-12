@@ -12,6 +12,7 @@ from dirigo.hardware.simulated import (
     SimulatedGalvoOutputSession,
     SimulatedGalvoScanner,
 )
+from dirigo.hardware.timing import ClockEdge, ExternalSampleClock
 from dirigo.hardware.waveform import AngularWaveform
 
 
@@ -30,9 +31,14 @@ def _waveform(count: int = 2, rate: float = 1000.0) -> AngularWaveform:
 class RecordingSession(GalvoOutputSession):
     """Record output hooks and allow deterministic completion or failure."""
 
-    def __init__(self, waveforms: Mapping[GalvoScanner, AngularWaveform]) -> None:
+    def __init__(
+        self,
+        waveforms: Mapping[GalvoScanner, AngularWaveform],
+        *,
+        external_clock: ExternalSampleClock | None = None,
+    ) -> None:
         """Validate bindings and initialize hook controls."""
-        super().__init__(waveforms)
+        super().__init__(waveforms, external_clock=external_clock)
         self.events: list[str] = []
         self.failures: dict[str, RuntimeError] = {}
         self.complete = False
@@ -283,3 +289,88 @@ def test_unprepared_and_closed_sessions_cannot_start_or_wait() -> None:
         session.start()
     with pytest.raises(RuntimeError, match="must be started"):
         session.wait(0.0)
+
+
+@pytest.mark.parametrize(
+    "clock",
+    [
+        None,
+        ExternalSampleClock(source="line_sync", max_rate=units.SampleRate("1.2 kS/s")),
+        ExternalSampleClock(
+            source="line_sync",
+            max_rate=units.SampleRate("1.2 kS/s"),
+            active_edge=ClockEdge.FALLING,
+        ),
+    ],
+)
+def test_output_session_stores_clock_without_reserving_axis(
+    clock: ExternalSampleClock | None,
+) -> None:
+    """Retain clock selection in the common contract without reserving hardware.
+
+    Cover internal timing and both external edges through a backend-neutral
+    recording session. A static command remains available before preparation.
+    """
+    axis = _axis()
+    session = RecordingSession({axis: _waveform()}, external_clock=clock)
+    try:
+        assert session.external_clock is clock
+        assert session.events == []
+        axis.angle = units.Angle("0 deg")
+    finally:
+        session.close()
+        axis.close()
+
+
+@pytest.mark.parametrize(
+    ("clock", "error_type", "message"),
+    [
+        (object(), TypeError, "external_clock must be an ExternalSampleClock"),
+        (
+            ExternalSampleClock(
+                source="line_sync", max_rate=units.SampleRate("900 S/s")
+            ),
+            ValueError,
+            "at least the waveform sample_rate",
+        ),
+    ],
+)
+def test_output_session_rejects_invalid_clock_selection(
+    clock: object,
+    error_type: type[Exception],
+    message: str,
+) -> None:
+    """Validate clock type and rate consistency in core before reserving axes."""
+    axis = _axis()
+    try:
+        with pytest.raises(error_type, match=message):
+            RecordingSession(
+                {axis: _waveform()},
+                external_clock=cast(ExternalSampleClock, clock),
+            )
+        axis.angle = units.Angle("0 deg")
+    finally:
+        axis.close()
+
+
+def test_simulation_rejects_external_clock_without_reserving_axis() -> None:
+    """Reject external timing rather than completing it using elapsed time.
+
+    The simulator has no incoming-edge model. Construction must reject this
+    mode and leave the axis available for a subsequent internally clocked run.
+    """
+    axis = _axis()
+    clock = ExternalSampleClock(
+        source="line_sync", max_rate=units.SampleRate("1.2 kS/s")
+    )
+    try:
+        with pytest.raises(NotImplementedError, match="external sample clocks"):
+            SimulatedGalvoOutputSession({axis: _waveform()}, external_clock=clock)
+
+        session = SimulatedGalvoOutputSession({axis: _waveform()})
+        try:
+            session.prepare()
+        finally:
+            session.close()
+    finally:
+        axis.close()
