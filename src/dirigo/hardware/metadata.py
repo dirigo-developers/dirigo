@@ -14,15 +14,21 @@ type MetadataValue = (
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class DeviceIdentity:
-    """Driver-declared physical identity; None means unknown.
+    """Physical-device identity, with None for unknown fields.
 
-    Values may come from configuration or hardware readback. Their source
-    should be documented by the driver.
+    Configured values are user declarations, not hardware verification.
     """
 
     manufacturer: str | None = None
     model: str | None = None
     serial_number: str | None = None
+
+    def __post_init__(self) -> None:
+        """Require each known identity field to be a string."""
+        for name in ("manufacturer", "model", "serial_number"):
+            value = getattr(self, name)
+            if value is not None and not isinstance(value, str):
+                raise TypeError(f"{name} must be a string or None.")
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)

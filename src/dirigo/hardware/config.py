@@ -9,6 +9,7 @@ from typing import Any, Protocol, get_type_hints
 from dirigo import units
 from dirigo.hardware.device import Device
 from dirigo.hardware.hardware import Hardware
+from dirigo.hardware.metadata import DeviceIdentity
 
 
 class DeviceDriver[ConfigT](Protocol):
@@ -111,7 +112,7 @@ def load_hardware(
     registrations: dict[str, importlib_metadata.EntryPoint] = (
         discover_drivers() if drivers is None else {}
     )
-    plan: list[tuple[str, DeviceDriver[Any], object]] = []
+    plan: list[tuple[str, DeviceDriver[Any], object, DeviceIdentity]] = []
 
     for name, definition in definitions.items():
         if not name:
@@ -120,7 +121,7 @@ def load_hardware(
         if not isinstance(definition, dict):
             raise ValueError(f"Device {name!r} must be a table.")
 
-        unknown = definition.keys() - {"driver", "config"}
+        unknown = definition.keys() - {"driver", "config", "identity"}
         if unknown:
             raise ValueError(
                 f"Device {name!r} has unsupported fields: {', '.join(sorted(unknown))}."
@@ -169,12 +170,18 @@ def load_hardware(
             )
             raise
 
-        plan.append((name, driver, config))
+        try:
+            identity = _parse_identity(definition.get("identity", {}))
+        except (TypeError, ValueError) as exc:
+            exc.add_note(f"While parsing identity for device {name!r}.")
+            raise
+
+        plan.append((name, driver, config, identity))
 
     devices: dict[str, Device] = {}
 
     try:
-        for name, driver, config in plan:
+        for name, driver, config, identity in plan:
             try:
                 device = driver(config)
                 if not isinstance(device, Device):
@@ -182,11 +189,13 @@ def load_hardware(
                         f"Driver for device {name!r} must return "
                         f"a Device; got {type(device).__name__}."
                     )
+
+                devices[name] = device
+                device.configure_identity(identity)
+
             except BaseException as exc:
                 exc.add_note(f"While constructing device {name!r}.")
                 raise
-
-            devices[name] = device
 
         return Hardware(devices)
 
@@ -323,3 +332,23 @@ def _parse_quantity_range(
         raise TypeError("Range max must be a quantity string containing units.")
 
     return range_type(minimum, maximum)
+
+
+def _parse_identity(value: object) -> DeviceIdentity:
+    """Parse an identity table independently of driver configuration."""
+    if not isinstance(value, Mapping):
+        raise TypeError("Device identity must be a table.")
+
+    allowed = {"manufacturer", "model", "serial_number"}
+    values: dict[str, str] = {}
+
+    for name, field_value in value.items():
+        if not isinstance(name, str):
+            raise TypeError("Identity field names must be strings.")
+        if name not in allowed:
+            raise ValueError(f"Unsupported identity field: {name!r}.")
+        if not isinstance(field_value, str):
+            raise TypeError(f"Identity field {name!r} must be a string.")
+        values[name] = field_value
+
+    return DeviceIdentity(**values)

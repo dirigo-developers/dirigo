@@ -25,6 +25,8 @@ class Device(ABC):
     resources they have already acquired.
     """
 
+    _configured_identity: DeviceIdentity = DeviceIdentity()
+
     @abstractmethod
     def close(self) -> None:
         """Stop activity and release this device's owned resources.
@@ -42,13 +44,52 @@ class Device(ABC):
         The caller must ensure that device use has finished before closing.
         """
 
-    @property
-    def identity(self) -> DeviceIdentity:
-        """Driver-declared physical identity, with unknown fields left empty.
+    def configure_identity(self, identity: DeviceIdentity) -> None:
+        """Replace the user-supplied identity without accessing hardware.
 
-        Override to provide information from configuration or hardware.
+        Reported values take precedence over configured values.
+        Pass DeviceIdentity() to clear all configured fields.
+
+        Raises:
+            TypeError: identity is not a DeviceIdentity.
+        """
+        if not isinstance(identity, DeviceIdentity):
+            raise TypeError("identity must be a DeviceIdentity.")
+        self._configured_identity = identity
+
+    @property
+    def configured_identity(self) -> DeviceIdentity:
+        """User-supplied identity; unknown fields are None."""
+        return self._configured_identity
+
+    @property
+    def reported_identity(self) -> DeviceIdentity:
+        """Driver-reported identity; unknown fields are None.
+
+        Drivers may override this property to expose cached physical-device
+        identity.
         """
         return DeviceIdentity()
+
+    @property
+    def identity(self) -> DeviceIdentity:
+        """Effective identity, using configured values for unreported fields."""
+        configured = self.configured_identity
+        reported = self.reported_identity
+
+        return DeviceIdentity(
+            manufacturer=(
+                reported.manufacturer
+                if reported.manufacturer is not None
+                else configured.manufacturer
+            ),
+            model=(reported.model if reported.model is not None else configured.model),
+            serial_number=(
+                reported.serial_number
+                if reported.serial_number is not None
+                else configured.serial_number
+            ),
+        )
 
     @property
     def driver_identity(self) -> DriverIdentity:
