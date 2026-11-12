@@ -3,9 +3,11 @@
 import math
 from abc import abstractmethod
 from dataclasses import dataclass, field
+from threading import RLock
 
 from dirigo import units
 from dirigo.hardware.device import Device
+from dirigo.hardware.waveform import AngularWaveform
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -206,3 +208,171 @@ class ResonantScanner(Device):
         Support partially initialized resources. Public amplitude commands are
         already disabled when this hook runs.
         """
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class GalvoScannerConfig:
+    """Physical specifications for one galvanometer scanner axis.
+
+    angle_range is the inclusive vendor-specified optical deflection range,
+    not the angular extent selected for a particular acquisition.
+    """
+
+    angle_range: units.AngleRange = field(
+        metadata={
+            "description": "Full-scale optical deflection range.",
+            "display_unit": "deg",
+        }
+    )
+
+    def __post_init__(self) -> None:
+        """Require a typed optical range with finite endpoints."""
+        if not isinstance(self.angle_range, units.AngleRange):
+            raise TypeError("angle_range must be an AngleRange.")
+        if not all(
+            math.isfinite(float(endpoint))
+            for endpoint in (self.angle_range.min, self.angle_range.max)
+        ):
+            raise ValueError("angle_range endpoints must be finite.")
+
+
+class GalvoScanner(Device):
+    """One galvo axis with a static optical-angle command.
+
+    Construction leaves the output unchanged. Scalar commands support parking
+    and alignment; buffered waveform execution is a separate operation.
+
+    angle records the last successful static command, not measured position
+    or instantaneous position during waveform output. Static commands and waveform
+    reservations are serialized internally.
+    """
+
+    def __init__(self, config: GalvoScannerConfig) -> None:
+        """Store physical specifications without commanding the scanner.
+
+        Raises:
+            TypeError: config is not a GalvoScannerConfig.
+        """
+        if not isinstance(config, GalvoScannerConfig):
+            raise TypeError("config must be a GalvoScannerConfig.")
+        self._config = config
+        self._output_lock = RLock()
+        self._output_owner: object | None = None
+        self._angle: units.Angle | None = None
+        self._closed = False
+
+    @property
+    def config(self) -> GalvoScannerConfig:
+        """Physical specifications for this axis."""
+        return self._config
+
+    @property
+    def angle(self) -> units.Angle | None:
+        """Last successful static command, or None before any such command.
+
+        This history does not describe instantaneous waveform position.
+        It remains readable after closure.
+        """
+        return self._angle
+
+    @angle.setter
+    def angle(self, value: units.Angle) -> None:
+        """Command a static optical angle without waiting for settling.
+
+        The axis must be open and unreserved. Update command history only
+        after the driver returns successfully. A driver error may leave
+        physical output uncertain while the recorded history stays unchanged.
+
+        Raises:
+            RuntimeError: The scanner is closed or reserved for waveform output.
+            TypeError: value is not an Angle.
+            ValueError: value is nonfinite or outside angle_range.
+
+        Driver exceptions propagate.
+        """
+        with self._output_lock:
+            if self._closed:
+                raise RuntimeError("Scanner is closed.")
+            if self._output_owner is not None:
+                raise RuntimeError("Scanner is reserved for waveform output.")
+            if not isinstance(value, units.Angle):
+                raise TypeError("angle must be an Angle.")
+            if not math.isfinite(float(value)):
+                raise ValueError("angle must be finite.")
+            if not (
+                float(self.config.angle_range.min)
+                <= float(value)
+                <= float(self.config.angle_range.max)
+            ):
+                raise ValueError("angle must be within angle_range.")
+
+            self._write_angle(value)
+            self._angle = value
+
+    def validate_waveform(self, waveform: AngularWaveform) -> None:
+        """Check every sample against this axis's inclusive optical limits.
+
+        This read-only check is available even after closure. It does not
+        issue output, change static-command history, or reserve the axis.
+        Output-session timing and hardware capabilities are checked separately.
+
+        Raises:
+            TypeError: waveform is not an AngularWaveform.
+            ValueError: Any sample is outside angle_range.
+        """
+        if not isinstance(waveform, AngularWaveform):
+            raise TypeError("waveform must be an AngularWaveform.")
+
+        samples = waveform.samples
+        if float(samples.min()) < float(self.config.angle_range.min) or float(
+            samples.max()
+        ) > float(self.config.angle_range.max):
+            raise ValueError("waveform samples must be within angle_range.")
+
+    def close(self) -> None:
+        """Release resources after all borrowing output sessions are closed.
+
+        A reserved axis raises RuntimeError and remains open. Otherwise,
+        closure is permanent even if cleanup fails, and repeated calls do
+        nothing. Closure does not select a parking angle.
+        """
+        with self._output_lock:
+            if self._closed:
+                return
+            if self._output_owner is not None:
+                raise RuntimeError("Scanner is reserved for waveform output.")
+            self._closed = True
+            self._close()
+
+    @abstractmethod
+    def _write_angle(self, value: units.Angle) -> None:
+        """Apply one validated static command with the output lock held."""
+
+    @abstractmethod
+    def _close(self) -> None:
+        """Release resources owned by this driver without choosing an angle."""
+
+    def _snapshot_settings(self) -> dict[str, object]:
+        """Record the optical range and last successful static command."""
+        return {
+            "angle_range": {
+                "min": self.config.angle_range.min,
+                "max": self.config.angle_range.max,
+            },
+            "last_static_angle": self.angle,
+        }
+
+    def _reserve_output(self, owner: object) -> None:
+        """Reserve this axis for one output session."""
+        with self._output_lock:
+            if self._closed:
+                raise RuntimeError("Scanner is closed.")
+            if self._output_owner is not None:
+                raise RuntimeError("Scanner is reserved for waveform output.")
+            self._output_owner = owner
+
+    def _release_output(self, owner: object) -> None:
+        """Release only the reservation belonging to this session."""
+        with self._output_lock:
+            if self._output_owner is owner:
+                self._output_owner = None

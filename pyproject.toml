@@ -75,3 +75,4 @@ python-version = "3.14"
 
 [project.entry-points."dirigo.devices.scanners"]
 simulated_resonant = "dirigo.hardware.simulated:SimulatedResonantScanner"
+simulated_galvo = "dirigo.hardware.simulated:SimulatedGalvoScanner"
