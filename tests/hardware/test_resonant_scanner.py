@@ -191,6 +191,7 @@ def test_loads_simulated_scanner_and_owns_its_lifetime(tmp_path: Path) -> None:
     path.write_text(
         """
         [devices.fast_scanner]
+        category = "scanners"
         driver = "simulated_resonant"
 
         [devices.fast_scanner.config]
@@ -203,7 +204,7 @@ def test_loads_simulated_scanner_and_owns_its_lifetime(tmp_path: Path) -> None:
     )
     hardware = load_hardware(
         path,
-        drivers={"simulated_resonant": SimulatedResonantScanner},
+        drivers={"scanners": {"simulated_resonant": SimulatedResonantScanner}},
     )
 
     try:

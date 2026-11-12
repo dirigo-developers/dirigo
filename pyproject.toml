@@ -73,5 +73,5 @@ addopts = "-ra --cov=dirigo --cov-report=term-missing --import-mode=importlib"
 [tool.ty.environment]
 python-version = "3.14"
 
-[project.entry-points."dirigo.devices"]
+[project.entry-points."dirigo.devices.scanners"]
 simulated_resonant = "dirigo.hardware.simulated:SimulatedResonantScanner"

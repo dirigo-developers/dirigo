@@ -4,7 +4,7 @@ from dataclasses import MISSING, fields, is_dataclass
 from importlib import metadata as importlib_metadata
 from os import PathLike
 from pathlib import Path
-from typing import Any, Protocol, get_type_hints
+from typing import Any, Protocol, cast, get_type_hints
 
 from dirigo import units
 from dirigo.hardware.device import Device
@@ -33,73 +33,73 @@ class DeviceDriver[ConfigT](Protocol):
         ...
 
 
-def discover_drivers() -> dict[str, importlib_metadata.EntryPoint]:
-    """Discover installed registrations in the dirigo.devices entry-point group.
+def _driver_group(category: str) -> str:
+    """Return the entry-point group for a nonempty category."""
+    if not isinstance(category, str):
+        raise TypeError("category must be a string.")
+    if not category:
+        raise ValueError("category must not be empty.")
+    return f"dirigo.devices.{category}"
 
-    Return unloaded entry points keyed by their case-sensitive names. Inspecting
-    this mapping does not import driver modules or construct devices. Call
-    an entry point's load() method to inspect its driver's config_type.
 
-    Do not cache results globally; each call inspects installed registrations.
+def discover_device_categories() -> tuple[str, ...]:
+    """Return sorted installed device categories without loading drivers."""
+    prefix = "dirigo.devices."
+    return tuple(
+        sorted(
+            group[len(prefix) :]
+            for group in importlib_metadata.entry_points().groups
+            if group.startswith(prefix) and group != prefix
+        )
+    )
+
+
+def discover_drivers(
+    category: str,
+) -> dict[str, importlib_metadata.EntryPoint]:
+    """Discover unloaded drivers registered in one device category.
+
+    Names must be unique within the selected category. Registrations in
+    other categories are independent.
 
     Raises:
-        ValueError: Multiple registrations use the same driver name.
+        TypeError: category is not a string.
+        ValueError: category is empty or the selected group contains
+            duplicate driver names.
     """
-    discovered: dict[str, importlib_metadata.EntryPoint] = {}
+    group = _driver_group(category)
+    drivers: dict[str, importlib_metadata.EntryPoint] = {}
 
-    for entry in importlib_metadata.entry_points(group="dirigo.devices"):
-        if entry.name in discovered:
-            previous = discovered[entry.name]
+    for entry in importlib_metadata.entry_points().select(group=group):
+        previous = drivers.get(entry.name)
+        if previous is not None:
             raise ValueError(
-                f"Duplicate driver registration {entry.name!r}: "
-                f"{previous.value!r} and {entry.value!r}."
+                f"Duplicate device driver {entry.name!r} in category "
+                f"{category!r}: {previous.value!r} and {entry.value!r}."
             )
+        drivers[entry.name] = entry
 
-        discovered[entry.name] = entry
-
-    return discovered
+    return drivers
 
 
 def load_hardware(
     path: str | PathLike[str],
     *,
-    drivers: Mapping[str, DeviceDriver[Any]] | None = None,
+    drivers: Mapping[str, Mapping[str, DeviceDriver[Any]]] | None = None,
 ) -> Hardware:
-    """Construct an owned hardware collection from a TOML devices table.
+    """Construct named devices selected by category and driver.
 
-    Each device selects a registered driver and optionally supplies a config
-    table. The driver declares its initialization dataclass through config_type.
+    Each device requires category and driver strings, and may supply config
+    and identity tables. Explicit registries map categories to driver maps;
+    any supplied registry, including an empty one, bypasses discovery.
 
-    Parse and validate every configuration before constructing any devices.
-    Configuration validation must not acquire hardware resources. Construct
-    devices in table order, passing each its validated configuration object.
+    Parse every configuration and identity before constructing devices.
+    Discovered implementations are loaded only when selected and cached
+    per (category, driver name) for this invocation.
 
-    If construction fails, close previously returned devices in reverse order
-    and re-raise the original failure. A driver that fails before returning a
-    device must clean up its own partially acquired resources.
-
-    When drivers is None, discover installed entry points and load only selected
-    driver implementations, once per driver name during this call. Driver imports
-    must not initialize hardware. An explicit registry, including an empty mapping,
-    bypasses discovery.
-
-    Args:
-        path: Path to the TOML configuration file.
-        drivers: Explicit registry of driver classes or callable factory objects.
-            None selects installed registrations in the dirigo.devices group.
-
-    Returns:
-        A Hardware collection owning the constructed devices.
-
-    Raises:
-        OSError: The configuration file cannot be read.
-        tomllib.TOMLDecodeError: The document is not valid TOML.
-        ValueError: A device definition or configuration is invalid.
-        TypeError: A driver declaration, configuration value, or returned
-            device has an invalid type.
-
-    Model validation and driver construction exceptions propagate with a note
-    identifying the device. Rollback failures are attached as additional notes.
+    On construction failure, close previously returned devices and preserve
+    the original exception. Drivers must clean up resources themselves if
+    their constructors fail before returning a Device.
     """
     with Path(path).open("rb") as stream:
         document = tomllib.load(stream)
@@ -108,97 +108,118 @@ def load_hardware(
     if not isinstance(definitions, dict):
         raise ValueError("Configuration must contain a [devices] table.")
 
-    registry: dict[str, DeviceDriver[Any]] = {} if drivers is None else dict(drivers)
-    registrations: dict[str, importlib_metadata.EntryPoint] = (
-        discover_drivers() if drivers is None else {}
-    )
-    plan: list[tuple[str, DeviceDriver[Any], object, DeviceIdentity]] = []
+    registry: dict[str, dict[str, DeviceDriver[Any]]] | None = None
+    if drivers is not None:
+        registry = {}
+        for category, members in drivers.items():
+            _driver_group(category)
+            if not isinstance(members, Mapping):
+                raise TypeError(f"Driver category {category!r} must contain a mapping.")
+            registry[category] = dict(members)
+
+    discovered: dict[str, dict[str, importlib_metadata.EntryPoint]] = {}
+    resolved: dict[tuple[str, str], DeviceDriver[Any]] = {}
+    plan: list[tuple[str, DeviceDriver[Any], Any, DeviceIdentity]] = []
 
     for name, definition in definitions.items():
         if not name:
             raise ValueError("Device names must not be empty.")
-
         if not isinstance(definition, dict):
             raise ValueError(f"Device {name!r} must be a table.")
 
-        unknown = definition.keys() - {"driver", "config", "identity"}
+        unknown = definition.keys() - {"category", "driver", "config", "identity"}
         if unknown:
             raise ValueError(
                 f"Device {name!r} has unsupported fields: {', '.join(sorted(unknown))}."
             )
 
+        category = definition.get("category")
+        if not isinstance(category, str) or not category:
+            raise ValueError(f"Device {name!r} requires a nonempty string category.")
+
         driver_name = definition.get("driver")
         if not isinstance(driver_name, str) or not driver_name:
             raise ValueError(f"Device {name!r} requires a nonempty string driver name.")
 
-        raw_config = definition.get("config", {})
-        if not isinstance(raw_config, dict):
+        values = definition.get("config", {})
+        if not isinstance(values, dict):
             raise ValueError(f"Device {name!r} config must be a table.")
 
-        if driver_name not in registry:
-            if driver_name not in registrations:
-                available = ", ".join(sorted(registry.keys() | registrations.keys()))
+        key = (category, driver_name)
+        if key not in resolved:
+            choices: Mapping[str, object]
+            if registry is None:
+                if category not in discovered:
+                    discovered[category] = discover_drivers(category)
+                choices = discovered[category]
+            else:
+                choices = registry.get(category, {})
+
+            if driver_name not in choices:
+                available = ", ".join(sorted(choices)) or "(none)"
                 raise ValueError(
-                    f"Device {name!r} selects unknown driver {driver_name!r}. "
-                    f"Available drivers: {available or 'none'}."
+                    f"Device {name!r} selects unknown driver "
+                    f"{driver_name!r} in category {category!r}. "
+                    f"Available drivers: {available}"
                 )
 
-            try:
-                registry[driver_name] = registrations[driver_name].load()
-            except BaseException as exc:
-                exc.add_note(
-                    f"While loading driver {driver_name!r} for device {name!r}."
+            candidate = choices[driver_name]
+            if registry is None:
+                entry = cast(importlib_metadata.EntryPoint, candidate)
+                try:
+                    candidate = entry.load()
+                except BaseException as exc:
+                    exc.add_note(
+                        f"While loading driver {driver_name!r} in category "
+                        f"{category!r} for device {name!r}."
+                    )
+                    raise
+
+            if not callable(candidate):
+                raise TypeError(
+                    f"Driver {driver_name!r} in category {category!r} must be callable."
                 )
-                raise
 
-        driver = registry[driver_name]
+            model_type = getattr(candidate, "config_type", None)
+            if not isinstance(model_type, type) or not is_dataclass(model_type):
+                raise TypeError(
+                    f"Driver {driver_name!r} in category {category!r} "
+                    "config_type must be a dataclass type."
+                )
 
-        if not callable(driver):
-            raise TypeError(f"Driver {driver_name!r} must be callable.")
+            resolved[key] = cast(DeviceDriver[Any], candidate)
 
-        config_type = getattr(driver, "config_type", None)
-        if not isinstance(config_type, type) or not is_dataclass(config_type):
-            raise TypeError(
-                f"Driver {driver_name!r} must declare a dataclass config_type."
-            )
-
+        driver = resolved[key]
         try:
-            config = parse_config(config_type, raw_config)
-        except BaseException as exc:
-            exc.add_note(
-                f"While validating device {name!r} with driver {driver_name!r}."
-            )
-            raise
-
-        try:
+            config = parse_config(driver.config_type, values)
             identity = _parse_identity(definition.get("identity", {}))
         except (TypeError, ValueError) as exc:
-            exc.add_note(f"While parsing identity for device {name!r}.")
+            exc.add_note(
+                f"While parsing device {name!r} using driver {driver_name!r} "
+                f"in category {category!r}."
+            )
             raise
 
         plan.append((name, driver, config, identity))
 
     devices: dict[str, Device] = {}
-
     try:
         for name, driver, config, identity in plan:
             try:
                 device = driver(config)
                 if not isinstance(device, Device):
                     raise TypeError(
-                        f"Driver for device {name!r} must return "
-                        f"a Device; got {type(device).__name__}."
+                        f"Driver for device {name!r} must return a Device; "
+                        f"got {type(device).__name__}."
                     )
 
                 devices[name] = device
                 device.configure_identity(identity)
-
             except BaseException as exc:
                 exc.add_note(f"While constructing device {name!r}.")
                 raise
 
         return Hardware(devices)
-
     except BaseException as failure:
         try:
             Hardware(devices).close()

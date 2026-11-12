@@ -4,6 +4,7 @@ from typing import cast
 
 import pytest
 
+from dirigo.hardware import config as config_module
 from dirigo.hardware.config import load_hardware
 from dirigo.hardware.device import Device
 from dirigo.hardware.metadata import DeviceIdentity
@@ -40,15 +41,18 @@ class FakeDriver:
     config_type = EmptyConfig
 
     def __init__(self) -> None:
+        """Initialize the construction record."""
         self.created: list[FakeDevice] = []
 
     def __call__(self, config: EmptyConfig, /) -> Device:
+        """Construct and record a device with no hardware resources."""
         device = FakeDevice()
         self.created.append(device)
         return device
 
 
 def test_identity_defaults_to_unknown() -> None:
+    """Provide unknown identities without requiring a base constructor."""
     device = FakeDevice()
 
     assert device.configured_identity == DeviceIdentity()
@@ -57,6 +61,12 @@ def test_identity_defaults_to_unknown() -> None:
 
 
 def test_configured_identity_is_per_instance_and_in_snapshot() -> None:
+    """Keep configured identity local to its device and include it in snapshots.
+
+    Configure one of two otherwise identical devices. Only that device's
+    effective identity changes, and its snapshot retains the unknown serial
+    number as None. Clearing its configured fields restores unknown identity.
+    """
     first = FakeDevice()
     second = FakeDevice()
     identity = DeviceIdentity(
@@ -80,6 +90,13 @@ def test_configured_identity_is_per_instance_and_in_snapshot() -> None:
 
 
 def test_reported_fields_take_precedence() -> None:
+    """Merge identity field by field while preserving configured declarations.
+
+    The driver reports a manufacturer and serial number that conflict with
+    configured values, but leaves the model unknown. Effective identity uses
+    the reported fields and configured model. Clearing configuration removes
+    that fallback without changing the driver's reported identity.
+    """
     device = ReportingDevice()
     configured = DeviceIdentity(
         manufacturer="Configured manufacturer",
@@ -100,11 +117,17 @@ def test_reported_fields_take_precedence() -> None:
 
 
 def test_identity_rejects_non_string_fields() -> None:
+    """Reject a numeric identity field during runtime validation."""
     with pytest.raises(TypeError, match="model must be a string or None"):
         DeviceIdentity(model=cast(str, 123))
 
 
 def test_configure_identity_rejects_other_objects() -> None:
+    """Reject identity-like mappings without changing the device's identity.
+
+    A dictionary containing a valid field name is still not a DeviceIdentity.
+    The rejected assignment leaves the device's default identity intact.
+    """
     device = FakeDevice()
 
     with pytest.raises(TypeError, match="identity must be a DeviceIdentity"):
@@ -116,10 +139,18 @@ def test_configure_identity_rejects_other_objects() -> None:
 def test_loader_applies_identity_outside_driver_config(
     tmp_path: Path,
 ) -> None:
+    """Attach common identity metadata after selecting a categorized driver.
+
+    The explicit scanners registry supplies a driver whose configuration
+    accepts no fields. Successful loading therefore demonstrates that identity
+    fields remain outside driver configuration. The returned device exposes
+    those fields through both its effective identity and scientific snapshot.
+    """
     path = tmp_path / "system_config.toml"
     path.write_text(
         """
 [devices.fast_scanner]
+category = "scanners"
 driver = "fake"
 
 [devices.fast_scanner.identity]
@@ -130,7 +161,10 @@ model = "CRS8K"
     )
     driver = FakeDriver()
 
-    hardware = load_hardware(path, drivers={"fake": driver})
+    hardware = load_hardware(
+        path,
+        drivers={"scanners": {"fake": driver}},
+    )
     try:
         device = hardware.require("fast_scanner", FakeDevice)
 
@@ -158,13 +192,23 @@ def test_invalid_later_identity_prevents_all_construction(
     identity_value: str,
     error_type: type[Exception],
 ) -> None:
+    """Validate every identity before constructing any device.
+
+    Both declarations select a valid driver from the scanners category.
+    The first declaration is valid, but the second supplies a malformed
+    identity table, an unknown field, or a non-string value. Each case must
+    raise the expected error before the driver constructs even the first
+    device.
+    """
     path = tmp_path / "system_config.toml"
     path.write_text(
         f"""
 [devices.first]
+category = "scanners"
 driver = "fake"
 
 [devices.second]
+category = "scanners"
 driver = "fake"
 identity = {identity_value}
 """,
@@ -173,6 +217,22 @@ identity = {identity_value}
     driver = FakeDriver()
 
     with pytest.raises(error_type):
-        load_hardware(path, drivers={"fake": driver})
+        load_hardware(
+            path,
+            drivers={"scanners": {"fake": driver}},
+        )
 
     assert driver.created == []
+
+
+def test_identity_parser_rejects_non_string_field_names() -> None:
+    """Reject non-string keys in a Python identity mapping.
+
+    TOML keys are always strings, so a configuration file cannot exercise
+    this defensive check. Call the parser directly with an integer key.
+    """
+    with pytest.raises(
+        TypeError,
+        match="Identity field names must be strings",
+    ):
+        config_module._parse_identity({123: "CRS8K"})
