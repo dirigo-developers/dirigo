@@ -82,6 +82,8 @@ class SimulatedDigitizer(Digitizer):
             raise NotImplementedError("Simulation does not support external clocks.")
         if settings.start_trigger is not None:
             raise NotImplementedError("Simulation does not support start triggers.")
+        if settings.record_trigger is not None:
+            raise NotImplementedError("Simulation does not support record triggers.")
 
         return _SimulatedCaptureSession(self, settings)
 

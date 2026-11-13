@@ -187,7 +187,11 @@ class DigitizerCaptureSession(ABC):
 
     @abstractmethod
     def _start_capture(self) -> None:
-        """Start or arm capture; an exception may indicate a partial start."""
+        """Establish backend readiness without waiting for record-trigger arrival.
+
+        On successful return, a coordinator may enable the trigger producer.
+        An exception may indicate a partial start and requires cleanup.
+        """
 
     @abstractmethod
     def _stop_capture(self) -> None:

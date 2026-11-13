@@ -17,7 +17,11 @@ from dirigo.hardware.simulated_digitizer import (
     SimulatedDigitizer,
     SimulatedDigitizerConfig,
 )
-from dirigo.hardware.timing import DigitalStartTrigger, ExternalSampleClock
+from dirigo.hardware.timing import (
+    DigitalRecordTrigger,
+    DigitalStartTrigger,
+    ExternalSampleClock,
+)
 
 
 def _settings() -> CaptureSettings:
@@ -264,3 +268,20 @@ def test_discovery_and_loading_from_toml(tmp_path: Path) -> None:
         assert device.channel_count == 3
     finally:
         hardware.close()
+
+
+def test_record_trigger_is_rejected_explicitly() -> None:
+    """Reject event-driven capture that the current simulator cannot honor."""
+    digitizer = SimulatedDigitizer(SimulatedDigitizerConfig())
+    try:
+        with pytest.raises(NotImplementedError, match="record triggers"):
+            digitizer.create_capture(
+                replace(
+                    _settings(),
+                    record_trigger=DigitalRecordTrigger(source="external"),
+                )
+            )
+
+        assert not digitizer.is_active
+    finally:
+        digitizer.close()

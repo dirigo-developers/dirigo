@@ -8,7 +8,11 @@ import numpy as np
 import numpy.typing as npt
 
 from dirigo import units
-from dirigo.hardware.timing import DigitalStartTrigger, ExternalSampleClock
+from dirigo.hardware.timing import (
+    DigitalRecordTrigger,
+    DigitalStartTrigger,
+    ExternalSampleClock,
+)
 
 type SampleArray = npt.NDArray[np.integer[Any]]
 
@@ -94,6 +98,11 @@ class CaptureInfo:
     access returns a read-only float64 view independent of SDK-buffer lifetime.
     None represents omitted timestamps. The capture session will validate the
     timestamp count against its layout and requested timestamp settings.
+
+    Independently triggered records may have gaps. Drivers must obtain their
+    timing from acquisition results, not assume consecutive record windows.
+    A backend exposing trigger times must translate them to this first-sample
+    convention and normalize the first record's first sample to time zero.
     """
 
     _timestamp_data: bytes | None = field(init=False, repr=False)
@@ -134,13 +143,20 @@ class CaptureInfo:
 class CaptureSettings:
     """Request uniformly sampled records and complete-batch delivery.
 
-    channel_indices selects zero-based physical inputs in delivered order.
-    Records are consecutive windows of record_length samples; per-record
-    triggering is not modeled here yet.
+    channel_indices selects zero-based inputs from the digitizer's exposed
+    channel list, in delivery order. batch_count=None requests unlimited delivery.
 
-    batch_count=None requests unlimited delivery. External sample clocks and
-    whole-run start triggers are optional capabilities that a backend may
-    reject.
+    record_trigger=None selects consecutive windows of record_length samples.
+    Otherwise each accepted record trigger defines an independently acquired
+    window; records can have gaps. trigger_offset_samples is the index of the
+    first returned sample relative to the digitizer's recognized trigger point.
+    Zero begins at that point, a negative value requests pre-trigger samples,
+    and a positive value delays the returned window. Backend-specific limits
+    and alignment apply; unsupported requests must be rejected, not rounded.
+
+    external_clock selects sample timing and start_trigger gates the whole run.
+    Neither implicitly provides a per-record trigger. Timing and trigger modes
+    are optional backend capabilities and may be rejected explicitly.
     """
 
     sample_rate: units.SampleRate
@@ -151,6 +167,8 @@ class CaptureSettings:
     timestamps_enabled: bool = False
     external_clock: ExternalSampleClock | None = None
     start_trigger: DigitalStartTrigger | None = None
+    record_trigger: DigitalRecordTrigger | None = None
+    trigger_offset_samples: int = 0
 
     def __post_init__(self) -> None:
         """Validate record geometry, delivery policy, and timing descriptions."""
@@ -205,3 +223,16 @@ class CaptureSettings:
             self.start_trigger, DigitalStartTrigger
         ):
             raise TypeError("start_trigger must be a DigitalStartTrigger or None.")
+
+        if self.record_trigger is not None and not isinstance(
+            self.record_trigger, DigitalRecordTrigger
+        ):
+            raise TypeError("record_trigger must be a DigitalRecordTrigger or None.")
+
+        if not isinstance(self.trigger_offset_samples, int) or isinstance(
+            self.trigger_offset_samples, bool
+        ):
+            raise TypeError("trigger_offset_samples must be an integer.")
+
+        if self.record_trigger is None and self.trigger_offset_samples != 0:
+            raise ValueError("trigger_offset_samples requires a record_trigger.")

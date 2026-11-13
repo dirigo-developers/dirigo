@@ -65,3 +65,30 @@ class DigitalStartTrigger:
             )
         if not isinstance(self.active_edge, SignalEdge):
             raise TypeError("active_edge must be a SignalEdge.")
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class DigitalRecordTrigger:
+    """Select a digital edge that requests each independently acquired record.
+
+    source is a receiver-side identifier interpreted by the digitizer backend.
+    This describes an input; it does not generate pulses or configure their
+    producer. Electrical input settings belong to the backend.
+
+    Each accepted edge requests one record. Declaring this input does not
+    establish that the receiver can accept the producer's trigger schedule.
+    """
+
+    source: str
+    active_edge: SignalEdge = SignalEdge.RISING
+
+    def __post_init__(self) -> None:
+        """Require an explicit receiver source and a typed digital edge."""
+        if not isinstance(self.source, str):
+            raise TypeError("source must be a string.")
+        if not self.source or self.source != self.source.strip():
+            raise ValueError(
+                "source must be nonempty and have no surrounding whitespace."
+            )
+        if not isinstance(self.active_edge, SignalEdge):
+            raise TypeError("active_edge must be a SignalEdge.")
