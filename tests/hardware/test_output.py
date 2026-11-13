@@ -5,6 +5,7 @@ from typing import cast
 
 import pytest
 
+import dirigo.hardware.simulated as simulated
 from dirigo import units
 from dirigo.hardware.output import GalvoOutputSession, OutputState
 from dirigo.hardware.scanner import GalvoScanner, GalvoScannerConfig
@@ -72,6 +73,18 @@ class RecordingSession(GalvoOutputSession):
     def _close_output(self) -> None:
         """Record resource cleanup."""
         self._step("close")
+
+
+class NonSimulatedGalvoScanner(GalvoScanner):
+    """Provide a galvo implementation that is unsupported by the simulator."""
+
+    def _write_angle(self, value: units.Angle) -> None:
+        """Accept static commands without hardware I/O."""
+        return
+
+    def _close(self) -> None:
+        """Release no resources."""
+        return
 
 
 @pytest.mark.parametrize(
@@ -444,3 +457,101 @@ def test_simulation_rejects_start_trigger_without_reserving_axis() -> None:
         axis.angle = units.Angle("0 deg")
     finally:
         axis.close()
+
+
+def test_simulation_rejects_non_simulated_axes_without_reserving_axis() -> None:
+    """Require simulated axes while leaving an incompatible axis available."""
+    axis = NonSimulatedGalvoScanner(
+        GalvoScannerConfig(angle_range=units.AngleRange("-10 deg", "15 deg"))
+    )
+    try:
+        with pytest.raises(
+            TypeError, match="Simulation requires SimulatedGalvoScanner"
+        ):
+            SimulatedGalvoOutputSession({axis: _waveform()})
+
+        # Failed construction must not reserve or otherwise disable the axis.
+        axis.angle = units.Angle("0 deg")
+    finally:
+        axis.close()
+
+
+def test_simulation_rejects_nonfinite_deadline_and_releases_axis(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Close a failed simulated run when its calculated deadline is nonfinite."""
+    axis = _axis()
+    session = SimulatedGalvoOutputSession({axis: _waveform()})
+
+    try:
+        session.prepare()
+
+        # Avoid dependence on extreme floating-point sample-rate values while
+        # deterministically causing the computed deadline to be nonfinite.
+        monkeypatch.setattr(
+            simulated.time,
+            "monotonic",
+            lambda: float("inf"),
+        )
+
+        with pytest.raises(ValueError, match="Simulated run duration is too large"):
+            session.start()
+
+        assert session.state is OutputState.CLOSED
+
+        # start() failure closed the session and released its reservation.
+        axis.angle = units.Angle("0 deg")
+    finally:
+        session.close()
+        axis.close()
+
+
+def test_simulation_wait_sleeps_for_positive_delay(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Sleep for a positive bounded wait without making the test time-sensitive."""
+    axis = _axis()
+    session = SimulatedGalvoOutputSession({axis: _waveform(count=2, rate=1.0)})
+    sleep_delays: list[float] = []
+
+    # The two-sample waveform lasts two seconds. Keeping monotonic time fixed
+    # makes its remaining duration deterministic throughout this test.
+    monkeypatch.setattr(simulated.time, "monotonic", lambda: 100.0)
+    monkeypatch.setattr(simulated.time, "sleep", sleep_delays.append)
+
+    try:
+        session.prepare()
+        session.start()
+
+        assert not session.wait(0.25)
+        assert sleep_delays == [0.25]
+        assert session.state is OutputState.STARTED
+    finally:
+        session.close()
+        axis.close()
+
+
+@pytest.mark.parametrize(
+    "timeout",
+    [-0.1, float("inf"), float("-inf"), float("nan")],
+    ids=["negative", "positive_infinity", "negative_infinity", "nan"],
+)
+def test_wait_rejects_nonfinite_or_negative_timeout(timeout: float) -> None:
+    """Reject invalid wait timeouts without changing the active session."""
+    axis = _axis()
+    session = RecordingSession({axis: _waveform()})
+    try:
+        session.prepare()
+        session.start()
+
+        with pytest.raises(ValueError, match="timeout must be finite and nonnegative"):
+            session.wait(timeout)
+
+        # Validation occurs before _wait_output(), and the run remains active.
+        assert session.state is OutputState.STARTED
+        assert session.events == ["prepare", "start"]
+    finally:
+        session.close()
+
+    assert session.events == ["prepare", "start", "stop", "close"]
+    axis.angle = units.Angle("0 deg")

@@ -774,7 +774,7 @@ class Digitizer(Device):
     @property
     @abstractmethod
     def channel_count(self) -> int:
-        """Number of available zero-based physical input indices."""
+        """Number of inputs, or raise RuntimeError until discovery is available."""
 
     def create_capture(self, settings: CaptureSettings) -> DigitizerCaptureSession:
         """Construct a session without reserving resources or accessing hardware.
@@ -789,11 +789,21 @@ class Digitizer(Device):
         with self._capture_lock:
             if self._closed:
                 raise RuntimeError("Digitizer is closed.")
-            if any(index >= self.channel_count for index in settings.channel_indices):
-                raise ValueError("channel_indices exceed the available inputs.")
+            self._validate_channel_indices(settings.channel_indices)
 
             return self._create_capture(settings)
 
     @abstractmethod
     def _create_capture(self, settings: CaptureSettings) -> DigitizerCaptureSession:
         """Validate backend support and construct an unprepared session."""
+
+    def _validate_channel_indices(self, indices: tuple[int, ...]) -> None:
+        """Reject indices beyond known inputs before constructing a session.
+
+        Drivers requiring discovery may defer this check until preparation.
+        They must then validate physical bounds before configuring inputs.
+        CaptureSettings has already validated tuple contents and uniqueness.
+        """
+        count = self.channel_count
+        if any(index >= count for index in indices):
+            raise ValueError("channel_indices exceed the available inputs.")

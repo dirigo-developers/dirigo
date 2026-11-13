@@ -191,6 +191,19 @@ def test_close_is_idempotent_and_does_not_park(
     assert scanner.angle == previous
 
 
+def test_closed_scanner_cannot_be_reserved_for_waveform_output(
+    scanner: RecordingGalvoScanner,
+) -> None:
+    """Reject waveform-output reservation after permanent scanner closure."""
+    scanner.close()
+
+    with pytest.raises(RuntimeError, match="Scanner is closed"):
+        scanner._reserve_output(object())
+
+    assert scanner.close_calls == 1
+    assert scanner.writes == []
+
+
 def test_cleanup_failure_still_permanently_closes_scanner(
     scanner: RecordingGalvoScanner,
 ) -> None:
