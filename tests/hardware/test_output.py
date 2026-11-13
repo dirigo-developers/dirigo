@@ -12,7 +12,7 @@ from dirigo.hardware.simulated import (
     SimulatedGalvoOutputSession,
     SimulatedGalvoScanner,
 )
-from dirigo.hardware.timing import ClockEdge, ExternalSampleClock
+from dirigo.hardware.timing import DigitalStartTrigger, ExternalSampleClock, SignalEdge
 from dirigo.hardware.waveform import AngularWaveform
 
 
@@ -36,9 +36,12 @@ class RecordingSession(GalvoOutputSession):
         waveforms: Mapping[GalvoScanner, AngularWaveform],
         *,
         external_clock: ExternalSampleClock | None = None,
+        start_trigger: DigitalStartTrigger | None = None,
     ) -> None:
         """Validate bindings and initialize hook controls."""
-        super().__init__(waveforms, external_clock=external_clock)
+        super().__init__(
+            waveforms, external_clock=external_clock, start_trigger=start_trigger
+        )
         self.events: list[str] = []
         self.failures: dict[str, RuntimeError] = {}
         self.complete = False
@@ -299,7 +302,7 @@ def test_unprepared_and_closed_sessions_cannot_start_or_wait() -> None:
         ExternalSampleClock(
             source="line_sync",
             max_rate=units.SampleRate("1.2 kS/s"),
-            active_edge=ClockEdge.FALLING,
+            active_edge=SignalEdge.FALLING,
         ),
     ],
 )
@@ -372,5 +375,72 @@ def test_simulation_rejects_external_clock_without_reserving_axis() -> None:
             session.prepare()
         finally:
             session.close()
+    finally:
+        axis.close()
+
+
+@pytest.mark.parametrize("use_external_clock", [False, True])
+@pytest.mark.parametrize(
+    "trigger",
+    [
+        None,
+        DigitalStartTrigger(source="frame_sync"),
+        DigitalStartTrigger(source="frame_sync", active_edge=SignalEdge.FALLING),
+    ],
+)
+def test_output_session_stores_trigger_independently_of_clock(
+    trigger: DigitalStartTrigger | None,
+    use_external_clock: bool,
+) -> None:
+    """Retain independent clock and trigger selections without reserving an axis.
+
+    Cover no trigger and both trigger edges with internal and external clocks.
+    Construction must leave the axis available for static commands.
+    """
+    axis = _axis()
+    clock = (
+        ExternalSampleClock(source="line_sync", max_rate=units.SampleRate("1 kS/s"))
+        if use_external_clock
+        else None
+    )
+    session = RecordingSession(
+        {axis: _waveform()}, external_clock=clock, start_trigger=trigger
+    )
+    try:
+        assert session.start_trigger is trigger
+        assert session.external_clock is clock
+        assert session.events == []
+        axis.angle = units.Angle("0 deg")
+    finally:
+        session.close()
+        axis.close()
+
+
+def test_output_session_rejects_incorrect_start_trigger_type() -> None:
+    """Reject an incompatible trigger object before reserving its scanner."""
+    axis = _axis()
+    try:
+        with pytest.raises(
+            TypeError, match="start_trigger must be a DigitalStartTrigger"
+        ):
+            RecordingSession(
+                {axis: _waveform()},
+                start_trigger=cast(DigitalStartTrigger, object()),
+            )
+        axis.angle = units.Angle("0 deg")
+    finally:
+        axis.close()
+
+
+def test_simulation_rejects_start_trigger_without_reserving_axis() -> None:
+    """Reject triggered timing rather than treating it as an elapsed-time run."""
+    axis = _axis()
+    try:
+        with pytest.raises(NotImplementedError, match="digital start triggers"):
+            SimulatedGalvoOutputSession(
+                {axis: _waveform()},
+                start_trigger=DigitalStartTrigger(source="frame_sync"),
+            )
+        axis.angle = units.Angle("0 deg")
     finally:
         axis.close()

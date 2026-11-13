@@ -7,8 +7,8 @@ from enum import StrEnum
 from dirigo import units
 
 
-class ClockEdge(StrEnum):
-    """Select the transition that advances a clocked operation."""
+class SignalEdge(StrEnum):
+    """Select the active transition of a digital signal."""
 
     RISING = "rising"
     FALLING = "falling"
@@ -25,7 +25,7 @@ class ExternalSampleClock:
 
     source: str
     max_rate: units.SampleRate
-    active_edge: ClockEdge = ClockEdge.RISING
+    active_edge: SignalEdge = SignalEdge.RISING
 
     def __post_init__(self) -> None:
         """Require a source, positive finite maximum rate, and typed edge."""
@@ -39,5 +39,29 @@ class ExternalSampleClock:
             raise TypeError("max_rate must be a SampleRate.")
         if not math.isfinite(float(self.max_rate)) or float(self.max_rate) <= 0:
             raise ValueError("max_rate must be finite and positive.")
-        if not isinstance(self.active_edge, ClockEdge):
-            raise TypeError("active_edge must be a ClockEdge.")
+        if not isinstance(self.active_edge, SignalEdge):
+            raise TypeError("active_edge must be a SignalEdge.")
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class DigitalStartTrigger:
+    """Gate one prepared run on a digital edge from a backend-defined source.
+
+    source is an opaque identifier interpreted by the backend. The trigger
+    permits the run to begin; the selected sample clock determines subsequent
+    sample timing. This description does not generate a trigger signal.
+    """
+
+    source: str
+    active_edge: SignalEdge = SignalEdge.RISING
+
+    def __post_init__(self) -> None:
+        """Require an explicit source and a typed digital edge."""
+        if not isinstance(self.source, str):
+            raise TypeError("source must be a string.")
+        if not self.source or self.source != self.source.strip():
+            raise ValueError(
+                "source must be nonempty and have no surrounding whitespace."
+            )
+        if not isinstance(self.active_edge, SignalEdge):
+            raise TypeError("active_edge must be a SignalEdge.")

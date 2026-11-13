@@ -7,7 +7,7 @@ from enum import StrEnum
 from types import MappingProxyType
 
 from dirigo.hardware.scanner import GalvoScanner
-from dirigo.hardware.timing import ExternalSampleClock
+from dirigo.hardware.timing import DigitalStartTrigger, ExternalSampleClock
 from dirigo.hardware.waveform import AngularWaveform
 
 
@@ -41,6 +41,9 @@ class GalvoOutputSession(ABC):
     Output hooks use _waveforms, _sample_rate, _sample_count, and external_clock.
     Constructors must remain free of hardware operations.
     Hardware devices must outlive their sessions.
+
+    start_trigger=None imposes no start-trigger gate. With a trigger, start()
+    arms the run and returns; STARTED does not imply the trigger has arrived.
     """
 
     def __init__(
@@ -48,6 +51,7 @@ class GalvoOutputSession(ABC):
         waveforms: Mapping[GalvoScanner, AngularWaveform],
         *,
         external_clock: ExternalSampleClock | None = None,
+        start_trigger: DigitalStartTrigger | None = None,
     ) -> None:
         """Validate waveform bindings and clock selection without hardware I/O."""
         if not isinstance(waveforms, Mapping):
@@ -79,7 +83,12 @@ class GalvoOutputSession(ABC):
                 raise ValueError(
                     "External clock max_rate must be at least the waveform sample_rate."
                 )
+        if start_trigger is not None and not isinstance(
+            start_trigger, DigitalStartTrigger
+        ):
+            raise TypeError("start_trigger must be a DigitalStartTrigger or None.")
 
+        self._start_trigger = start_trigger
         self._external_clock = external_clock
         self._waveforms = MappingProxyType(bindings)
         self._reserved: list[GalvoScanner] = []
@@ -94,6 +103,11 @@ class GalvoOutputSession(ABC):
     def external_clock(self) -> ExternalSampleClock | None:
         """Requested external clock, or None for internally clocked output."""
         return self._external_clock
+
+    @property
+    def start_trigger(self) -> DigitalStartTrigger | None:
+        """Requested start trigger, or None for no start-trigger gate."""
+        return self._start_trigger
 
     def prepare(self) -> None:
         """Reserve every axis and prepare output without starting the run.
@@ -113,7 +127,11 @@ class GalvoOutputSession(ABC):
         self._state = OutputState.PREPARED
 
     def start(self) -> None:
-        """Start or arm the prepared run exactly once."""
+        """Start or arm once, returning without waiting for a trigger.
+
+        STARTED records acceptance of this request, not observed trigger arrival
+        or physical output. Use wait() to observe finite completion.
+        """
         self._require_state(OutputState.PREPARED)
         self._state = OutputState.STARTED
         try:
@@ -128,6 +146,8 @@ class GalvoOutputSession(ABC):
         None permits an unbounded wait. A finite timeout must be nonnegative.
         Return True on completion, or False on timeout or after stop().
         A timeout leaves the session started and reservations held.
+
+        Waiting includes time awaiting a start trigger or external clock edges.
         """
         if timeout is not None and (not math.isfinite(timeout) or timeout < 0):
             raise ValueError("timeout must be finite and nonnegative.")
