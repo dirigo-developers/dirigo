@@ -8,20 +8,28 @@ Option getters describe settings supported by the driver in the current
 configuration. Unsupported values raise ValueError; changes while prepared
 raise RuntimeError. Getters may return cached effective settings rather than
 querying hardware on every access.
+
+configuration is locked while a capture reservation is held, through session close()
 """
 
 from abc import ABC, abstractmethod
 from collections.abc import Collection
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import Any
-
-import numpy as np
-import numpy.typing as npt
+from threading import RLock
+from typing import TYPE_CHECKING
 
 from dirigo import units
+from dirigo.hardware.capture import (
+    CaptureInfo,
+    CaptureLayout,
+    CaptureSettings,
+    SampleArray,
+)
+from dirigo.hardware.device import Device
 
-from .hardware import Device
+if TYPE_CHECKING:
+    from dirigo.hardware.capture_session import DigitizerCaptureSession
 
 __all__ = [
     "Acquire",
@@ -184,46 +192,6 @@ class DigitizerProfile:
     sample_clock: SampleClockProfile
     channels: tuple[ChannelProfile, ...]
     trigger: TriggerProfile
-
-
-type SampleArray = npt.NDArray[np.integer[Any]]
-
-
-@dataclass(frozen=True, slots=True)
-class CaptureLayout:
-    """The layout fixed by prepare() and valid until stop().
-
-    shape is (records_per_buffer, record_length, enabled_channel_count).
-    All dimensions are positive.
-
-    channel_indices contains distinct physical channel indices in the
-    order represented by the final array axis.
-
-    dtype is the exact native-endian integer storage dtype.
-    """
-
-    shape: tuple[int, int, int]
-    channel_indices: tuple[int, ...]
-    dtype: np.dtype[np.integer[Any]]
-
-
-@dataclass(frozen=True, slots=True, eq=False)
-class CaptureInfo:
-    """Information accompanying one successfully transferred complete batch.
-
-    timestamps is a float64 array of first-sample times for each record,
-    in seconds relative to the first sample of the first acquired record.
-
-    Its shape is (records_per_buffer,). It is required when timestamps are
-    enabled, and None otherwise.
-
-    The driver must not modify it after returning or expose memory whose
-    lifetime depends on an SDK buffer.
-
-    Frozen fields do not make the array immutable; treat it as read-only.
-    """
-
-    timestamps: npt.NDArray[np.float64] | None = None
 
 
 class Channel(ABC):
@@ -723,29 +691,28 @@ class AuxiliaryIO(ABC):
 
 
 class Digitizer(Device):
-    """A device owning its channels, clock, trigger, and capture component.
+    """Own a reusable digitizer connection and construct single-use captures.
 
-    Component identities remain stable until close(). Constructors establish
-    these attributes; concrete driver classes implement Device.close().
+    A capture session reserves this logical digitizer from prepare() through
+    close(). The reservation covers its input operation; it is not a global
+    lock on a physical DAQ card or on other devices using that card.
 
-    close() stops any run and releases owned SDK resources, leaving the device
-    object unusable. It does not imply powering off the hardware.
+    Close borrowing sessions before closing the digitizer. A reserved device
+    rejects closure and remains open. Concrete drivers call super().__init__()
+    and implement _close() for their persistent SDK resources.
 
-    One acquisition controls a digitizer at a time. Collection lookup does
-    not provide exclusive ownership.
-
-    Calls may move from the preparation thread to the source thread, but
-    must not overlap.
+    Public configuration setters must hold _capture_lock and call
+    _require_configurable() before changing settings. Calls into one digitizer
+    remain sequential, although preparation and execution may use different
+    threads.
     """
 
-    input_mode: InputMode
-    streaming_mode: StreamingMode
-
-    channels: tuple[Channel, ...]
-    sample_clock: SampleClock
-    trigger: Trigger
-    acquire: Acquire
-    aux_io: AuxiliaryIO | None
+    def __init__(self) -> None:
+        """Initialize lifecycle bookkeeping without accessing hardware."""
+        super().__init__()
+        self._capture_lock = RLock()
+        self._capture_owner: DigitizerCaptureSession | None = None
+        self._closed = False
 
     @property
     @abstractmethod
@@ -759,5 +726,74 @@ class Digitizer(Device):
 
     @property
     def is_active(self) -> bool:
-        """Whether an acquisition has started and still requires stopping."""
-        return self.acquire.is_active
+        """Whether the reserved session has started and has not stopped.
+
+        True does not establish that triggers or samples are arriving.
+        """
+        with self._capture_lock:
+            owner = self._capture_owner
+            return owner is not None and owner.is_active
+
+    def close(self) -> None:
+        """Release persistent resources after borrowing sessions have closed.
+
+        Closure is permanent even if the driver hook fails. Repeated calls do
+        nothing. A reservation error leaves the device open.
+        """
+        with self._capture_lock:
+            if self._closed:
+                return
+            if self._capture_owner is not None:
+                raise RuntimeError("Digitizer is reserved for capture.")
+            self._closed = True
+            self._close()
+
+    def _require_configurable(self) -> None:
+        """Check usability while the caller holds _capture_lock."""
+        if self._closed:
+            raise RuntimeError("Digitizer is closed.")
+        if self._capture_owner is not None:
+            raise RuntimeError("Digitizer is reserved for capture.")
+
+    def _reserve_capture(self, owner: DigitizerCaptureSession) -> None:
+        """Reserve this input operation for one capture session."""
+        with self._capture_lock:
+            self._require_configurable()
+            self._capture_owner = owner
+
+    def _release_capture(self, owner: DigitizerCaptureSession) -> None:
+        """Release only the reservation belonging to the supplied session."""
+        with self._capture_lock:
+            if self._capture_owner is owner:
+                self._capture_owner = None
+
+    @abstractmethod
+    def _close(self) -> None:
+        """Release persistent resources owned by this logical digitizer."""
+
+    @property
+    @abstractmethod
+    def channel_count(self) -> int:
+        """Number of available zero-based physical input indices."""
+
+    def create_capture(self, settings: CaptureSettings) -> DigitizerCaptureSession:
+        """Construct a session without reserving resources or accessing hardware.
+
+        A different session may already own the device. The new session must
+        wait for that reservation to end before it can prepare(). Drivers
+        reject unsupported requests in _create_capture().
+        """
+        if not isinstance(settings, CaptureSettings):
+            raise TypeError("settings must be a CaptureSettings.")
+
+        with self._capture_lock:
+            if self._closed:
+                raise RuntimeError("Digitizer is closed.")
+            if any(index >= self.channel_count for index in settings.channel_indices):
+                raise ValueError("channel_indices exceed the available inputs.")
+
+            return self._create_capture(settings)
+
+    @abstractmethod
+    def _create_capture(self, settings: CaptureSettings) -> DigitizerCaptureSession:
+        """Validate backend support and construct an unprepared session."""
