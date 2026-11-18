@@ -4,6 +4,7 @@ from collections.abc import Mapping
 
 from dirigo.hardware.device import Device
 from dirigo.hardware.synchronization import SyncBackend
+from dirigo.optics import LaserScanningOptics
 
 
 class System:
@@ -28,6 +29,7 @@ class System:
         devices: Mapping[str, Device],
         *,
         syncs: Mapping[str, SyncBackend] | None = None,
+        optics: LaserScanningOptics | None = None,
     ) -> None:
         """Validate and take ownership of the supplied components."""
         configured_devices = dict(devices)
@@ -43,9 +45,12 @@ class System:
             SyncBackend,
             category="Synchronization backend",
         )
+        if optics is not None and not isinstance(optics, LaserScanningOptics):
+            raise TypeError("optics must be LaserScanningOptics or None.")
 
         self._devices = configured_devices
         self._syncs = configured_syncs
+        self._optics = optics
         self._closed = False
 
     @staticmethod
@@ -119,6 +124,19 @@ class System:
             )
 
         return backend
+
+    def require_optics(self) -> LaserScanningOptics:
+        """Return configured laser-scanning optics.
+
+        Raise KeyError when optical calibration is absent, or RuntimeError
+        after the System has closed.
+        """
+        self._require_open()
+
+        if self._optics is None:
+            raise KeyError("optics")
+
+        return self._optics
 
     def _require_open(self) -> None:
         """Reject component lookup after closure."""

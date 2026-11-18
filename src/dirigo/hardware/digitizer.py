@@ -16,6 +16,7 @@ from abc import ABC, abstractmethod
 from collections.abc import Collection
 from dataclasses import dataclass
 from enum import StrEnum
+from os import PathLike
 from threading import RLock
 from typing import TYPE_CHECKING
 
@@ -749,6 +750,18 @@ class Digitizer(Device):
         with self._capture_lock:
             self._require_configurable()
             self._profile = value
+
+    @staticmethod
+    def read_profile(
+        path: str | PathLike[str],
+    ) -> DigitizerProfile:
+        """Read stored defaults without constructing or accessing hardware.
+
+        Drivers may override this to parse additional vendor-specific settings.
+        """
+        from dirigo.hardware.profiles import load_digitizer_profile
+
+        return load_digitizer_profile(path)
 
     @property
     def is_active(self) -> bool:

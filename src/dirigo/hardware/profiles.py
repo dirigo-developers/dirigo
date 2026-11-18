@@ -298,13 +298,10 @@ def _validate_voltage_range(value: units.VoltageRange) -> None:
         raise ValueError("Voltage range endpoints must be finite.")
 
 
-def load_digitizer_profile(
-    path: str | PathLike[str],
+def parse_digitizer_profile(
+    values: Mapping[str, object],
 ) -> DigitizerProfile:
-    """Read and validate an immutable digitizer profile from TOML."""
-    with Path(path).open("rb") as stream:
-        values = tomllib.load(stream)
-
+    """Parse and validate the common digitizer-profile sections."""
     profile = _parse_fields(
         values,
         DigitizerProfile,
@@ -316,6 +313,16 @@ def load_digitizer_profile(
     )
     validate_digitizer_profile(profile)
     return profile
+
+
+def load_digitizer_profile(
+    path: str | PathLike[str],
+) -> DigitizerProfile:
+    """Read a common digitizer profile from TOML."""
+    with Path(path).open("rb") as stream:
+        values = tomllib.load(stream)
+
+    return parse_digitizer_profile(values)
 
 
 def capture_settings_from_profile(

@@ -10,8 +10,12 @@ from dirigo import units
 from dirigo.hardware.device import Device
 from dirigo.hardware.digitizer import Digitizer, DigitizerProfile
 from dirigo.hardware.metadata import DeviceIdentity
-from dirigo.hardware.profiles import load_digitizer_profile
+from dirigo.hardware.profiles import (
+    load_digitizer_profile,
+    validate_digitizer_profile,
+)
 from dirigo.hardware.synchronization import SyncBackend
+from dirigo.optics import LaserScanningOptics
 from dirigo.system import System
 
 
@@ -222,7 +226,27 @@ def _load_devices(
                         f"Device {name!r} profile must be a nonempty file path."
                     )
 
-                profile = load_digitizer_profile(profile_directory / profile_path)
+                profile_reader = getattr(
+                    driver,
+                    "read_profile",
+                    load_digitizer_profile,
+                )
+
+                if not callable(profile_reader):
+                    raise TypeError(
+                        f"Driver for device {name!r} must expose a callable "
+                        f"read_profile."
+                    )
+
+                profile = profile_reader(profile_directory / profile_path)
+
+                if not isinstance(profile, DigitizerProfile):
+                    raise TypeError(
+                        f"Profile reader for device {name!r} must return a "
+                        f"DigitizerProfile."
+                    )
+
+                validate_digitizer_profile(profile)
 
         except (TypeError, ValueError) as exc:
             exc.add_note(
@@ -515,6 +539,19 @@ def load_system(
         config = parse_config(factory.config_type, values)
         sync_plan = (factory, config)
 
+    optics = None
+
+    if "optics" in document:
+        optics_values = document["optics"]
+
+        if not isinstance(optics_values, dict):
+            raise ValueError("optics must be a table.")
+
+        optics = parse_config(
+            LaserScanningOptics,
+            optics_values,
+        )
+
     devices = _load_devices(
         document,
         profile_directory=Path(path).parent,
@@ -534,7 +571,8 @@ def load_system(
 
             syncs["raster_frame_sync"] = backend
 
-        return System(devices, syncs=syncs)
+        return System(devices, syncs=syncs, optics=optics)
+
     except BaseException as failure:
         try:
             System(devices, syncs=syncs).close()
