@@ -8,7 +8,9 @@ from typing import Any, Protocol, cast, get_type_hints
 
 from dirigo import units
 from dirigo.hardware.device import Device
+from dirigo.hardware.digitizer import Digitizer, DigitizerProfile
 from dirigo.hardware.metadata import DeviceIdentity
+from dirigo.hardware.profiles import load_digitizer_profile
 from dirigo.hardware.synchronization import SyncBackend
 from dirigo.system import System
 
@@ -99,6 +101,7 @@ def discover_drivers(
 def _load_devices(
     document: Mapping[str, object],
     *,
+    profile_directory: Path,
     drivers: Mapping[str, Mapping[str, DeviceDriver[Any]]] | None = None,
 ) -> dict[str, Device]:
     """Parse and construct devices from an already loaded document.
@@ -121,7 +124,15 @@ def _load_devices(
 
     discovered: dict[str, dict[str, importlib_metadata.EntryPoint]] = {}
     resolved: dict[tuple[str, str], DeviceDriver[Any]] = {}
-    plan: list[tuple[str, DeviceDriver[Any], Any, DeviceIdentity]] = []
+    plan: list[
+        tuple[
+            str,
+            DeviceDriver[Any],
+            Any,
+            DeviceIdentity,
+            DigitizerProfile | None,
+        ]
+    ] = []
 
     for name, definition in definitions.items():
         if not name:
@@ -129,7 +140,13 @@ def _load_devices(
         if not isinstance(definition, dict):
             raise ValueError(f"Device {name!r} must be a table.")
 
-        unknown = definition.keys() - {"category", "driver", "config", "identity"}
+        unknown = definition.keys() - {
+            "category",
+            "driver",
+            "config",
+            "identity",
+            "profile",
+        }
         if unknown:
             raise ValueError(
                 f"Device {name!r} has unsupported fields: {', '.join(sorted(unknown))}."
@@ -195,6 +212,18 @@ def _load_devices(
         try:
             config = parse_config(driver.config_type, values)
             identity = _parse_identity(definition.get("identity", {}))
+
+            profile = None
+            if "profile" in definition:
+                profile_path = definition["profile"]
+
+                if not isinstance(profile_path, str) or not profile_path:
+                    raise ValueError(
+                        f"Device {name!r} profile must be a nonempty file path."
+                    )
+
+                profile = load_digitizer_profile(profile_directory / profile_path)
+
         except (TypeError, ValueError) as exc:
             exc.add_note(
                 f"While parsing device {name!r} using driver {driver_name!r} "
@@ -202,11 +231,11 @@ def _load_devices(
             )
             raise
 
-        plan.append((name, driver, config, identity))
+        plan.append((name, driver, config, identity, profile))
 
     devices: dict[str, Device] = {}
     try:
-        for name, driver, config, identity in plan:
+        for name, driver, config, identity, profile in plan:
             try:
                 device = driver(config)
                 if not isinstance(device, Device):
@@ -217,6 +246,14 @@ def _load_devices(
 
                 devices[name] = device
                 device.configure_identity(identity)
+                if profile is not None:
+                    if not isinstance(device, Digitizer):
+                        raise TypeError(
+                            f"Device {name!r} supplies a digitizer profile "
+                            "but is not a Digitizer."
+                        )
+
+                    device.profile = profile
             except BaseException as exc:
                 exc.add_note(f"While constructing device {name!r}.")
                 raise
@@ -478,7 +515,11 @@ def load_system(
         config = parse_config(factory.config_type, values)
         sync_plan = (factory, config)
 
-    devices = _load_devices(document, drivers=drivers)
+    devices = _load_devices(
+        document,
+        profile_directory=Path(path).parent,
+        drivers=drivers,
+    )
     syncs: dict[str, SyncBackend] = {}
 
     try:

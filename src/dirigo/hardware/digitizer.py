@@ -156,7 +156,7 @@ class SampleClockProfile:
 class ChannelProfile:
     """Requested channel settings.
 
-    None leaves an optional setting unchanged.
+    None selects the driver's default for an optional setting.
     """
 
     enabled: bool
@@ -171,7 +171,7 @@ class ChannelProfile:
 class TriggerProfile:
     """Requested trigger settings.
 
-    None leaves an optional setting unchanged.
+    None selects the driver's default for an optional setting.
     """
 
     source: TriggerSource
@@ -184,9 +184,13 @@ class TriggerProfile:
 
 @dataclass(frozen=True, slots=True)
 class DigitizerProfile:
-    """Requested settings, distinct from an effective-state snapshot.
+    """Stored defaults for constructing independent capture sessions.
 
-    Profile parsing, file lookup, and application live outside the ABC.
+    Profiles contain sampling, channel, and trigger settings. Record
+    geometry and acquisition length are configured on each capture session.
+
+    Drivers resolve omitted optional settings to their defaults and reject
+    explicitly requested settings they cannot support.
     """
 
     sample_clock: SampleClockProfile
@@ -710,6 +714,7 @@ class Digitizer(Device):
     def __init__(self) -> None:
         """Initialize lifecycle bookkeeping without accessing hardware."""
         super().__init__()
+        self._profile: DigitizerProfile | None = None
         self._capture_lock = RLock()
         self._capture_owner: DigitizerCaptureSession | None = None
         self._closed = False
@@ -723,6 +728,27 @@ class Digitizer(Device):
     @abstractmethod
     def data_range(self) -> units.IntRange:
         """Inclusive bounds for sample codes delivered to consumers."""
+
+    @property
+    def profile(self) -> DigitizerProfile:
+        """Stored defaults used by future profile-based capture sessions."""
+        with self._capture_lock:
+            if self._closed:
+                raise RuntimeError("Digitizer is closed.")
+            if self._profile is None:
+                raise RuntimeError("No digitizer profile has been configured.")
+            return self._profile
+
+    @profile.setter
+    def profile(self, value: DigitizerProfile) -> None:
+        """Replace defaults without changing existing capture sessions."""
+        from dirigo.hardware.profiles import validate_digitizer_profile
+
+        validate_digitizer_profile(value)
+
+        with self._capture_lock:
+            self._require_configurable()
+            self._profile = value
 
     @property
     def is_active(self) -> bool:
@@ -776,26 +802,67 @@ class Digitizer(Device):
     def channel_count(self) -> int:
         """Number of inputs, or raise RuntimeError until discovery is available."""
 
-    def create_capture(self, settings: CaptureSettings) -> DigitizerCaptureSession:
-        """Construct a session without reserving resources or accessing hardware.
+    def create_capture(
+        self,
+        settings: CaptureSettings | None = None,
+    ) -> DigitizerCaptureSession:
+        """Construct an unprepared capture without accessing hardware.
 
-        A different session may already own the device. The new session must
-        wait for that reservation to end before it can prepare(). Drivers
-        reject unsupported requests in _create_capture().
+        With explicit settings, retain the existing complete-request API.
+
+        With no settings, snapshot the stored profile. The returned session
+        requires configure() before prepare().
         """
-        if not isinstance(settings, CaptureSettings):
-            raise TypeError("settings must be a CaptureSettings.")
+        if settings is not None and not isinstance(settings, CaptureSettings):
+            raise TypeError("settings must be CaptureSettings or None.")
 
         with self._capture_lock:
             if self._closed:
                 raise RuntimeError("Digitizer is closed.")
-            self._validate_channel_indices(settings.channel_indices)
 
-            return self._create_capture(settings)
+            if settings is not None:
+                self._validate_channel_indices(settings.channel_indices)
+                return self._create_capture(settings)
+
+            profile = self.profile
+            indices = tuple(
+                index
+                for index, channel in enumerate(profile.channels)
+                if channel.enabled
+            )
+            self._validate_channel_indices(indices)
+            return self._create_profile_capture(profile)
 
     @abstractmethod
     def _create_capture(self, settings: CaptureSettings) -> DigitizerCaptureSession:
         """Validate backend support and construct an unprepared session."""
+
+    def _create_profile_capture(
+        self,
+        profile: DigitizerProfile,
+    ) -> DigitizerCaptureSession:
+        """Construct a session whose geometry will be configured later."""
+        raise NotImplementedError(
+            f"{type(self).__name__} does not support stored profiles yet."
+        )
+
+    def _settings_from_profile(
+        self,
+        profile: DigitizerProfile,
+        *,
+        record_length: int,
+        records_per_batch: int,
+        batch_count: int | None,
+        timestamps_enabled: bool,
+        trigger_offset_samples: int,
+    ) -> CaptureSettings:
+        """Resolve a profile and geometry into complete driver settings.
+
+        Perform validation only. Do not access hardware or reserve resources.
+        """
+        raise NotImplementedError(
+            f"{type(self).__name__} does not support stored profiles yet."
+        )
 
     def _validate_channel_indices(self, indices: tuple[int, ...]) -> None:
         """Reject indices beyond known inputs before constructing a session.

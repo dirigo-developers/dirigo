@@ -7,8 +7,14 @@ from numbers import Real
 
 import numpy as np
 
-from dirigo.hardware.capture import CaptureInfo, CaptureLayout, SampleArray
-from dirigo.hardware.digitizer import Digitizer
+from dirigo import units
+from dirigo.hardware.capture import (
+    CaptureInfo,
+    CaptureLayout,
+    CaptureSettings,
+    SampleArray,
+)
+from dirigo.hardware.digitizer import Digitizer, DigitizerProfile
 
 
 class CaptureState(StrEnum):
@@ -47,6 +53,7 @@ class DigitizerCaptureSession(ABC):
         *,
         batch_count: int | None = None,
         timestamps_enabled: bool = False,
+        profile: DigitizerProfile | None = None,
     ) -> None:
         """Validate delivery settings without reserving or configuring hardware."""
         if not isinstance(digitizer, Digitizer):
@@ -59,6 +66,12 @@ class DigitizerCaptureSession(ABC):
         if not isinstance(timestamps_enabled, bool):
             raise TypeError("timestamps_enabled must be a bool.")
 
+        if profile is not None and not isinstance(profile, DigitizerProfile):
+            raise TypeError("profile must be a DigitizerProfile or None.")
+
+        self._profile = profile
+        self._configured = profile is None
+        self._configured_settings: CaptureSettings | None = None
         self._batch_count = batch_count
         self._timestamps_enabled = timestamps_enabled
         self._batches_acquired = 0
@@ -71,6 +84,72 @@ class DigitizerCaptureSession(ABC):
     def digitizer(self) -> Digitizer:
         """The borrowed digitizer; ownership remains with its caller."""
         return self._digitizer
+
+    @property
+    def profile(self) -> DigitizerProfile | None:
+        """Immutable profile snapshot, or None for explicit-settings capture."""
+        return self._profile
+
+    @property
+    def settings(self) -> CaptureSettings:
+        """Complete run settings after configuration."""
+        if self._configured_settings is None:
+            raise RuntimeError("Capture settings are not configured.")
+        return self._configured_settings
+
+    @property
+    def requested_sample_rate(self) -> units.SampleRate:
+        """Binding sample rate requested for this capture.
+
+        For an external clock this is a declared rate, not a measurement.
+        Profile-based preparation must reject an incompatible effective rate.
+        """
+        if self._profile is not None:
+            return self._profile.sample_clock.rate
+        return self.settings.sample_rate
+
+    def _set_capture_settings(self, settings: CaptureSettings) -> None:
+        """Publish a validated complete request to session bookkeeping."""
+        if not isinstance(settings, CaptureSettings):
+            raise TypeError("Resolved settings must be CaptureSettings.")
+
+        self._configured_settings = settings
+        self._batch_count = settings.batch_count
+        self._timestamps_enabled = settings.timestamps_enabled
+        self._configured = True
+
+    def configure(
+        self,
+        *,
+        record_length: int,
+        records_per_batch: int,
+        batch_count: int | None,
+        timestamps_enabled: bool = False,
+        trigger_offset_samples: int = 0,
+    ) -> None:
+        """Set geometry for a profile-based capture before preparation.
+
+        Configuration performs no hardware operations. It may be replaced while
+        the session remains NEW. A validation failure preserves the previous
+        successful configuration.
+        """
+        self._require_state(CaptureState.NEW)
+
+        profile = self._profile
+        if profile is None:
+            raise RuntimeError(
+                "configure() requires a capture created from a stored profile."
+            )
+
+        settings = self._digitizer._settings_from_profile(
+            profile,
+            record_length=record_length,
+            records_per_batch=records_per_batch,
+            batch_count=batch_count,
+            timestamps_enabled=timestamps_enabled,
+            trigger_offset_samples=trigger_offset_samples,
+        )
+        self._set_capture_settings(settings)
 
     @property
     def state(self) -> CaptureState:
@@ -92,18 +171,25 @@ class DigitizerCaptureSession(ABC):
         return self._layout
 
     def prepare(self) -> None:
-        """Reserve input resources and establish layout without starting capture."""
+        """Reserve input resources and establish layout without starting."""
         self._require_state(CaptureState.NEW)
+
+        if not self._configured:
+            raise RuntimeError("Capture must be configured before preparation.")
+
         try:
             self._digitizer._reserve_capture(self)
             self._reserved = True
             layout = self._prepare_capture()
+
             if not isinstance(layout, CaptureLayout):
                 raise TypeError("_prepare_capture() must return a CaptureLayout.")
+
             self._layout = layout
         except BaseException as failure:
             self._close_after_failure(failure)
             raise
+
         self._state = CaptureState.PREPARED
 
     def start(self) -> None:

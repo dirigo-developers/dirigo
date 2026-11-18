@@ -12,7 +12,8 @@ from dirigo.hardware.capture import (
     SampleArray,
 )
 from dirigo.hardware.capture_session import DigitizerCaptureSession
-from dirigo.hardware.digitizer import Digitizer
+from dirigo.hardware.digitizer import Digitizer, DigitizerProfile
+from dirigo.hardware.profiles import capture_settings_from_profile
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -74,8 +75,74 @@ class SimulatedDigitizer(Digitizer):
         """Inclusive range of generated signed int16 sample codes."""
         return units.IntRange(-32768, 32767)
 
-    def _create_capture(self, settings: CaptureSettings) -> DigitizerCaptureSession:
-        """Reject unsupported timing modes and construct a finite session."""
+    def _create_capture(
+        self,
+        settings: CaptureSettings,
+    ) -> DigitizerCaptureSession:
+        """Construct a session from a complete explicit request."""
+        self._validate_capture_settings(settings)
+        return _SimulatedCaptureSession(self, settings)
+
+    def _create_profile_capture(
+        self,
+        profile: DigitizerProfile,
+    ) -> DigitizerCaptureSession:
+        """Construct a synthetic capture with deferred record geometry."""
+        return _SimulatedCaptureSession(self, profile=profile)
+
+    def _settings_from_profile(
+        self,
+        profile: DigitizerProfile,
+        *,
+        record_length: int,
+        records_per_batch: int,
+        batch_count: int | None,
+        timestamps_enabled: bool,
+        trigger_offset_samples: int,
+    ) -> CaptureSettings:
+        """Resolve supported synthetic timing without hardware access."""
+        for channel in profile.channels:
+            if not channel.enabled:
+                continue
+
+            if (
+                channel.inverted
+                or channel.coupling is not None
+                or channel.impedance is not None
+                or channel.input_range is not None
+                or channel.offset is not None
+            ):
+                raise NotImplementedError(
+                    "Simulation does not implement analog channel settings."
+                )
+
+        trigger = profile.trigger
+        if any(
+            value is not None
+            for value in (
+                trigger.level,
+                trigger.external_coupling,
+                trigger.external_impedance,
+                trigger.external_range,
+            )
+        ):
+            raise NotImplementedError(
+                "Simulation does not implement electrical trigger settings."
+            )
+
+        settings = capture_settings_from_profile(
+            profile,
+            record_length=record_length,
+            records_per_batch=records_per_batch,
+            batch_count=batch_count,
+            timestamps_enabled=timestamps_enabled,
+            trigger_offset_samples=trigger_offset_samples,
+        )
+        self._validate_capture_settings(settings)
+        return settings
+
+    def _validate_capture_settings(self, settings: CaptureSettings) -> None:
+        """Reject unsupported simulated acquisition modes."""
         if settings.batch_count is None:
             raise NotImplementedError("Simulation requires finite batch_count.")
         if settings.external_clock is not None:
@@ -84,8 +151,6 @@ class SimulatedDigitizer(Digitizer):
             raise NotImplementedError("Simulation does not support start triggers.")
         if settings.record_trigger is not None:
             raise NotImplementedError("Simulation does not support record triggers.")
-
-        return _SimulatedCaptureSession(self, settings)
 
     def _close(self) -> None:
         """Release no external resources."""
@@ -105,18 +170,24 @@ class _SimulatedCaptureSession(DigitizerCaptureSession):
     """Generate consecutive sample windows from a validated simulator request."""
 
     def __init__(
-        self, digitizer: SimulatedDigitizer, settings: CaptureSettings
+        self,
+        digitizer: SimulatedDigitizer,
+        settings: CaptureSettings | None = None,
+        *,
+        profile: DigitizerProfile | None = None,
     ) -> None:
-        super().__init__(
-            digitizer,
-            batch_count=settings.batch_count,
-            timestamps_enabled=settings.timestamps_enabled,
-        )
-        self._settings = settings
+        """Accept either a complete request or a deferred profile snapshot."""
+        if (settings is None) == (profile is None):
+            raise ValueError("Supply exactly one of settings or profile.")
+
+        super().__init__(digitizer, profile=profile)
+
+        if settings is not None:
+            self._set_capture_settings(settings)
 
     def _prepare_capture(self) -> CaptureLayout:
         """Describe complete batches without allocating SDK transfer resources."""
-        settings = self._settings
+        settings = self.settings
         return CaptureLayout(
             shape=(
                 settings.records_per_batch,
@@ -141,7 +212,7 @@ class _SimulatedCaptureSession(DigitizerCaptureSession):
 
         Data is immediately available even when timeout is zero.
         """
-        settings = self._settings
+        settings = self.settings
         records = settings.records_per_batch
         length = settings.record_length
         first_record = self.batches_acquired * records
