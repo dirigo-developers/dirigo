@@ -1,21 +1,27 @@
-from .config import DeviceDriver, discover_drivers, load_hardware, parse_config
+from .config import (
+    DeviceDriver,
+    discover_drivers,
+    load_system,
+    parse_config,
+)
 from .device import Device
-from .hardware import Hardware
 from .metadata import DeviceIdentity, DeviceSnapshot, DriverIdentity
-from .scanner import ResonantScanner, ResonantScannerConfig
+from .scanner import BeamScanner, ResonantScanner, ResonantScannerConfig
 from .simulated import SimulatedResonantScanner
+from .synchronization import SyncBackend
 
 __all__ = [
+    "BeamScanner",
     "Device",
     "DeviceDriver",
     "DeviceIdentity",
     "DeviceSnapshot",
     "DriverIdentity",
-    "Hardware",
     "ResonantScanner",
     "ResonantScannerConfig",
     "SimulatedResonantScanner",
+    "SyncBackend",
     "discover_drivers",
-    "load_hardware",
+    "load_system",
     "parse_config",
 ]

@@ -1,5 +1,6 @@
 from . import units
-from .hardware import Hardware, load_hardware
+from .hardware.config import load_system
 from .pipeline import Pipeline
+from .system import System
 
-__all__ = ["Hardware", "Pipeline", "load_hardware", "units"]
+__all__ = ["Pipeline", "System", "load_system", "units"]

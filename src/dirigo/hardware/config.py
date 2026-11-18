@@ -8,8 +8,9 @@ from typing import Any, Protocol, cast, get_type_hints
 
 from dirigo import units
 from dirigo.hardware.device import Device
-from dirigo.hardware.hardware import Hardware
 from dirigo.hardware.metadata import DeviceIdentity
+from dirigo.hardware.synchronization import SyncBackend
+from dirigo.system import System
 
 
 class DeviceDriver[ConfigT](Protocol):
@@ -30,6 +31,19 @@ class DeviceDriver[ConfigT](Protocol):
 
         Release partially acquired resources if construction raises.
         """
+        ...
+
+
+class SyncBackendFactory[ConfigT](Protocol):
+    """Construct a configured backend from its declared configuration."""
+
+    @property
+    def config_type(self) -> type[ConfigT]:
+        """Configuration dataclass inspectable before construction."""
+        ...
+
+    def __call__(self, config: ConfigT, /) -> SyncBackend:
+        """Construct a backend, cleaning up internally if construction fails."""
         ...
 
 
@@ -82,28 +96,16 @@ def discover_drivers(
     return drivers
 
 
-def load_hardware(
-    path: str | PathLike[str],
+def _load_devices(
+    document: Mapping[str, object],
     *,
     drivers: Mapping[str, Mapping[str, DeviceDriver[Any]]] | None = None,
-) -> Hardware:
-    """Construct named devices selected by category and driver.
+) -> dict[str, Device]:
+    """Parse and construct devices from an already loaded document.
 
-    Each device requires category and driver strings, and may supply config
-    and identity tables. Explicit registries map categories to driver maps;
-    any supplied registry, including an empty one, bypasses discovery.
-
-    Parse every configuration and identity before constructing devices.
-    Discovered implementations are loaded only when selected and cached
-    per (category, driver name) for this invocation.
-
-    On construction failure, close previously returned devices and preserve
-    the original exception. Drivers must clean up resources themselves if
-    their constructors fail before returning a Device.
+    Parse every device definition before constructing devices. On failure,
+    close previously constructed devices and preserve the original error.
     """
-    with Path(path).open("rb") as stream:
-        document = tomllib.load(stream)
-
     definitions = document.get("devices")
     if not isinstance(definitions, dict):
         raise ValueError("Configuration must contain a [devices] table.")
@@ -219,13 +221,68 @@ def load_hardware(
                 exc.add_note(f"While constructing device {name!r}.")
                 raise
 
-        return Hardware(devices)
+        return devices
+
     except BaseException as failure:
         try:
-            Hardware(devices).close()
+            System(devices).close()
         except BaseException as cleanup_failure:
-            failure.add_note(f"Hardware rollback also failed: {cleanup_failure!r}")
+            failure.add_note(
+                f"Device construction rollback also failed: {cleanup_failure!r}"
+            )
         raise
+
+
+def _load_raster_sync_factory(
+    name: str,
+    *,
+    factories: Mapping[str, SyncBackendFactory[Any]] | None,
+) -> SyncBackendFactory[Any]:
+    """Load only the selected raster synchronization implementation."""
+    candidate: object
+
+    if factories is not None:
+        if name not in factories:
+            raise ValueError(f"Unknown raster frame synchronization backend {name!r}.")
+
+        candidate = factories[name]
+    else:
+        entries = importlib_metadata.entry_points().select(
+            group="dirigo.syncs.raster_frame",
+            name=name,
+        )
+
+        if not entries:
+            raise ValueError(f"Unknown raster frame synchronization backend {name!r}.")
+
+        if len(entries) != 1:
+            raise ValueError(
+                f"Duplicate raster frame synchronization backend {name!r}."
+            )
+
+        entry = next(iter(entries))
+
+        try:
+            candidate = entry.load()
+        except BaseException as failure:
+            failure.add_note(
+                f"While loading raster frame synchronization backend {name!r}."
+            )
+            raise
+
+    model = getattr(candidate, "config_type", None)
+
+    if (
+        not callable(candidate)
+        or not isinstance(model, type)
+        or not is_dataclass(model)
+    ):
+        raise TypeError(
+            f"Synchronization factory {name!r} must be callable and "
+            "declare a dataclass config_type."
+        )
+
+    return cast(SyncBackendFactory[Any], candidate)
 
 
 def parse_config[T](model_type: type[T], values: Mapping[str, object]) -> T:
@@ -373,3 +430,75 @@ def _parse_identity(value: object) -> DeviceIdentity:
         values[name] = field_value
 
     return DeviceIdentity(**values)
+
+
+def load_system(
+    path: str | PathLike[str],
+    *,
+    drivers: Mapping[str, Mapping[str, DeviceDriver[Any]]] | None = None,
+    sync_backends: Mapping[str, SyncBackendFactory[Any]] | None = None,
+) -> System:
+    """Load devices and optional raster frame synchronization.
+
+    Explicit registries bypass discovery, including when they are empty.
+
+    Synchronization configuration is parsed before devices are constructed.
+    Any construction failure closes components already returned by their
+    factories and preserves the original exception.
+    """
+    with Path(path).open("rb") as stream:
+        document = tomllib.load(stream)
+
+    sync_plan: tuple[SyncBackendFactory[Any], Any] | None = None
+
+    if "raster_frame_sync" in document:
+        definition = document["raster_frame_sync"]
+
+        if not isinstance(definition, dict):
+            raise ValueError("raster_frame_sync must be a table.")
+
+        unknown = definition.keys() - {"backend", "config"}
+        if unknown:
+            raise ValueError(
+                f"Unsupported raster_frame_sync fields: {', '.join(sorted(unknown))}."
+            )
+
+        backend_name = definition.get("backend")
+        if not isinstance(backend_name, str) or not backend_name:
+            raise ValueError("raster_frame_sync requires a nonempty backend name.")
+
+        values = definition.get("config", {})
+        if not isinstance(values, dict):
+            raise ValueError("raster_frame_sync.config must be a table.")
+
+        factory = _load_raster_sync_factory(
+            backend_name,
+            factories=sync_backends,
+        )
+        config = parse_config(factory.config_type, values)
+        sync_plan = (factory, config)
+
+    devices = _load_devices(document, drivers=drivers)
+    syncs: dict[str, SyncBackend] = {}
+
+    try:
+        if sync_plan is not None:
+            factory, config = sync_plan
+            backend = factory(config)
+
+            if not isinstance(backend, SyncBackend):
+                raise TypeError(
+                    "Raster frame synchronization factory must return a SyncBackend."
+                )
+
+            syncs["raster_frame_sync"] = backend
+
+        return System(devices, syncs=syncs)
+    except BaseException as failure:
+        try:
+            System(devices, syncs=syncs).close()
+        except BaseException as cleanup_failure:
+            failure.add_note(
+                f"System construction rollback also failed: {cleanup_failure!r}"
+            )
+        raise

@@ -6,17 +6,16 @@ from typing import Never
 import numpy as np
 import pytest
 
-from dirigo import units
+from dirigo import System, units
 from dirigo.hardware.capture import CaptureInfo, CaptureSettings, SampleArray
 from dirigo.hardware.capture_session import CaptureState, DigitizerCaptureSession
 from dirigo.hardware.digitizer import Digitizer
-from dirigo.hardware.hardware import Hardware
 from dirigo.hardware.simulated_digitizer import (
     SimulatedDigitizer,
     SimulatedDigitizerConfig,
 )
+from dirigo.pipeline import Worker
 from dirigo.pipeline.exceptions import EndOfStream
-from dirigo.pipeline.hardware_worker import HardwareWorker
 from dirigo.pipeline.pipeline import Pipeline
 from dirigo.pipeline.product import Metadata
 from dirigo.pipeline.sink import Sink
@@ -35,7 +34,7 @@ class CaptureBatch:
     info: CaptureInfo = field(default_factory=CaptureInfo)
 
 
-class CaptureAcquisition(HardwareWorker[Never, CaptureBatch]):
+class CaptureAcquisition(Worker[Never, CaptureBatch]):
     """Test helper connecting a borrowed digitizer to the worker output pool."""
 
     def __init__(
@@ -43,9 +42,11 @@ class CaptureAcquisition(HardwareWorker[Never, CaptureBatch]):
         device_name: str,
         settings: CaptureSettings,
         *,
+        system: System,
         pool_capacity: int = 1,
     ) -> None:
         super().__init__()
+        self._system = system
         self._device_name = device_name
         self._settings = settings
         self._pool_capacity = pool_capacity
@@ -53,7 +54,7 @@ class CaptureAcquisition(HardwareWorker[Never, CaptureBatch]):
 
     def _prepare(self) -> None:
         """Prepare capture before allocating storage from its effective layout."""
-        digitizer = self._hardware.require(self._device_name, Digitizer)
+        digitizer = self._system.require_device(self._device_name, Digitizer)
         session = digitizer.create_capture(self._settings)
         self.session = session
         session.prepare()
@@ -138,13 +139,13 @@ def _settings() -> CaptureSettings:
 
 
 def _run_capture(
-    hardware: Hardware,
+    system: System,
     settings: CaptureSettings,
 ) -> tuple[CaptureAcquisition, CaptureCollector]:
     """Run fresh workers and join them before the caller releases hardware."""
-    acquisition = CaptureAcquisition("adc", settings, pool_capacity=1)
+    acquisition = CaptureAcquisition("adc", settings, system=system, pool_capacity=1)
     collector = CaptureCollector(acquisition)
-    pipeline = Pipeline(acquisition, collector, hardware=hardware)
+    pipeline = Pipeline(acquisition, collector)
 
     pipeline.start()
     try:
@@ -171,11 +172,11 @@ def test_capture_pipeline_delivers_complete_batches_with_reused_storage(
     Normal exhaustion must close the session while leaving Hardware open.
     """
     digitizer = SimulatedDigitizer(SimulatedDigitizerConfig())
-    hardware = Hardware({"adc": digitizer})
+    system = System({"adc": digitizer})
     settings = replace(_settings(), timestamps_enabled=timestamps_enabled)
 
     try:
-        acquisition, collector = _run_capture(hardware, settings)
+        acquisition, collector = _run_capture(system, settings)
 
         assert len(collector.received) == 5
         assert len(set(collector.sample_ids)) == 1
@@ -215,9 +216,9 @@ def test_capture_pipeline_delivers_complete_batches_with_reused_storage(
         assert session.batches_acquired == 5
         assert session.layout.channel_indices == (1, 0)
         assert not digitizer.is_active
-        assert hardware.require("adc", Digitizer) is digitizer
+        assert system.require_device("adc", Digitizer) is digitizer
     finally:
-        hardware.close()
+        system.close()
 
 
 def test_successive_pipelines_reuse_the_same_digitizer() -> None:
@@ -229,12 +230,12 @@ def test_successive_pipelines_reuse_the_same_digitizer() -> None:
     independently of the persistent device.
     """
     digitizer = SimulatedDigitizer(SimulatedDigitizerConfig())
-    hardware = Hardware({"adc": digitizer})
+    system = System({"adc": digitizer})
     settings = _settings()
 
     try:
-        first_worker, first = _run_capture(hardware, settings)
-        second_worker, second = _run_capture(hardware, settings)
+        first_worker, first = _run_capture(system, settings)
+        second_worker, second = _run_capture(system, settings)
 
         assert first_worker.session is not second_worker.session
         assert len(first.received) == len(second.received) == 5
@@ -253,6 +254,6 @@ def test_successive_pipelines_reuse_the_same_digitizer() -> None:
 
             assert first_metadata == second_metadata
 
-        assert hardware.require("adc", Digitizer) is digitizer
+        assert system.require_device("adc", Digitizer) is digitizer
     finally:
-        hardware.close()
+        system.close()

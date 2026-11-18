@@ -11,11 +11,11 @@ from typing import cast
 
 import pytest
 
+from dirigo import load_system
 from dirigo.hardware import config as config_module
 from dirigo.hardware.config import (
     discover_device_categories,
     discover_drivers,
-    load_hardware,
 )
 from dirigo.hardware.device import Device
 
@@ -209,12 +209,12 @@ driver = "demo"
 config = {channel = "ai0"}
 """,
     )
-    hardware = load_hardware(path)
+    system = load_system(path)
 
     try:
-        first = hardware.require("first", DemoDevice)
-        second = hardware.require("second", DemoDevice)
-        third = hardware.require("third", DemoDevice)
+        first = system.require_device("first", DemoDevice)
+        second = system.require_device("second", DemoDevice)
+        third = system.require_device("third", DemoDevice)
         assert first is not second
         assert first is not third
         assert second is not third
@@ -226,7 +226,7 @@ config = {channel = "ai0"}
             ("dirigo.devices.digitizers", "demo"),
         ]
     finally:
-        hardware.close()
+        system.close()
 
     assert first.closed
     assert second.closed
@@ -260,11 +260,11 @@ driver = "demo"
 """,
     )
 
-    hardware = load_hardware(path, drivers={"scanners": {"demo": DemoDevice}})
-    hardware.close()
+    system = load_system(path, drivers={"scanners": {"demo": DemoDevice}})
+    system.close()
 
     with pytest.raises(ValueError, match="unknown driver"):
-        load_hardware(path, drivers={})
+        load_system(path, drivers={})
 
 
 def test_missing_driver_reports_available_registrations(
@@ -304,7 +304,7 @@ driver = "missing"
     )
 
     with pytest.raises(ValueError, match="unknown driver") as caught:
-        load_hardware(path)
+        load_system(path)
 
     assert "category 'scanners'" in str(caught.value)
     assert "Available drivers: demo" in str(caught.value)
@@ -340,7 +340,7 @@ driver = "demo"
     )
 
     with pytest.raises(ImportError) as caught:
-        load_hardware(path)
+        load_system(path)
 
     assert caught.value is failure
     assert any(
@@ -379,7 +379,7 @@ driver = "demo"
     )
 
     with pytest.raises(TypeError, match="demo") as caught:
-        load_hardware(path)
+        load_system(path)
 
     assert "scanners" in str(caught.value)
 
@@ -427,7 +427,7 @@ config = {channel = 3}
     )
 
     with pytest.raises(TypeError, match="channel"):
-        load_hardware(path)
+        load_system(path)
 
     assert created == []
 

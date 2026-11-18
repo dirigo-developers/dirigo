@@ -8,10 +8,9 @@ from typing import cast
 import numpy as np
 import pytest
 
-from dirigo import units
+from dirigo import load_system, units
 from dirigo.hardware.capture import CaptureSettings
 from dirigo.hardware.capture_session import CaptureState
-from dirigo.hardware.config import load_hardware
 from dirigo.hardware.digitizer import Digitizer
 from dirigo.hardware.simulated_digitizer import (
     SimulatedDigitizer,
@@ -261,13 +260,13 @@ def test_discovery_and_loading_from_toml(tmp_path: Path) -> None:
         encoding="utf-8",
     )
 
-    hardware = load_hardware(path)
+    system = load_system(path)
     try:
-        device = hardware.require("adc", Digitizer)
+        device = system.require_device("adc", Digitizer)
         assert isinstance(device, SimulatedDigitizer)
         assert device.channel_count == 3
     finally:
-        hardware.close()
+        system.close()
 
 
 def test_record_trigger_is_rejected_explicitly() -> None:

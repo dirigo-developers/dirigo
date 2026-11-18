@@ -8,8 +8,8 @@ from typing import Any, Protocol, cast
 from dirigo.hardware.capture import CaptureInfo, CaptureLayout, SampleArray
 from dirigo.hardware.capture_session import CaptureState
 from dirigo.hardware.frame_plan import RecordFramePlan
-from dirigo.hardware.hardware import Hardware
 from dirigo.hardware.waveform import AngularWaveform
+from dirigo.system import System
 
 _GROUP = "dirigo.acquisition_sequences"
 
@@ -78,16 +78,11 @@ class FrameSequenceFactory[ConfigT](Protocol):
         config: ConfigT,
         /,
         *,
-        hardware: Hardware,
+        system: System,
         plan: RecordFramePlan,
         waveforms: Mapping[str, AngularWaveform],
     ) -> FrameAcquisitionSequence:
-        """Validate compatibility and return a new, caller-owned sequence.
-
-        Waveform keys name scanner devices in hardware. Preserve the supplied
-        capture-settings subclass. Construction performs no hardware access
-        or reservation. Release partial ownership if construction raises.
-        """
+        """Construct a sequence borrowing devices from the supplied system."""
         ...
 
 

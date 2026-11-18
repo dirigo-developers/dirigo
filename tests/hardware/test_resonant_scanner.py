@@ -4,8 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from dirigo import units
-from dirigo.hardware.config import load_hardware
+from dirigo import load_system, units
 from dirigo.hardware.scanner import ResonantScanner, ResonantScannerConfig
 from dirigo.hardware.simulated import SimulatedResonantScanner
 
@@ -202,13 +201,13 @@ def test_loads_simulated_scanner_and_owns_its_lifetime(tmp_path: Path) -> None:
         """,
         encoding="utf-8",
     )
-    hardware = load_hardware(
+    system = load_system(
         path,
         drivers={"scanners": {"simulated_resonant": SimulatedResonantScanner}},
     )
 
     try:
-        scanner = hardware.require("fast_scanner", ResonantScanner)
+        scanner = system.require_device("fast_scanner", ResonantScanner)
         assert isinstance(scanner, SimulatedResonantScanner)
         assert scanner.amplitude is None
         assert scanner.config.nominal_frequency == units.Frequency("7910 Hz")
@@ -216,7 +215,7 @@ def test_loads_simulated_scanner_and_owns_its_lifetime(tmp_path: Path) -> None:
         scanner.amplitude = units.Angle("5 deg")
         assert scanner.amplitude == units.Angle("5 deg")
     finally:
-        hardware.close()
+        system.close()
 
     with pytest.raises(RuntimeError, match="closed"):
         scanner.amplitude = units.Angle("6 deg")

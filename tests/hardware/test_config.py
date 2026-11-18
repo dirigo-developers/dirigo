@@ -6,8 +6,8 @@ from typing import Any, cast
 
 import pytest
 
-from dirigo import units
-from dirigo.hardware.config import DeviceDriver, load_hardware
+from dirigo import load_system, units
+from dirigo.hardware.config import DeviceDriver
 from dirigo.hardware.device import Device
 
 _DEFAULT_TIMEOUT = units.Time("100 ms")
@@ -89,19 +89,19 @@ driver = "demo"
 config = {channel = "ao1"}
 """,
     )
-    hardware = load_hardware(path, drivers={"scanners": {"demo": FakeDevice}})
+    system = load_system(path, drivers={"scanners": {"demo": FakeDevice}})
 
     try:
-        x = hardware.require("x", FakeDevice)
-        y = hardware.require("y", FakeDevice)
-        assert hardware.names == ("x", "y")
+        x = system.require_device("x", FakeDevice)
+        y = system.require_device("y", FakeDevice)
+        assert system.device_names == ("x", "y")
         assert x is not y
         assert x.config == FakeConfig(
             channel="ao0", gain=2.5, timeout=units.Time("25 ms")
         )
         assert y.config == FakeConfig(channel="ao1")
     finally:
-        hardware.close()
+        system.close()
 
     assert x.close_calls == y.close_calls == 1
 
@@ -118,12 +118,12 @@ category = "scanners"
 driver = "demo"
 """,
     )
-    hardware = load_hardware(str(path), drivers={"scanners": {"demo": FakeDevice}})
+    system = load_system(str(path), drivers={"scanners": {"demo": FakeDevice}})
 
     try:
-        assert hardware.require("board", FakeDevice).config == FakeConfig()
+        assert system.require_device("board", FakeDevice).config == FakeConfig()
     finally:
-        hardware.close()
+        system.close()
 
 
 def test_registry_accepts_callable_factory_objects(
@@ -145,13 +145,13 @@ category = "scanners"
 driver = "demo"
 """,
     )
-    hardware = load_hardware(path, drivers={"scanners": {"demo": driver}})
+    system = load_system(path, drivers={"scanners": {"demo": driver}})
 
     try:
-        assert hardware.require("board", FakeDevice) is device
+        assert system.require_device("board", FakeDevice) is device
         assert driver.received == FakeConfig()
     finally:
-        hardware.close()
+        system.close()
 
     assert device.close_calls == 1
 
@@ -205,7 +205,7 @@ driver = "demo"
     )
 
     with pytest.raises(error, match=field_name) as caught:
-        load_hardware(path, drivers={"scanners": {"demo": RecordingDevice}})
+        load_system(path, drivers={"scanners": {"demo": RecordingDevice}})
 
     assert created == []
     assert any(
@@ -278,7 +278,7 @@ def test_invalid_definitions_are_rejected(
     path = _write_config(tmp_path, document)
 
     with pytest.raises(ValueError, match=message):
-        load_hardware(path, drivers={"scanners": {"demo": FakeDevice}})
+        load_system(path, drivers={"scanners": {"demo": FakeDevice}})
 
 
 @pytest.mark.parametrize("driver", [object(), int])
@@ -302,7 +302,7 @@ driver = "demo"
     )
 
     with pytest.raises(TypeError, match="demo"):
-        load_hardware(
+        load_system(
             path,
             drivers={
                 "scanners": {
@@ -367,7 +367,7 @@ config = {channel = "fail"}
     )
 
     with pytest.raises(RuntimeError) as caught:
-        load_hardware(path, drivers={"scanners": {"demo": RecordingDevice}})
+        load_system(path, drivers={"scanners": {"demo": RecordingDevice}})
 
     assert caught.value is failure
     assert events == ["second", "first"]
@@ -403,7 +403,7 @@ driver = "bad"
     )
 
     with pytest.raises(TypeError, match="bad"):
-        load_hardware(
+        load_system(
             path,
             drivers={
                 "scanners": {
@@ -418,19 +418,19 @@ driver = "bad"
 
 def test_empty_devices_table_is_valid(tmp_path: Path) -> None:
     """Allow an empty devices table with an explicit empty registry."""
-    hardware = load_hardware(
+    system = load_system(
         _write_config(tmp_path, "[devices]"),
         drivers={},
     )
 
-    assert hardware.names == ()
-    hardware.close()
+    assert system.device_names == ()
+    system.close()
 
 
 def test_missing_file_is_reported(tmp_path: Path) -> None:
     """Propagate FileNotFoundError when the configuration path is absent."""
     with pytest.raises(FileNotFoundError):
-        load_hardware(tmp_path / "missing.toml", drivers={})
+        load_system(tmp_path / "missing.toml", drivers={})
 
 
 def test_registry_category_requires_a_mapping(tmp_path: Path) -> None:
@@ -447,7 +447,7 @@ def test_registry_category_requires_a_mapping(tmp_path: Path) -> None:
         TypeError,
         match="Driver category 'scanners' must contain a mapping",
     ):
-        load_hardware(
+        load_system(
             path,
             drivers={"scanners": invalid_members},
         )

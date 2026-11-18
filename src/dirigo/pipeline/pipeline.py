@@ -2,9 +2,6 @@ from threading import Lock
 from time import monotonic
 from typing import Any
 
-from dirigo.hardware.hardware import Hardware
-
-from .hardware_worker import HardwareWorker
 from .worker import Worker
 
 type _AnyWorker = Worker[Any, Any]
@@ -13,12 +10,7 @@ type _AnyWorker = Worker[Any, Any]
 class Pipeline:
     """A single-use execution graph of workers."""
 
-    def __init__(self, *workers: _AnyWorker, hardware: Hardware | None = None) -> None:
-        if hardware is not None and not isinstance(hardware, Hardware):
-            raise TypeError("hardware must be a Hardware instance or None.")
-
-        self._hardware = hardware
-
+    def __init__(self, *workers: _AnyWorker) -> None:
         self._ownership_token = object()
 
         self._started: bool = False
@@ -122,8 +114,6 @@ class Pipeline:
         attempted: list[Worker] = []
 
         try:
-            self._bind_hardware_workers()
-
             for worker in self._workers:
                 attempted.append(worker)
                 worker._prepare()
@@ -265,21 +255,3 @@ class Pipeline:
                     "outside this pipeline. Include every connected consumer "
                     "with Pipeline.add() before starting."
                 )
-
-    def _bind_hardware_workers(self) -> None:
-        """Bind all hardware workers before any worker prepares."""
-        hardware_workers = [
-            worker for worker in self._workers if isinstance(worker, HardwareWorker)
-        ]
-
-        if not hardware_workers:
-            return
-
-        hardware = self._hardware
-
-        if hardware is None:
-            names = ", ".join(repr(worker.name) for worker in hardware_workers)
-            raise RuntimeError(f"Hardware collection required by worker(s): {names}.")
-
-        for worker in hardware_workers:
-            worker._bind_hardware(hardware)

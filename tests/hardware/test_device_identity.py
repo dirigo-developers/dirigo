@@ -4,8 +4,8 @@ from typing import cast
 
 import pytest
 
+from dirigo import load_system
 from dirigo.hardware import config as config_module
-from dirigo.hardware.config import load_hardware
 from dirigo.hardware.device import Device
 from dirigo.hardware.metadata import DeviceIdentity
 
@@ -161,12 +161,12 @@ model = "CRS8K"
     )
     driver = FakeDriver()
 
-    hardware = load_hardware(
+    system = load_system(
         path,
         drivers={"scanners": {"fake": driver}},
     )
     try:
-        device = hardware.require("fast_scanner", FakeDevice)
+        device = system.require_device("fast_scanner", FakeDevice)
 
         assert device is driver.created[0]
         assert device.identity == DeviceIdentity(
@@ -175,7 +175,7 @@ model = "CRS8K"
         )
         assert device.snapshot()["identity"]["model"] == "CRS8K"
     finally:
-        hardware.close()
+        system.close()
 
 
 @pytest.mark.parametrize(
@@ -217,7 +217,7 @@ identity = {identity_value}
     driver = FakeDriver()
 
     with pytest.raises(error_type):
-        load_hardware(
+        load_system(
             path,
             drivers={"scanners": {"fake": driver}},
         )

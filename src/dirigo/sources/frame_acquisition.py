@@ -2,11 +2,13 @@
 
 import math
 from collections.abc import Mapping
+from dataclasses import dataclass
 from numbers import Real
 from typing import Any
 
 import numpy as np
 
+from dirigo import units
 from dirigo.hardware.acquisition import (
     FrameAcquisitionSequence,
     FrameSequenceFactory,
@@ -14,18 +16,104 @@ from dirigo.hardware.acquisition import (
 )
 from dirigo.hardware.capture_session import CaptureState
 from dirigo.hardware.config import parse_config
+from dirigo.hardware.digitizer import Digitizer
 from dirigo.hardware.frame_plan import RecordFramePlan
+from dirigo.hardware.scanner import BeamScanner
 from dirigo.hardware.waveform import AngularWaveform
-from dirigo.pipeline.hardware_worker import HardwareWorker
 from dirigo.pipeline.product import Metadata, Product
+from dirigo.pipeline.worker import Worker
 from dirigo.records import RecordBatch
+from dirigo.system import System
 
 
-class FrameAcquisitionWorker(HardwareWorker[object, RecordBatch]):
+def create_raster_sync_session(
+    fast_scanner: BeamScanner, slow_scanner: BeamScanner, digitizer: Digitizer
+) -> None:
+    """todo"""
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class RasterFrameAcquisitionSpec:
+    pixel_width: units.Length
+    pixel_height: units.Length
+    frame_width: units.Length
+    frame_height: units.Length
+    bidirectional: bool
+    frames_per_acquisition: int | None
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.pixel_width, units.Length):
+            raise TypeError("pixel_width must be a Length")
+        if float(self.pixel_width) <= 0:
+            raise ValueError("pixel_width must be positive")
+
+        if not isinstance(self.pixel_height, units.Length):
+            raise TypeError("pixel_height must be a Length")
+        if float(self.pixel_height) <= 0:
+            raise ValueError("pixel_height must be positive")
+
+        if not isinstance(self.frame_width, units.Length):
+            raise TypeError("frame_width must be a Length")
+        if float(self.frame_width) <= 0:
+            raise ValueError("frame_width must be positive")
+
+        if not isinstance(self.frame_height, units.Length):
+            raise TypeError("frame_height must be a Length")
+        if float(self.frame_height) <= 0:
+            raise ValueError("frame_height must be positive")
+
+        if not isinstance(self.bidirectional, bool):
+            raise TypeError("bidirectional must be a bool")
+
+        if self.frames_per_acquisition is not None:
+            if type(self.frames_per_acquisition) is not int:
+                raise TypeError("frames_per_acquisition must be an int or None")
+            if self.frames_per_acquisition < 1:
+                raise ValueError("frames_per_acquisition must be positive")
+
+
+# class RasterFrameAcquisition(Worker[Never, RecordBatch]):
+#     def __init__(
+#         self, spec: RasterFrameAcquisitionSpec, *, name: str | None = None
+#     ) -> None:
+#         """Raster-scanned acquisition worker."""
+#         if not isinstance(spec, RasterFrameAcquisitionSpec):
+#             raise TypeError("spec must be RasterFrameAcquisitionSpec")
+
+#         super().__init__(name=name)
+#         self._spec = spec
+
+#     def _prepare(self) -> None:
+#         hw = self._hardware
+#         fast_scanner = hw.require("fast_scanner", BeamScanner)
+#         slow_scanner = hw.require("slow_scanner", BeamScanner)
+#         digitizer = hw.require("digitizer", Digitizer)
+
+#         self._sync = create_raster_sync_session(
+#             fast_scanner=fast_scanner,
+#             slow_scanner=slow_scanner,
+#         )
+
+#         self._capture = digitizer.create_capture()
+
+#         # allocate pool
+
+#     def _work(self) -> None:
+#         # start the sequence
+#         # read into & publish
+#         pass
+
+#     def _close(self) -> None:
+#         """Close the sequence"""
+#         pass
+
+
+class FrameAcquisitionWorker(Worker[object, RecordBatch]):
     def __init__(
         self,
         plan: RecordFramePlan,
         *,
+        system: System,
         sequence: str,
         waveforms: Mapping[str, AngularWaveform],
         sequence_config: Mapping[str, object] | None = None,
@@ -33,7 +121,8 @@ class FrameAcquisitionWorker(HardwareWorker[object, RecordBatch]):
         read_timeout: float = 0.05,
         name: str | None = None,
     ) -> None:
-        """Store the run description without discovering plugins or hardware."""
+        if not isinstance(system, System):
+            raise TypeError("system must be a System.")
         if not isinstance(plan, RecordFramePlan):
             raise TypeError("plan must be a RecordFramePlan.")
         if not isinstance(sequence, str) or not sequence:
@@ -44,6 +133,7 @@ class FrameAcquisitionWorker(HardwareWorker[object, RecordBatch]):
             raise ValueError("read_timeout must be finite and positive.")
 
         super().__init__(name=name)
+        self._system = system
         self._plan = plan
         self._sequence_name = sequence
         self._waveforms = dict(waveforms)
@@ -66,7 +156,7 @@ class FrameAcquisitionWorker(HardwareWorker[object, RecordBatch]):
         )
         sequence = factory(
             config,
-            hardware=self._hardware,
+            system=self._system,
             plan=self._plan,
             waveforms=self._waveforms,
         )

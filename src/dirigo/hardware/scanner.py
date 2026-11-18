@@ -10,6 +10,10 @@ from dirigo.hardware.device import Device
 from dirigo.hardware.waveform import AngularWaveform
 
 
+class BeamScanner(Device):
+    """A device that deflects the scanning beam."""
+
+
 @dataclass(frozen=True, slots=True, kw_only=True)
 class ResonantScannerConfig:
     """Describe the installed scanner independently of its control hardware.
@@ -95,7 +99,7 @@ class ResonantScannerConfig:
             raise ValueError("frequency_tolerance must satisfy 0 <= value < 1.")
 
 
-class ResonantScanner(Device):
+class ResonantScanner(BeamScanner):
     """Control the commanded optical amplitude of a resonant scanner.
 
     Construction stores configuration without issuing an amplitude command.
@@ -236,7 +240,7 @@ class GalvoScannerConfig:
             raise ValueError("angle_range endpoints must be finite.")
 
 
-class GalvoScanner(Device):
+class GalvoScanner(BeamScanner):
     """One galvo axis with a static optical-angle command.
 
     Construction leaves the output unchanged. Scalar commands support parking
