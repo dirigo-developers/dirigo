@@ -16,6 +16,7 @@ from dirigo.hardware.profiles import (
 )
 from dirigo.hardware.synchronization import SyncBackend
 from dirigo.optics import LaserScanningOptics
+from dirigo.resonant_raster import ResonantRasterSettings
 from dirigo.system import System
 
 
@@ -540,7 +541,6 @@ def load_system(
         sync_plan = (factory, config)
 
     optics = None
-
     if "optics" in document:
         optics_values = document["optics"]
 
@@ -550,6 +550,18 @@ def load_system(
         optics = parse_config(
             LaserScanningOptics,
             optics_values,
+        )
+
+    resonant_raster = None
+    if "resonant_raster" in document:
+        raster_values = document["resonant_raster"]
+
+        if not isinstance(raster_values, dict):
+            raise ValueError("resonant_raster must be a table.")
+
+        resonant_raster = parse_config(
+            ResonantRasterSettings,
+            raster_values,
         )
 
     devices = _load_devices(
@@ -571,7 +583,9 @@ def load_system(
 
             syncs["raster_frame_sync"] = backend
 
-        return System(devices, syncs=syncs, optics=optics)
+        return System(
+            devices, syncs=syncs, optics=optics, resonant_raster=resonant_raster
+        )
 
     except BaseException as failure:
         try:

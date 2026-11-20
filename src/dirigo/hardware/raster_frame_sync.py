@@ -5,6 +5,7 @@ from collections.abc import Mapping
 from enum import StrEnum
 from typing import TYPE_CHECKING
 
+from dirigo import units
 from dirigo.hardware.synchronization import SyncBackend
 
 if TYPE_CHECKING:
@@ -51,6 +52,11 @@ class RasterFrameSyncSession(ABC):
     @abstractmethod
     def state(self) -> RasterFrameSyncState:
         """Current synchronization lifecycle state."""
+
+    @property
+    @abstractmethod
+    def max_record_rate(self) -> units.SampleRate:
+        """Upper record-event rate used when reserving frame timing margin."""
 
     @abstractmethod
     def configure(

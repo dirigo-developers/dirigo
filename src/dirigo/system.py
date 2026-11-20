@@ -5,6 +5,7 @@ from collections.abc import Mapping
 from dirigo.hardware.device import Device
 from dirigo.hardware.synchronization import SyncBackend
 from dirigo.optics import LaserScanningOptics
+from dirigo.resonant_raster import ResonantRasterSettings
 
 
 class System:
@@ -30,6 +31,7 @@ class System:
         *,
         syncs: Mapping[str, SyncBackend] | None = None,
         optics: LaserScanningOptics | None = None,
+        resonant_raster: ResonantRasterSettings | None = None,
     ) -> None:
         """Validate and take ownership of the supplied components."""
         configured_devices = dict(devices)
@@ -47,10 +49,16 @@ class System:
         )
         if optics is not None and not isinstance(optics, LaserScanningOptics):
             raise TypeError("optics must be LaserScanningOptics or None.")
+        if resonant_raster is not None and not isinstance(
+            resonant_raster,
+            ResonantRasterSettings,
+        ):
+            raise TypeError("resonant_raster must be ResonantRasterSettings or None.")
 
         self._devices = configured_devices
         self._syncs = configured_syncs
         self._optics = optics
+        self._resonant_raster = resonant_raster
         self._closed = False
 
     @staticmethod
@@ -137,6 +145,15 @@ class System:
             raise KeyError("optics")
 
         return self._optics
+
+    def require_resonant_raster(self) -> ResonantRasterSettings:
+        """Return installed resonant-raster settings."""
+        self._require_open()
+
+        if self._resonant_raster is None:
+            raise KeyError("resonant_raster")
+
+        return self._resonant_raster
 
     def _require_open(self) -> None:
         """Reject component lookup after closure."""

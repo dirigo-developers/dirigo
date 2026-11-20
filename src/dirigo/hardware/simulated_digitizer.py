@@ -244,3 +244,7 @@ class _SimulatedCaptureSession(DigitizerCaptureSession):
     def _close_capture(self) -> None:
         """Release no persistent per-run resources."""
         return
+
+    def _resolve_record_length_constraints(self) -> tuple[int, int]:
+        """Synthetic records accept any positive integer length."""
+        return 1, 1

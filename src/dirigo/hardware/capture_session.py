@@ -75,6 +75,7 @@ class DigitizerCaptureSession(ABC):
         self._batch_count = batch_count
         self._timestamps_enabled = timestamps_enabled
         self._batches_acquired = 0
+        self._record_length_constraints: tuple[int, int] | None = None
         self._digitizer = digitizer
         self._state = CaptureState.NEW
         self._layout: CaptureLayout | None = None
@@ -178,8 +179,9 @@ class DigitizerCaptureSession(ABC):
             raise RuntimeError("Capture must be configured before preparation.")
 
         try:
-            self._digitizer._reserve_capture(self)
-            self._reserved = True
+            if not self._reserved:
+                self._digitizer._reserve_capture(self)
+                self._reserved = True
             layout = self._prepare_capture()
 
             if not isinstance(layout, CaptureLayout):
@@ -400,3 +402,48 @@ class DigitizerCaptureSession(ABC):
         metadata-decoding errors. Unexpected SDK exhaustion or data loss must
         raise an error. Finite exhaustion is managed by the base batch counter.
         """
+
+    def resolve_record_length_constraints(self) -> tuple[int, int]:
+        """Return minimum length and step, reserving the digitizer if needed.
+
+        Valid lengths are multiples of step that are at least minimum.
+
+        The driver may access hardware to discover these limits, but must not
+        start acquisition or allocate capture transfer buffers.
+
+        The reservation remains held until close(), including while geometry
+        is configured. A failed probe closes the session.
+        """
+        self._require_state(CaptureState.NEW)
+
+        if self._record_length_constraints is not None:
+            return self._record_length_constraints
+
+        try:
+            if not self._reserved:
+                self._digitizer._reserve_capture(self)
+                self._reserved = True
+
+            limits = self._resolve_record_length_constraints()
+
+            if (
+                not isinstance(limits, tuple)
+                or len(limits) != 2
+                or any(type(value) is not int or value <= 0 for value in limits)
+            ):
+                raise RuntimeError(
+                    "Driver must return positive integer record-length "
+                    "minimum and step."
+                )
+
+            self._record_length_constraints = limits
+            return limits
+        except BaseException as failure:
+            self._close_after_failure(failure)
+            raise
+
+    def _resolve_record_length_constraints(self) -> tuple[int, int]:
+        """Discover limits while this session holds the digitizer reservation."""
+        raise NotImplementedError(
+            "This capture backend does not expose record-length constraints."
+        )

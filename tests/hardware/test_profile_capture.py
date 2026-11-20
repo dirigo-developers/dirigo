@@ -383,3 +383,22 @@ channel_count = 2
             capture.prepare()
 
             assert capture.layout.shape == (2, 4, 1)
+
+
+def test_record_constraints_can_be_resolved_before_geometry(
+    digitizer: SimulatedDigitizer,
+) -> None:
+    """Reserve during planning and reuse that reservation during preparation."""
+    with closing(digitizer.create_capture()) as capture:
+        assert capture.resolve_record_length_constraints() == (1, 1)
+        assert capture.state is CaptureState.NEW
+
+        with pytest.raises(RuntimeError, match="reserved"):
+            digitizer.profile = _profile("2 kS/s")
+
+        _configure(capture)
+        capture.prepare()
+
+        assert capture.state is CaptureState.PREPARED
+
+    digitizer.profile = _profile("2 kS/s")

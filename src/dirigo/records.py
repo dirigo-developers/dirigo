@@ -13,7 +13,7 @@ class RecordBatch:
     publication. Each batch owns an independent array, so unpooled products
     may be retained after receive() exits. info retains optional record times.
 
-    first_record is the zero-based logical record index within this sequence.
+    first_record is the zero-based logical record index within this acquisition.
     records_per_frame describes logical grouping, independent of DMA batches.
     Neither field corrects counter startup phase or galvo response delay;
     downstream frame processing applies that alignment.
