@@ -8,6 +8,38 @@ from dirigo.optics import LaserScanningOptics
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
+class RasterLineAcquisitionSpec:
+    """Request finite repeated-line capture in complete publication batches.
+
+    Counts refer to useful image lines. Bidirectional records may contain two
+    lines; the selected planner validates pairing and batch divisibility.
+    """
+
+    pixel_width: units.Length
+    line_width: units.Length
+    bidirectional: bool
+    lines_per_acquisition: int
+    lines_per_batch: int
+
+    def __post_init__(self) -> None:
+        """Require positive physical dimensions and positive integer counts."""
+        for name in ("pixel_width", "line_width"):
+            value = getattr(self, name)
+            if not isinstance(value, units.Length):
+                raise TypeError(f"{name} must be a Length.")
+            if not math.isfinite(float(value)) or float(value) <= 0:
+                raise ValueError(f"{name} must be finite and positive.")
+        if not isinstance(self.bidirectional, bool):
+            raise TypeError("bidirectional must be a bool.")
+        for name in ("lines_per_acquisition", "lines_per_batch"):
+            value = getattr(self, name)
+            if type(value) is not int:
+                raise TypeError(f"{name} must be an int.")
+            if value < 1:
+                raise ValueError(f"{name} must be positive.")
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
 class RasterFrameAcquisitionSpec:
     """Request physical image dimensions, pixel spacing, and acquisition length.
 

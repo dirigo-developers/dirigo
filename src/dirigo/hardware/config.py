@@ -16,7 +16,7 @@ from dirigo.hardware.profiles import (
 )
 from dirigo.hardware.synchronization import SyncBackend
 from dirigo.optics import LaserScanningOptics
-from dirigo.resonant_raster import ResonantRasterSettings
+from dirigo.resonant_raster import ResonantRasterSettings, ResonantScanSettings
 from dirigo.system import System
 
 
@@ -564,6 +564,13 @@ def load_system(
             raster_values,
         )
 
+    resonant_scan = None
+    if "resonant_scan" in document:
+        scan_values = document["resonant_scan"]
+        if not isinstance(scan_values, dict):
+            raise ValueError("[resonant_scan] must be a table.")
+        resonant_scan = parse_config(ResonantScanSettings, scan_values)
+
     devices = _load_devices(
         document,
         profile_directory=Path(path).parent,
@@ -584,7 +591,11 @@ def load_system(
             syncs["raster_frame_sync"] = backend
 
         return System(
-            devices, syncs=syncs, optics=optics, resonant_raster=resonant_raster
+            devices,
+            syncs=syncs,
+            optics=optics,
+            resonant_raster=resonant_raster,
+            resonant_scan=resonant_scan,
         )
 
     except BaseException as failure:

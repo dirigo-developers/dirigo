@@ -8,7 +8,7 @@ import numpy as np
 from dirigo import units
 from dirigo.hardware.scanner import ResonantScannerConfig
 from dirigo.hardware.waveform import AngularWaveform
-from dirigo.raster import RasterFrameGeometry
+from dirigo.raster import RasterFrameGeometry, RasterLineAcquisitionSpec
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -41,6 +41,22 @@ class ResonantFastAxisPlan:
     def nominal_line_period(self) -> units.Time:
         """Nominal separation between useful line centers."""
         return units.Time(1 / (float(self.nominal_frequency) * self.lines_per_record))
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class ResonantLinePlan:
+    """Combine fast-axis capture with finite line grouping."""
+
+    spec: RasterLineAcquisitionSpec
+    columns: int
+    fast_axis: ResonantFastAxisPlan
+    records_per_batch: int
+    batch_count: int
+
+    @property
+    def pixel_width(self) -> units.Length:
+        """Resolved spacing while preserving the requested line width."""
+        return units.Length(float(self.spec.line_width) / self.columns)
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -358,80 +374,74 @@ def plan_resonant_raster_frame(
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
-class ResonantRasterSettings:
-    """Installed timing and execution settings for resonant raster acquisition.
-
-    trigger_phase uses the phase convention of plan_resonant_raster_frame().
-    read_timeout is a positive polling interval in seconds, not an overall
-    acquisition deadline.
-
-    When stop_fast_scanner_on_close is True, a worker that attempted an
-    amplitude command requests zero amplitude after closing its run resources.
-    """
+class ResonantScanSettings:
+    """Settings shared by resonant line and frame acquisition."""
 
     line_fill_fraction: float
     trigger_phase: units.Angle
     capture_rearm_time: units.Time
-    slow_sample_rate: units.SampleRate
-    slow_flyback_time: units.Time
-    output_rearm_time: units.Time
-    slow_settling_time: units.Time
     read_timeout: float = 0.05
     max_pixel_size_adjustment: float = 0.01
     stop_fast_scanner_on_close: bool = True
 
     def __post_init__(self) -> None:
-        """Validate declared timing values without accessing hardware."""
+        """Validate useful scan extent, phase, margins, and execution policy."""
         for name in (
             "line_fill_fraction",
             "read_timeout",
             "max_pixel_size_adjustment",
         ):
             value = getattr(self, name)
-
-            if type(value) not in (int, float):
+            if isinstance(value, (bool, units.Quantity)) or not isinstance(
+                value, (int, float)
+            ):
                 raise TypeError(f"{name} must be a plain number.")
-
             if not math.isfinite(float(value)):
                 raise ValueError(f"{name} must be finite.")
 
         if not 0 < self.line_fill_fraction <= 1:
-            raise ValueError("line_fill_fraction must be in (0, 1].")
-
+            raise ValueError("line_fill_fraction must satisfy 0 < value <= 1.")
         if self.read_timeout <= 0:
             raise ValueError("read_timeout must be positive.")
-
         if not 0 <= self.max_pixel_size_adjustment < 1:
-            raise ValueError("max_pixel_size_adjustment must be in [0, 1).")
-
+            raise ValueError("max_pixel_size_adjustment must satisfy 0 <= value < 1.")
         if not isinstance(self.trigger_phase, units.Angle):
             raise TypeError("trigger_phase must be an Angle.")
-
         if not math.isfinite(float(self.trigger_phase)):
             raise ValueError("trigger_phase must be finite.")
-
         _positive_quantity(
-            self.slow_sample_rate,
-            units.SampleRate,
-            "slow_sample_rate",
-        )
-        _positive_quantity(
-            self.slow_flyback_time,
+            self.capture_rearm_time,
             units.Time,
-            "slow_flyback_time",
-        )
-
-        for name in (
             "capture_rearm_time",
-            "output_rearm_time",
-            "slow_settling_time",
-        ):
-            _positive_quantity(
-                getattr(self, name),
-                units.Time,
-                name,
-                allow_zero=True,
-            )
-
-        if type(self.stop_fast_scanner_on_close) is not bool:
+            allow_zero=True,
+        )
+        if not isinstance(self.stop_fast_scanner_on_close, bool):
             raise TypeError("stop_fast_scanner_on_close must be a bool.")
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class ResonantRasterSettings(ResonantScanSettings):
+    """Extend resonant scan settings with slow-axis frame motion."""
+
+    slow_sample_rate: units.SampleRate
+    slow_flyback_time: units.Time
+    output_rearm_time: units.Time
+    slow_settling_time: units.Time
+
+    def __post_init__(self) -> None:
+        """Validate shared settings and the additional frame timing."""
+        ResonantScanSettings.__post_init__(self)
+        _positive_quantity(self.slow_sample_rate, units.SampleRate, "slow_sample_rate")
+        _positive_quantity(self.slow_flyback_time, units.Time, "slow_flyback_time")
+        _positive_quantity(
+            self.output_rearm_time,
+            units.Time,
+            "output_rearm_time",
+            allow_zero=True,
+        )
+        _positive_quantity(
+            self.slow_settling_time,
+            units.Time,
+            "slow_settling_time",
+            allow_zero=True,
+        )
