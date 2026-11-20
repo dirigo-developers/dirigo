@@ -23,6 +23,7 @@ from dirigo.hardware.raster_frame_sync import (
 )
 from dirigo.hardware.scanner import (
     GalvoScanner,
+    GalvoScannerConfig,
     ResonantScanner,
     ResonantScannerConfig,
 )
@@ -34,6 +35,7 @@ from dirigo.pipeline.sink import Sink
 from dirigo.raster import RasterFrameAcquisitionSpec
 from dirigo.records import RecordBatch
 from dirigo.resonant_raster import ResonantRasterSettings
+from dirigo.sources import raster_acquisition as raster_base_module
 from dirigo.sources import raster_frame_acquisition as acquisition_module
 from dirigo.sources.raster_frame_acquisition import RasterFrameAcquisition
 from dirigo.system import System
@@ -71,6 +73,7 @@ def participants(
 ) -> Iterator[Participants]:
     """Supply passive mocks with preparation-dependent capture layout."""
     monkeypatch.setattr(acquisition_module, "monotonic", lambda: 0.0)
+    monkeypatch.setattr(raster_base_module, "monotonic", lambda: 0.0)
 
     events: list[str] = []
     amplitudes: list[units.Angle] = []
@@ -89,6 +92,7 @@ def participants(
         raising=False,
     )
     slow = Mock(spec=GalvoScanner)
+    slow.config = GalvoScannerConfig(angle_range=units.AngleRange("-20 deg", "20 deg"))
 
     capture = Mock(spec=DigitizerCaptureSession)
     capture.state = CaptureState.NEW
@@ -430,7 +434,7 @@ def test_premature_capture_eof_is_rejected(
 
     source = RasterFrameAcquisition(_spec(), system=p.system)
 
-    with pytest.raises(RuntimeError, match="before the requested frame count"):
+    with pytest.raises(RuntimeError, match="requested batch count"):
         _run(Pipeline(source))
 
     p.sync.close.assert_called_once_with()

@@ -14,13 +14,15 @@ class RecordBatch:
     may be retained after receive() exits. info retains optional record times.
 
     first_record is the zero-based logical record index within this acquisition.
-    records_per_frame describes logical grouping, independent of DMA batches.
-    Neither field corrects counter startup phase or galvo response delay;
-    downstream frame processing applies that alignment.
+    records_per_frame describes logical grouping independently of transfer
+    batches. None means this acquisition does not declare frame grouping.
+
+    These fields do not correct counter startup phase or scanner response delay;
+    downstream reconstruction applies that alignment.
     """
 
     samples: SampleArray
     layout: CaptureLayout
     info: CaptureInfo
     first_record: int
-    records_per_frame: int
+    records_per_frame: int | None = None
