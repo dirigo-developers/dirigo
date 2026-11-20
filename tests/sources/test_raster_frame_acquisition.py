@@ -2,13 +2,14 @@
 
 from collections.abc import Iterator
 from dataclasses import dataclass, replace
-from typing import cast
+from typing import Any, cast
 from unittest.mock import Mock, PropertyMock
 
 import numpy as np
 import pytest
 
 from dirigo import units
+from dirigo.frames import FrameMetadata
 from dirigo.hardware.capture import (
     CaptureInfo,
     CaptureLayout,
@@ -31,7 +32,10 @@ from dirigo.hardware.timing import DigitalRecordTrigger
 from dirigo.optics import LaserScanningOptics
 from dirigo.pipeline.exceptions import EndOfStream
 from dirigo.pipeline.pipeline import Pipeline
+from dirigo.pipeline.product import Metadata, Product
 from dirigo.pipeline.sink import Sink
+from dirigo.pipeline.worker import Worker
+from dirigo.processors.frame import FrameProcessor
 from dirigo.raster import RasterFrameAcquisitionSpec
 from dirigo.records import RecordBatch
 from dirigo.resonant_raster import ResonantRasterSettings
@@ -119,9 +123,9 @@ def participants(
             shape=(
                 settings.records_per_batch,
                 settings.record_length,
-                1,
+                len(settings.channel_indices),
             ),
-            channel_indices=(0,),
+            channel_indices=settings.channel_indices,
             dtype=np.dtype(np.int16),
         )
         capture.state = CaptureState.PREPARED
@@ -176,6 +180,7 @@ def participants(
     backend.create_session.return_value = sync
 
     digitizer = Mock(spec=Digitizer)
+    digitizer.data_range = units.IntRange(-32768, 32767)
     digitizer.create_capture.return_value = capture
 
     settings = ResonantRasterSettings(
@@ -218,13 +223,13 @@ def participants(
         system.close()
 
 
-class Collector(Sink[RecordBatch]):
+class Collector[BatchT](Sink[BatchT]):
     """Retain independently owned batches after receive contexts exit."""
 
-    def __init__(self, upstream: RasterFrameAcquisition) -> None:
+    def __init__(self, upstream: Worker[Any, BatchT]) -> None:
         super().__init__(upstream=upstream)
-        self.batches: list[RecordBatch] = []
-        self.indices: list[int | None] = []
+        self.batches: list[BatchT] = []
+        self.metadata: list[Metadata] = []
 
     def _prepare(self) -> None:
         pass
@@ -234,7 +239,7 @@ class Collector(Sink[RecordBatch]):
             try:
                 with self._receive() as product:
                     self.batches.append(product.payload)
-                    self.indices.append(product.metadata.sequence_index)
+                    self.metadata.append(product.metadata)
             except EndOfStream:
                 return
 
@@ -299,7 +304,7 @@ def test_pipeline_reads_capture_and_retains_independent_batches(
 
     plan = source.plan
     assert len(collector.batches) == 3
-    assert collector.indices == [0, 1, 2]
+    assert [metadata.sequence_index for metadata in collector.metadata] == [0, 1, 2]
     assert p.capture.read_into.call_count == 4
 
     assert [batch.first_record for batch in collector.batches] == [
@@ -455,3 +460,91 @@ def test_sync_cleanup_failure_does_not_skip_capture_or_scanner_cleanup(
 
     p.capture.close.assert_called_once_with()
     assert p.amplitudes[-1] == units.Angle(0)
+
+
+@pytest.mark.parametrize("bidirectional", [False, True])
+def test_frame_processor_reconstructs_only_imaging_records(
+    participants: Participants,
+    bidirectional: bool,
+) -> None:
+    """Publish ordered pixels and metadata for mono and multichannel frames."""
+    capture = participants.capture
+    channel_indices = (2, 0) if bidirectional else (0,)
+    prepare_original = capture.prepare.side_effect
+    assert callable(prepare_original)
+
+    def prepare() -> None:
+        capture.settings = replace(capture.settings, channel_indices=channel_indices)
+        prepare_original()
+
+    spec = replace(
+        _spec(),
+        frame_width=units.Length("2 um"),
+        frame_height=units.Length("4 um"),
+        bidirectional=bidirectional,
+        frames_per_acquisition=2,
+    )
+    source = RasterFrameAcquisition(spec, system=participants.system)
+    delivered = 0
+
+    def read(destination: SampleArray, *, timeout: float | None = None) -> CaptureInfo:
+        nonlocal delivered
+        image_records = source.plan.image_records
+        record_offsets = 100 * np.arange(image_records)[:, None, None]
+        channel_offsets = 10 * np.arange(len(channel_indices))[None, None, :]
+        code = 1000 * delivered + record_offsets + channel_offsets
+        destination.fill(30_000)
+        destination[:image_records, 50:250, :] = code + 1
+        destination[:image_records, 250:450, :] = code + 2
+        if bidirectional:
+            destination[:image_records, 550:750, :] = code + 4
+            destination[:image_records, 750:950, :] = code + 3
+
+        delivered += 1
+        if delivered == 2:
+            capture.state = CaptureState.COMPLETED
+        return CaptureInfo()
+
+    capture.prepare.side_effect = prepare
+    capture.read_into.side_effect = read
+    processor = FrameProcessor(upstream=source)
+    collector = Collector(processor)
+    _run(Pipeline(collector))
+
+    expected = np.array(
+        [[1, 2], [3, 4], [101, 102], [103, 104]]
+        if bidirectional
+        else [[1, 2], [101, 102], [201, 202], [301, 302]],
+        dtype=np.int16,
+    )
+    if bidirectional:
+        expected = np.stack((expected, expected + 10), axis=-1)
+
+    assert source.plan.blank_records > 0
+    assert len(collector.batches) == 2
+    assert collector.metadata == [
+        FrameMetadata(sequence_index=0),
+        FrameMetadata(sequence_index=1),
+    ]
+    assert collector.batches[0] is not collector.batches[1]
+    for index, frame in enumerate(collector.batches):
+        assert frame.dtype == np.dtype(np.int16)
+        assert not frame.flags.writeable
+        np.testing.assert_array_equal(frame, expected + 1000 * index)
+
+
+def test_frame_processor_rejects_a_batch_starting_mid_frame(
+    participants: Participants,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = RasterFrameAcquisition(_spec(), system=participants.system)
+    publish = source._publish
+
+    def publish_misaligned(product: Product[RecordBatch]) -> None:
+        publish(replace(product, payload=replace(product.payload, first_record=1)))
+
+    monkeypatch.setattr(source, "_publish", publish_misaligned)
+    processor = FrameProcessor(upstream=source)
+
+    with pytest.raises(ValueError, match="frame boundary"):
+        _run(Pipeline(processor))

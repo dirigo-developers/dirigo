@@ -62,6 +62,7 @@ class PreparedRaster(RasterAcquisition):
         """Attach the fixture's already described capture."""
         self._capture = cast(DigitizerCaptureSession, self.test_capture)
         self._sync = self.test_sync
+        self._sample_code_range = units.IntRange(-32768, 32767)
         self._prepared = True
 
     def _close_scanners(self) -> None:

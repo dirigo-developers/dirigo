@@ -1,11 +1,13 @@
-"""Plan nominal resonant raster timing without accessing hardware."""
+"""Plan and reconstruct nominal resonant raster scans without hardware I/O."""
 
 import math
 from dataclasses import dataclass
 
 import numpy as np
+import numpy.typing as npt
 
 from dirigo import units
+from dirigo.hardware.capture import SampleArray
 from dirigo.hardware.scanner import ResonantScannerConfig
 from dirigo.hardware.waveform import AngularWaveform
 from dirigo.raster import RasterFrameGeometry, RasterLineAcquisitionSpec
@@ -282,6 +284,89 @@ def plan_resonant_fast_axis(
         maximum_record_period=units.Time(1 / minimum_frequency),
         latest_useful_sample_end=units.Time(latest_end),
     )
+
+
+class ResonantLineReconstructor:
+    """Precompute sample bins for a uniform fast-axis pixel grid."""
+
+    def __init__(self, plan: ResonantFastAxisPlan, *, columns: int) -> None:
+        """Build nominal bins for the useful sweep or sweep pair in a record."""
+        if type(columns) is not int:
+            raise TypeError("columns must be an int.")
+        if columns < 1:
+            raise ValueError("columns must be positive.")
+        if columns > len(plan.nominal_forward_samples):
+            raise ValueError("Column count produces an empty pixel bin.")
+
+        self._record_length = plan.record_length
+        self._columns = columns
+        self._sweeps: list[
+            tuple[range, npt.NDArray[np.intp], npt.NDArray[np.intp]]
+        ] = []
+
+        radians_per_second = math.tau * float(plan.nominal_frequency)
+        samples_per_radian = float(plan.sample_rate) / radians_per_second
+        forward_center = float(plan.nominal_first_line_center) * radians_per_second
+        field_limit = math.sin(math.pi * plan.line_fill_fraction / 2)
+        spatial_edges = np.linspace(-field_limit, field_limit, columns + 1)
+        phase_offsets = np.arcsin(spatial_edges[1:-1])
+
+        windows = (plan.nominal_forward_samples, plan.nominal_reverse_samples)
+        for direction, window in enumerate(windows):
+            if window is None:
+                continue
+            if not 0 <= window.start < window.stop <= plan.record_length:
+                raise ValueError("The useful sweep must fit within the record.")
+
+            # In time order, the normalized position on either sweep is
+            # sin(phase_offset) up to a sign. Flip the reverse pixels after binning.
+            center = forward_center + direction * math.pi
+            interior = (center + phase_offsets) * samples_per_radian
+
+            # Use the planner's half-open sweep bounds for the two outer edges.
+            edges = np.empty(columns + 1, dtype=np.intp)
+            edges[0] = window.start
+            edges[1:-1] = [_ceil_samples(float(value)) for value in interior]
+            edges[-1] = window.stop
+            counts = np.diff(edges)
+            if np.any(counts <= 0):
+                raise ValueError("Column count produces an empty pixel bin.")
+
+            self._sweeps.append((window, edges[:-1] - window.start, counts))
+
+    def reconstruct(self, samples: SampleArray) -> npt.NDArray[np.float64]:
+        """Average records into (lines, columns, channels) in ADC-code units.
+
+        Input shape is (records, samples, channels). Emit the forward line
+        first and the reverse line second for each bidirectional record. Every
+        line runs from low to high fast-axis position.
+        """
+        if samples.ndim != 3 or samples.shape[1] != self._record_length:
+            raise ValueError(
+                "samples must have shape (records, record_length, channels)."
+            )
+        if samples.dtype.kind not in "iu":
+            raise TypeError("samples must contain integer ADC codes.")
+
+        records, _, channels = samples.shape
+        lines_per_record = len(self._sweeps)
+        lines = np.empty(
+            (records * lines_per_record, self._columns, channels), dtype=np.float64
+        )
+        for direction, (window, starts, counts) in enumerate(self._sweeps):
+            # reduceat extends its final bin to the end of the sliced input.
+            means = np.add.reduceat(
+                samples[:, window.start : window.stop, :],
+                starts,
+                axis=1,
+                dtype=np.float64,
+            )
+            means /= counts[None, :, None]
+            if direction == 1:
+                means = means[:, ::-1, :]
+            lines[direction::lines_per_record] = means
+
+        return lines
 
 
 def plan_resonant_raster_frame(

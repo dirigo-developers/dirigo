@@ -5,6 +5,7 @@ from typing import Never, Protocol
 
 import numpy as np
 
+from dirigo import units
 from dirigo.hardware.capture_session import CaptureState, DigitizerCaptureSession
 from dirigo.pipeline.product import Metadata, Product
 from dirigo.pipeline.worker import Worker
@@ -52,9 +53,18 @@ class RasterAcquisition(Worker[Never, RecordBatch]):
         self._sync: _RasterSyncSession | None = None
         self._read_timeout = 0.05
         self._records_per_frame: int | None = None
+        self._sample_code_range: units.IntRange | None = None
         self._settled_at = 0.0
         self._prepared = False
         self._closed = False
+
+    @property
+    def sample_code_range(self) -> units.IntRange:
+        """Inclusive digitizer code bounds captured during preparation."""
+        bounds = self._sample_code_range
+        if not self._prepared or bounds is None:
+            raise RuntimeError("The sample code range requires successful preparation.")
+        return bounds
 
     def _work(self) -> None:
         """Read and publish complete batches until the capture count or abort."""
