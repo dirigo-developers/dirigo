@@ -92,6 +92,7 @@ class RasterLineAcquisition(RasterAcquisition):
         ):
             raise ValueError("Prepared capture layout does not match the line plan.")
 
+        self._capture_layout = layout
         self._sample_code_range = digitizer.data_range
         self._plan = plan
         self._prepared = True

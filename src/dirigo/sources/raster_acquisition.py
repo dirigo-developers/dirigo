@@ -6,6 +6,7 @@ from typing import Never, Protocol
 import numpy as np
 
 from dirigo import units
+from dirigo.hardware.capture import CaptureLayout
 from dirigo.hardware.capture_session import CaptureState, DigitizerCaptureSession
 from dirigo.pipeline.product import Metadata, Product
 from dirigo.pipeline.worker import Worker
@@ -30,7 +31,7 @@ class RasterAcquisition(Worker[Never, RecordBatch]):
 
     Subclasses implement _prepare(). Store capture and sync sessions as soon
     as they are created so cleanup can handle partial preparation. Set the
-    settling deadline, read timeout, optional frame grouping, and finally
+    settling deadline, read timeout, optional frame grouping, layout, and finally
     _prepared after preparation succeeds.
 
     Session methods are called serially. The supplied System and its devices
@@ -54,6 +55,7 @@ class RasterAcquisition(Worker[Never, RecordBatch]):
         self._read_timeout = 0.05
         self._records_per_frame: int | None = None
         self._sample_code_range: units.IntRange | None = None
+        self._capture_layout: CaptureLayout | None = None
         self._settled_at = 0.0
         self._prepared = False
         self._closed = False
@@ -66,19 +68,29 @@ class RasterAcquisition(Worker[Never, RecordBatch]):
             raise RuntimeError("The sample code range requires successful preparation.")
         return bounds
 
+    @property
+    def capture_layout(self) -> CaptureLayout:
+        """Resolved layout, available after preparation and retained on closure."""
+        layout = self._capture_layout
+        if not self._prepared or layout is None:
+            raise RuntimeError("The capture layout requires successful preparation.")
+        return layout
+
     def _work(self) -> None:
         """Read and publish complete batches until the capture count or abort."""
         capture = self._capture
         sync = self._sync
+
         if not self._prepared or capture is None or sync is None:
             raise RuntimeError("Raster acquisition requires successful preparation.")
+
+        layout = self.capture_layout
 
         remaining = max(0.0, self._settled_at - monotonic())
         if self._abort_requested.wait(remaining):
             return
 
         sync.start()
-        layout = capture.layout
         batch_count = capture.settings.batch_count
         index = 0
 

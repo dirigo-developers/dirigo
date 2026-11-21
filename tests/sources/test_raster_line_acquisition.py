@@ -3,7 +3,7 @@
 from collections.abc import Iterator
 from dataclasses import replace
 from typing import Any, cast
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 import numpy as np
 import pytest
@@ -25,10 +25,11 @@ from dirigo.pipeline.exceptions import EndOfStream
 from dirigo.pipeline.pipeline import Pipeline
 from dirigo.pipeline.sink import Sink
 from dirigo.pipeline.worker import Worker
+from dirigo.processors import _reconstruction as reconstruction_module
 from dirigo.processors._encoding import _encode_int16
 from dirigo.processors.line import LineProcessor
 from dirigo.raster import RasterLineAcquisitionSpec
-from dirigo.resonant_raster import ResonantScanSettings
+from dirigo.resonant_raster import ResonantLineReconstructor, ResonantScanSettings
 from dirigo.sources.raster_line_acquisition import RasterLineAcquisition
 from dirigo.system import System
 
@@ -290,10 +291,12 @@ def test_abort_during_a_read_discards_the_unpublished_batch(rig: LineRig) -> Non
 
 @pytest.mark.parametrize("offset_binary", [False, True])
 def test_line_processor_publishes_two_batches(
-    rig: LineRig, offset_binary: bool
+    monkeypatch: pytest.MonkeyPatch, rig: LineRig, offset_binary: bool
 ) -> None:
     """Encode two-channel records while preserving sweep order and metadata."""
     system, capture, digitizer, _ = rig
+    monkeypatch.setattr(reconstruction_module, "get_num_threads", lambda: 1)
+    monkeypatch.setattr(reconstruction_module, "threading_layer", lambda: "omp")
     if offset_binary:
         digitizer.data_range = units.IntRange(0, 4095)
         dtype = np.dtype(np.uint16)
@@ -341,13 +344,21 @@ def test_line_processor_publishes_two_batches(
     processor = LineProcessor(upstream=source)
     collector = Collector(processor)
     pipeline = Pipeline(collector)
-    pipeline.start()
-    try:
-        pipeline.wait(timeout=2)
-    finally:
-        if not pipeline.done:
-            pipeline.abort()
+    with patch.object(
+        ResonantLineReconstructor,
+        "reconstruct_int16",
+        autospec=True,
+        side_effect=ResonantLineReconstructor.reconstruct_int16,
+    ) as accelerated:
+        pipeline.start()
+        try:
             pipeline.wait(timeout=2)
+        finally:
+            if not pipeline.done:
+                pipeline.abort()
+                pipeline.wait(timeout=2)
+
+    assert accelerated.call_count == 2
 
     assert collector.indices == [0, 1]
     assert [batch.first_record for batch in collector.batches] == [0, 2]

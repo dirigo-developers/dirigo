@@ -63,6 +63,7 @@ class PreparedRaster(RasterAcquisition):
         self._capture = cast(DigitizerCaptureSession, self.test_capture)
         self._sync = self.test_sync
         self._sample_code_range = units.IntRange(-32768, 32767)
+        self._capture_layout = self.test_capture.layout
         self._prepared = True
 
     def _close_scanners(self) -> None:

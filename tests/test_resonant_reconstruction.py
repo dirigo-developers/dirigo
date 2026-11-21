@@ -7,6 +7,7 @@ import pytest
 
 from dirigo import units
 from dirigo.hardware.scanner import ResonantScannerConfig
+from dirigo.processors._encoding import _encode_int16
 from dirigo.resonant_raster import (
     ResonantFastAxisPlan,
     ResonantLineReconstructor,
@@ -88,3 +89,56 @@ def test_rejects_samples_with_the_wrong_record_length() -> None:
 
     with pytest.raises(ValueError, match="record_length"):
         reconstructor.reconstruct(samples)
+
+
+@pytest.mark.parametrize("dtype", [np.int8, np.uint8, np.int16, np.uint16])
+@pytest.mark.parametrize("bidirectional", [False, True])
+def test_numba_matches_numpy_pixel_encoding(
+    dtype: type[np.int16] | type[np.uint16], bidirectional: bool
+) -> None:
+    plan = _plan(bidirectional=bidirectional, trigger_phase="9 deg")
+    reconstructor = ResonantLineReconstructor(plan, columns=17)
+
+    limits = np.iinfo(dtype)
+    code_range = units.IntRange(int(limits.min), int(limits.max))
+    if dtype is np.uint16:
+        code_range = units.IntRange(0, 4095)
+
+    samples = np.random.default_rng(0).integers(
+        code_range.min,
+        code_range.max + 1,
+        size=(7, plan.record_length, 2),
+        dtype=dtype,
+    )
+    samples.setflags(write=False)
+
+    actual = reconstructor.reconstruct_int16(samples, sample_code_range=code_range)
+    expected = _encode_int16(reconstructor.reconstruct(samples), code_range)
+
+    assert actual.dtype == np.dtype(np.int16)
+    np.testing.assert_array_equal(actual, expected)
+
+
+def test_numba_rounds_ties_to_even_and_saturates_before_cast() -> None:
+    plan = _plan()
+    reconstructor = ResonantLineReconstructor(plan, columns=2)
+    samples = np.zeros((1, plan.record_length, 8), dtype=np.int16)[:, :, ::2]
+    samples[:, 50:150, :] = [1, 2, -1, -2]
+    samples[:, 150:250, :] = [0, 1, 0, -1]
+    samples[:, 250:450, :] = [-32768, -32767, 32766, 32767]
+
+    full_scale = reconstructor.reconstruct_int16(
+        samples, sample_code_range=units.IntRange(-32768, 32767)
+    )
+    np.testing.assert_array_equal(
+        full_scale, [[[0, 2, 0, -2], [-32768, -32767, 32766, 32767]]]
+    )
+
+    scaled = reconstructor.reconstruct_int16(
+        samples, sample_code_range=units.IntRange(-2048, 2047)
+    )
+    np.testing.assert_array_equal(
+        scaled, [[[8, 24, -8, -24], [-32768, -32768, 32767, 32767]]]
+    )
+
+    assert samples.flags.writeable

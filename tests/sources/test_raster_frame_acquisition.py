@@ -3,7 +3,7 @@
 from collections.abc import Iterator
 from dataclasses import dataclass, replace
 from typing import Any, cast
-from unittest.mock import Mock, PropertyMock
+from unittest.mock import Mock, PropertyMock, patch
 
 import numpy as np
 import pytest
@@ -35,10 +35,11 @@ from dirigo.pipeline.pipeline import Pipeline
 from dirigo.pipeline.product import Metadata, Product
 from dirigo.pipeline.sink import Sink
 from dirigo.pipeline.worker import Worker
+from dirigo.processors import _reconstruction as reconstruction_module
 from dirigo.processors.frame import FrameProcessor
 from dirigo.raster import RasterFrameAcquisitionSpec
 from dirigo.records import RecordBatch
-from dirigo.resonant_raster import ResonantRasterSettings
+from dirigo.resonant_raster import ResonantLineReconstructor, ResonantRasterSettings
 from dirigo.sources import raster_acquisition as raster_base_module
 from dirigo.sources import raster_frame_acquisition as acquisition_module
 from dirigo.sources.raster_frame_acquisition import RasterFrameAcquisition
@@ -462,10 +463,20 @@ def test_sync_cleanup_failure_does_not_skip_capture_or_scanner_cleanup(
     assert p.amplitudes[-1] == units.Angle(0)
 
 
-@pytest.mark.parametrize("bidirectional", [False, True])
+@pytest.mark.parametrize(
+    ("bidirectional", "sample_dtype", "use_numba"),
+    [
+        (False, np.int16, True),
+        (True, np.int16, True),
+        (True, np.int32, False),
+    ],
+)
 def test_frame_processor_reconstructs_only_imaging_records(
     participants: Participants,
+    monkeypatch: pytest.MonkeyPatch,
     bidirectional: bool,
+    sample_dtype: type[np.int16] | type[np.int32],
+    use_numba: bool,
 ) -> None:
     """Publish ordered pixels and metadata for mono and multichannel frames."""
     capture = participants.capture
@@ -473,9 +484,20 @@ def test_frame_processor_reconstructs_only_imaging_records(
     prepare_original = capture.prepare.side_effect
     assert callable(prepare_original)
 
+    monkeypatch.setattr(reconstruction_module, "get_num_threads", lambda: 1)
+    monkeypatch.setattr(reconstruction_module, "threading_layer", lambda: "omp")
+    load_kernel = Mock(wraps=reconstruction_module.import_module)
+    monkeypatch.setattr(reconstruction_module, "import_module", load_kernel)
+
     def prepare() -> None:
         capture.settings = replace(capture.settings, channel_indices=channel_indices)
         prepare_original()
+        capture.layout = replace(capture.layout, dtype=np.dtype(sample_dtype))
+
+    def start() -> None:
+        assert load_kernel.call_count == int(use_numba)
+        accelerated.assert_not_called()
+        capture.state = CaptureState.STARTED
 
     spec = replace(
         _spec(),
@@ -493,6 +515,7 @@ def test_frame_processor_reconstructs_only_imaging_records(
         record_offsets = 100 * np.arange(image_records)[:, None, None]
         channel_offsets = 10 * np.arange(len(channel_indices))[None, None, :]
         code = 1000 * delivered + record_offsets + channel_offsets
+
         destination.fill(30_000)
         destination[:image_records, 50:250, :] = code + 1
         destination[:image_records, 250:450, :] = code + 2
@@ -506,10 +529,22 @@ def test_frame_processor_reconstructs_only_imaging_records(
         return CaptureInfo()
 
     capture.prepare.side_effect = prepare
+    capture.start.side_effect = start
     capture.read_into.side_effect = read
+
     processor = FrameProcessor(upstream=source)
     collector = Collector(processor)
-    _run(Pipeline(collector))
+    with patch.object(
+        ResonantLineReconstructor,
+        "reconstruct_int16",
+        autospec=True,
+        side_effect=ResonantLineReconstructor.reconstruct_int16,
+    ) as accelerated:
+        _run(Pipeline(collector))
+
+    assert accelerated.call_count == (2 if use_numba else 0)
+    if use_numba:
+        load_kernel.assert_called_once_with("dirigo._resonant_kernel")
 
     expected = np.array(
         [[1, 2], [3, 4], [101, 102], [103, 104]]
@@ -531,6 +566,27 @@ def test_frame_processor_reconstructs_only_imaging_records(
         assert frame.dtype == np.dtype(np.int16)
         assert not frame.flags.writeable
         np.testing.assert_array_equal(frame, expected + 1000 * index)
+
+
+def test_frame_processor_rejects_workqueue_before_capture(
+    participants: Participants,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(reconstruction_module, "get_num_threads", lambda: 1)
+    monkeypatch.setattr(reconstruction_module, "threading_layer", lambda: "workqueue")
+    load_kernel = Mock()
+    monkeypatch.setattr(reconstruction_module, "import_module", load_kernel)
+
+    source = RasterFrameAcquisition(_spec(), system=participants.system)
+    pipeline = Pipeline(FrameProcessor(upstream=source))
+
+    with pytest.raises(RuntimeError, match=r"(?i)workqueue"):
+        pipeline.start()
+
+    participants.sync.start.assert_not_called()
+    participants.capture.start.assert_not_called()
+    participants.capture.read_into.assert_not_called()
+    load_kernel.assert_not_called()
 
 
 def test_frame_processor_rejects_a_batch_starting_mid_frame(

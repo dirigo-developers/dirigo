@@ -5,6 +5,7 @@ from dirigo.pipeline.exceptions import EndOfStream
 from dirigo.pipeline.product import Product
 from dirigo.pipeline.worker import Worker
 from dirigo.processors._encoding import _encode_int16
+from dirigo.processors._reconstruction import _prepare_reconstructor
 from dirigo.records import RecordBatch
 from dirigo.resonant_raster import ResonantLineReconstructor
 from dirigo.sources.raster_line_acquisition import RasterLineAcquisition
@@ -23,12 +24,13 @@ class LineProcessor(Worker[RecordBatch, LineBatch]):
         super().__init__(upstream=upstream, name=name)
         self._source = upstream
         self._reconstructor: ResonantLineReconstructor | None = None
+        self._use_numba: bool = False
 
     def _prepare(self) -> None:
-        """Build nominal pixel bins from the prepared acquisition plan."""
+        """Build nominal pixel bins and prepare the selected backend."""
         plan = self._source.plan
-        self._reconstructor = ResonantLineReconstructor(
-            plan.fast_axis, columns=plan.columns
+        self._reconstructor, self._use_numba = _prepare_reconstructor(
+            self._source, plan.fast_axis, columns=plan.columns
         )
 
     def _work(self) -> None:
@@ -46,9 +48,16 @@ class LineProcessor(Worker[RecordBatch, LineBatch]):
             try:
                 with self._receive() as product:
                     batch = product.payload
-                    pixels = _encode_int16(
-                        reconstructor.reconstruct(batch.samples), sample_code_range
-                    )
+
+                    if self._use_numba:
+                        pixels = reconstructor.reconstruct_int16(
+                            batch.samples, sample_code_range=sample_code_range
+                        )
+                    else:
+                        pixels = _encode_int16(
+                            reconstructor.reconstruct(batch.samples), sample_code_range
+                        )
+
                     pixels.setflags(write=False)
                     output = Product(
                         LineBatch(

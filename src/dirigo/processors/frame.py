@@ -6,6 +6,7 @@ from dirigo.pipeline.exceptions import EndOfStream
 from dirigo.pipeline.product import Product
 from dirigo.pipeline.worker import Worker
 from dirigo.processors._encoding import _encode_int16
+from dirigo.processors._reconstruction import _prepare_reconstructor
 from dirigo.records import RecordBatch
 from dirigo.resonant_raster import ResonantLineReconstructor, ResonantRasterPlan
 from dirigo.sources.raster_frame_acquisition import RasterFrameAcquisition
@@ -17,6 +18,7 @@ def _reconstruct_frame(
     plan: ResonantRasterPlan,
     reconstructor: ResonantLineReconstructor,
     sample_code_range: units.IntRange,
+    use_numba: bool = False,
 ) -> FrameArray:
     """Select one frame's imaging records and encode oriented rows."""
     records_per_frame = plan.records_per_frame
@@ -30,14 +32,22 @@ def _reconstruct_frame(
     if batch.samples.shape != batch.layout.shape:
         raise ValueError("Frame samples must match the capture layout shape.")
 
-    averages = reconstructor.reconstruct(batch.samples[: plan.image_records])
-    if averages.shape[:2] != plan.geometry.shape:
-        raise ValueError("Reconstructed frame shape differs from the raster plan.")
-    if averages.shape[2] == 1:
-        averages = averages[:, :, 0]
+    samples = batch.samples[: plan.image_records]
+    if use_numba:
+        pixels = reconstructor.reconstruct_int16(
+            samples, sample_code_range=sample_code_range
+        )
+    else:
+        averages = reconstructor.reconstruct(samples)
+        if averages.shape[2] == 1:
+            averages = averages[:, :, 0]
+        pixels = _encode_int16(averages, sample_code_range)
 
-    pixels = _encode_int16(averages, sample_code_range)
+    if pixels.shape[:2] != plan.geometry.shape:
+        raise ValueError("Reconstructed frame shape differs from the raster plan.")
     pixels.setflags(write=False)
+    if pixels.ndim == 3 and pixels.shape[2] == 1:
+        return pixels[:, :, 0]
     return pixels
 
 
@@ -59,12 +69,13 @@ class FrameProcessor(Worker[RecordBatch, FrameArray]):
         super().__init__(upstream=upstream, name=name)
         self._source = upstream
         self._reconstructor: ResonantLineReconstructor | None = None
+        self._use_numba: bool = False
 
     def _prepare(self) -> None:
-        """Build the nominal fast-axis bins once for this pipeline run."""
+        """Build nominal pixel bins and prepare the selected backend."""
         plan = self._source.plan
-        self._reconstructor = ResonantLineReconstructor(
-            plan.fast_axis, columns=plan.geometry.columns
+        self._reconstructor, self._use_numba = _prepare_reconstructor(
+            self._source, plan.fast_axis, columns=plan.geometry.columns
         )
 
     def _work(self) -> None:
@@ -83,6 +94,7 @@ class FrameProcessor(Worker[RecordBatch, FrameArray]):
                         plan=plan,
                         reconstructor=reconstructor,
                         sample_code_range=sample_code_range,
+                        use_numba=self._use_numba,
                     )
                     metadata = product.metadata
                     if not isinstance(metadata, FrameMetadata):

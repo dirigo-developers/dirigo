@@ -303,6 +303,7 @@ class ResonantLineReconstructor:
         self._sweeps: list[
             tuple[range, npt.NDArray[np.intp], npt.NDArray[np.intp]]
         ] = []
+        sample_edges: list[npt.NDArray[np.intp]] = []
 
         radians_per_second = math.tau * float(plan.nominal_frequency)
         samples_per_radian = float(plan.sample_rate) / radians_per_second
@@ -333,6 +334,18 @@ class ResonantLineReconstructor:
                 raise ValueError("Column count produces an empty pixel bin.")
 
             self._sweeps.append((window, edges[:-1] - window.start, counts))
+            sample_edges.append(edges)
+
+        self._sample_edges = np.stack(sample_edges)
+
+    def _validate_samples(self, samples: SampleArray) -> None:
+        """Check the record shape and sample encoding type."""
+        if samples.ndim != 3 or samples.shape[1] != self._record_length:
+            raise ValueError(
+                "samples must have shape (records, record_length, channels)."
+            )
+        if samples.dtype.kind not in "iu":
+            raise TypeError("samples must contain integer ADC codes.")
 
     def reconstruct(self, samples: SampleArray) -> npt.NDArray[np.float64]:
         """Average records into (lines, columns, channels) in ADC-code units.
@@ -341,13 +354,7 @@ class ResonantLineReconstructor:
         first and the reverse line second for each bidirectional record. Every
         line runs from low to high fast-axis position.
         """
-        if samples.ndim != 3 or samples.shape[1] != self._record_length:
-            raise ValueError(
-                "samples must have shape (records, record_length, channels)."
-            )
-        if samples.dtype.kind not in "iu":
-            raise TypeError("samples must contain integer ADC codes.")
-
+        self._validate_samples(samples)
         records, _, channels = samples.shape
         lines_per_record = len(self._sweeps)
         lines = np.empty(
@@ -367,6 +374,36 @@ class ResonantLineReconstructor:
             lines[direction::lines_per_record] = means
 
         return lines
+
+    def reconstruct_int16(
+        self, samples: SampleArray, *, sample_code_range: units.IntRange
+    ) -> npt.NDArray[np.int16]:
+        """Reconstruct and scale native 8-bit or 16-bit ADC codes with Numba.
+
+        Uses the same shape and sweep order as reconstruct(). Samples are
+        averaged before scaling to signed int16. Ties round to even.
+        """
+        self._validate_samples(samples)
+        if samples.dtype.itemsize > 2 or not samples.dtype.isnative:
+            raise TypeError("Numba reconstruction requires native 8- or 16-bit codes.")
+
+        from dirigo._resonant_kernel import _reconstruct_int16
+
+        if not samples.flags.c_contiguous or samples.flags.writeable:
+            samples = np.ascontiguousarray(samples).view()
+            samples.setflags(write=False)
+
+        records, _, channels = samples.shape
+        lines_per_record = len(self._sweeps)
+        pixels = np.empty(
+            (records * lines_per_record, self._columns, channels), dtype=np.int16
+        )
+        code_count = sample_code_range.count
+        zero_code = sample_code_range.min + code_count // 2
+        _reconstruct_int16(
+            samples, self._sample_edges, float(zero_code), 2**16 / code_count, pixels
+        )
+        return pixels
 
 
 def plan_resonant_raster_frame(

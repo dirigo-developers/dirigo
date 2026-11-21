@@ -129,6 +129,7 @@ class RasterFrameAcquisition(RasterAcquisition):
         ):
             raise ValueError("Prepared capture layout differs from the raster plan.")
 
+        self._capture_layout = layout
         self._sample_code_range = digitizer.data_range
         self._records_per_frame = plan.records_per_frame
         self._plan = plan
